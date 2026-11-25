@@ -8,7 +8,7 @@ in it. The model only chooses the operation: its words matched first (one
 operation whose words the sentence holds: no model), else the model is
 shown the list (only the operations the roles in use have) and writes one
 line 「操作: 名前」. Every value (the system, the day or period, the place,
-the satellites, the screen) is read here from the sentence, by code, in the
+the satellites, 画像検索's satellites or SAR・光学, the screen) is read here from the sentence, by code, in the
 direction the operation looks (計画ファイル・撮像計画 ahead, 画像検索・観測記録
 back); one it cannot read is left empty, never guessed. Nothing runs
 before the person looks at the card and presses its button, and nothing
@@ -18,7 +18,10 @@ Measured on the real sarashina2.2 3B int4 (2026-11-21, 4 cores, the 33
 sentences of tests/test_text_command.py and two that are no operation):
 the operation right in 33 (27 by their words, 6 by the model in about a
 second each once the list was read, 10 s), the values read by code right
-in 33 (the model writing them got 21 of 32 right).
+in 33 (the model writing them got 21 of 32 right). With 画像検索's satellites
+and SAR・光学 (2026-11-25): the same, and 10 sentences naming them (8 by the
+model) all 画像検索 with 「SAR/レーダーか光学か」 in its line (「SAR か光学か」
+took 「昨日のレーダー画像を地図の範囲で」 for 衛星パス).
 
 This module is pure Python: the operations, the prompt and the readers.
 The card and the running are ui/text_command.py and features/command.py.
@@ -31,8 +34,10 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any, Optional, Sequence
 
+from .catalog.api import kinds_in, sensors_named
+from .plan.api import plain, series_of
 from .text_assist import Message, TextTask
-from .text_request import period_of
+from .text_request import name_pattern, period_of, satellites_of
 from .text_tasks import period_in
 #: The most of a sentence read (characters).
 TEXT_LIMIT = 300
@@ -52,7 +57,8 @@ class Operation:
     feature: str
     #: Words that name it on their own (matched without the model when only one operation's words are found).
     words: tuple[str, ...]
-    #: What it reads: system, day (one day), period (first and last), year, place, satellites, screen.
+    #: What it reads: system, day (one day), period (first and last), year, place, satellites, sensors (satellites,
+    #: series, sensors or kinds, for 画像カタログ's センサー), screen.
     slots: tuple[str, ...] = ()
     #: Which way its dates look when a word could be either (「今月」): True back (records, images), False ahead (plans).
     past: Optional[bool] = None
@@ -80,9 +86,10 @@ OPERATIONS: tuple[Operation, ...] = (
     Operation("quotas", "年間上限", "年間撮像上限の消費と残りを見る", "年間撮像上限…",
               ("年間上限", "年間撮像上限", "撮像上限", "上限の残り"), ("year",), True, "年間撮像上限", "開く",
               "「年間撮像上限」をその年で表示"),
-    Operation("catalog", "画像検索", "画像カタログで撮像済みの画像を探す（場所・期間）", "画像カタログ",
-              ("画像を探", "画像検索", "画像カタログ", "撮った画像", "画像はある", "画像があるか"), ("place", "period"), True, "画像カタログ", "検索",
-              "「画像カタログ」で、その場所（なければ地図の表示範囲）と期間で検索"),
+    Operation("catalog", "画像検索", "画像カタログで撮像済みの画像を探す（場所・期間・衛星・SAR/レーダーか光学か）", "画像カタログ",
+              ("画像を探", "画像検索", "画像カタログ", "撮った画像", "画像はある", "画像があるか"), ("place", "period", "sensors"), True,
+              "画像カタログ", "検索",
+              "「画像カタログ」で、その場所と期間、衛星・種別があればそのセンサーで検索"),
     Operation("passes", "衛星パス", "衛星の軌道・通過を地図に描く", "衛星パス",
               ("衛星パス", "軌道", "パスを", "通過"), ("satellites", "day"), None, "衛星パス", "描く",
               "「衛星パス」でその衛星を選び、その日（なければ今）の軌道を描画"),
@@ -309,6 +316,8 @@ _NOT_PLACES = {
     "年内", "直近", "最近", "過去", "毎日", "全部", "全て", "すべて", "選んだ記録", "選んだ", "交代", "画面", "地図", "衛星",
     "画像", "記録", "依頼", "撮像", "予定", "計画", "結果", "システム", "観測記録", "撮像予定", "撮像計画", "撮像依頼", "今", "次",
     "前", "後", "分", "日", "週", "月", "年", "上限", "年間上限", "新着", "通報", "障害", "軌道", "雲", "艦船", "船舶", "航空機", "車両",
+    # The kinds of 画像検索 (core/catalog/sensors.py).
+    "SAR", "SAR画像", "SAR衛星", "光学", "光学画像", "光学衛星", "レーダー", "レーダー画像", "レーダ画像", "可視", "可視画像",
 }
 _CHUNK = re.compile(r"([一-鿿々〆ヵヶ゠-ヿー・A-Za-z0-9\-]{1,20}?)(?:周辺|付近|近く|一帯|地区)?(?=の|で|を|へ|に|まで|周辺|付近|近く|、|$)")
 
@@ -342,6 +351,29 @@ def place_word(text: str, known: Sequence[str] = (), others: Sequence[str] = ())
     return None
 
 
+def sensor_words(text: str, sats: Sequence[Any] = (), values: Sequence[str] = ()) -> list[str]:
+    """
+    What a sentence names for 画像カタログ's センサー (core/catalog/sensors.py):
+    the satellites and series of the satellite catalog it names (by name, id or
+    other name), and the catalog's sensors (`values`) written in it that those
+    do not already give; when it names none of them, its kinds (SAR, 光学).
+    """
+    named = satellites_of(text, sats) if sats else None
+    out = [*named.satellites, *named.series] if named else []
+    t = unicodedata.normalize("NFKC", text)
+    # A sensor (WV03) those named do not give.
+    for v in values:
+        pattern = name_pattern(v)
+        if pattern and pattern.search(t) and not any(sensors_named(x, [v], sats) for x in out):
+            out.append(v)
+    # A series only the catalog's sensors have (「ICEYE」 of ICEYE-X27), not one of a name already found (OPT of 「OPT 1」).
+    for v in dict.fromkeys(series_of(v) for v in values):
+        pattern = name_pattern(v)
+        if pattern and pattern.search(t) and not any(plain(x).startswith(plain(v)) for x in out):
+            out.append(v)
+    return out or kinds_in(text)
+
+
 def screen_in(text: str, screens: Sequence[str]) -> Optional[str]:
     """The screen (a menu entry's text) `text` names: the longest name found, without 「…」 and brackets."""
     t = fold(text)
@@ -369,6 +401,10 @@ class Reading:
     #: A latitude and longitude written (lon, lat).
     point: Optional[tuple[float, float]] = None
     satellites: list[str] = field(default_factory=list)
+    #: 画像検索's 衛星・種別: satellites, series, sensors and kinds (SAR, 光学) as written.
+    sensors: list[str] = field(default_factory=list)
+    #: The catalog's sensors they name (set when it is done: features/command.py).
+    catalog_sensors: list[str] = field(default_factory=list)
     screen: Optional[str] = None
     #: How the operation was found: "words" (no model) or "model".
     by: str = "words"
@@ -390,11 +426,11 @@ class Reading:
 
 
 def read(op: Operation, text: str, today: date, systems: Sequence[Any] = (), places: Sequence[str] = (),
-         sats: Sequence[Any] = (), screens: Sequence[str] = (), by: str = "words") -> Reading:
+         sats: Sequence[Any] = (), screens: Sequence[str] = (), by: str = "words", sensors: Sequence[str] = ()) -> Reading:
     """
     The values of `op` that `text` says, read by code (`systems`:
     requestExports; `places`: names known; `sats`: the satellite catalog;
-    `screens`: the menu's entries).
+    `screens`: the menu's entries; `sensors`: the image catalog's sensors).
     """
     r = Reading(op, text, by=by)
     slots = set(op.slots)
@@ -411,7 +447,7 @@ def read(op: Operation, text: str, today: date, systems: Sequence[Any] = (), pla
         r.point = lat_lon_in(text)
         if r.point is None:
             others = [s.system for s in systems] + [_base(s.label) for s in systems]
-            others += [getattr(s, "name", "") for s in sats]
+            others += [getattr(s, "name", "") for s in sats] + list(sensors)
             r.place = place_word(text, places, others)
     if "satellites" in slots and sats:
         from .text_request import satellites_of
@@ -420,6 +456,8 @@ def read(op: Operation, text: str, today: date, systems: Sequence[Any] = (), pla
         # A series named: its satellites (衛星パス chooses satellites).
         more = [x.name for x in sats if getattr(x, "series", None) in named.series and x.name not in named.satellites]
         r.satellites = list(dict.fromkeys([*named.satellites, *more]))
+    if "sensors" in slots:
+        r.sensors = sensor_words(text, sats, sensors)
     if "screen" in slots:
         r.screen = screen_in(text, screens)
     return r

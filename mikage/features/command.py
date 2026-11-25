@@ -17,6 +17,7 @@ from datetime import date
 from typing import Any, Callable, Optional
 
 from ..core import errors
+from ..core.catalog.api import KINDS, SensorPick, pick_sensors
 from ..core.obs.api import load_named_areas, settings_for
 from ..core.request.api import jst_day
 from ..core.text_command import OPERATIONS, Operation, Reading
@@ -98,6 +99,22 @@ class Command(Feature):
     def screens(self) -> list[str]:
         return self.host.menu_texts()
 
+    def sensors(self) -> list[str]:
+        """The sensors of the catalog chosen in 画像カタログ (as it lists them; none before they are read)."""
+        port = self.ports.catalog()
+        return list((port.sensor_values() if port is not None else None) or [])
+
+    def pick_sensors(self, words: list[str]) -> Optional[SensorPick]:
+        """
+        The sensors of the catalog chosen in 画像カタログ that 衛星・種別's words name (core/catalog/sensors.py);
+        None when it has no sensor attribute (they can not be searched by).
+        """
+        port = self.ports.catalog()
+        values = port.sensor_values() if port is not None else None
+        if values is None:
+            return None
+        return pick_sensors(words, values, self.satellites(), self.context.known_names())
+
     def ask_data(self, text: str) -> bool:
         """A question on the data typed in the field: asked in 「データに質問」 (False when it is not offered)."""
         return self.host.open_data_chat(text) is not None
@@ -170,4 +187,17 @@ class Command(Feature):
         run = self.host.text_operations().get(key)
         if run is None:
             raise RuntimeError(errors.tagged(tr("{o} はいまは使えない（設定ファイル・担当）").format(o=reading.operation.title), "E206"))
+        if "sensors" in reading.operation.slots:
+            reading.catalog_sensors = self._catalog_sensors(reading.sensors)
         return run(reading, place)
+
+    def _catalog_sensors(self, words: list[str]) -> list[str]:
+        """The catalog's sensors 衛星・種別 names (none: every sensor); an error when it names none of them."""
+        pick = self.pick_sensors(words) if words else None
+        if pick is None:
+            return []
+        if not pick.sensors:
+            if any(w in KINDS for w in pick.missing) and not pick.listed:
+                raise RuntimeError(tr("画像カタログのセンサーの一覧が読めず、SAR・光学で探せない（衛星・種別を消すか、衛星の名前で）"))
+            raise RuntimeError(tr("「{w}」に当たるセンサーが画像カタログにない（衛星・種別を直すか消す）").format(w="、".join(words)))
+        return pick.sensors

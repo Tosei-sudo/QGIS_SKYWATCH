@@ -35,7 +35,9 @@ if TYPE_CHECKING:  # the door (core/door.py): each name is imported from its mod
     from .pairs import repeat_pairs, RepeatOptions, stereo_pairs, StereoOptions
     from .remind import due_reminders, merge_reminders, new_reminders, plan_ics, reminder_of, reminder_text
     from .revisit import box_of, cell_targets, grid_cells, hours_text, revisit_color, revisit_csv, revisit_layer, revisit_stats
-    from .satellites import BUILT_IN_DEFAULTS, platform_key, sample_satellites, satellite_label, satellites_from_text, SatelliteSpec
+    from .satellites import (
+        BUILT_IN_DEFAULTS, platform_key, sample_satellites, satellite_label, satellites_from_text, SatelliteSpec, series_of,
+    )
     from .scene import pass_shapes, shift_scene, track_place
     from .targets import in_polygon, MAX_POINTS, MAX_TARGETS, name_of, priority_of, spread_out, target_of
     from .timeline import bar_at, HEAD, Layout, layout, ROW
@@ -66,7 +68,7 @@ __all__ = [
     "plan_ics", "plan_ships", "PlanLayer", "PLANNED", "PlanOptions", "PlanResult", "PlanTarget", "platform_key", "point_at",
     "priority_of", "R", "reach_of", "read_grid", "RECOVERED", "reminder_of", "reminder_text", "repeat_pairs", "RepeatOptions",
     "Report", "revisit_color", "revisit_csv", "revisit_layer", "revisit_stats", "ROW", "sample_at", "sample_satellites",
-    "sample_sensor_modes", "satellite_label", "satellite_track", "SatelliteChoice", "SatelliteNames", "satellites_from_text",
+    "sample_sensor_modes", "satellite_label", "satellite_track", "SatelliteChoice", "SatelliteNames", "satellites_from_text", "series_of",
     "SatelliteSpec", "satrec_of", "save_outage", "shift_scene", "ShipState", "side_text", "sorted_ops", "source_text",
     "SPEED_UNITS", "split_antimeridian", "spread_out", "stereo_pairs", "StereoOptions", "stopped", "summary_all",
     "summary_cover", "summary_text", "sun_angles", "SYSTEM_OUTAGE", "SYSTEM_STOP", "SYSTEM_WARNING", "system_limits",

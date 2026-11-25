@@ -20,6 +20,7 @@ from ..time_zone import TimeZone
 from .. import sql
 from ..util import is_number, time_of
 from .config import CatalogConfig
+from .sensors import sensor_list
 
 #: The Esri field types by name.
 FieldTypes = dict[str, str]
@@ -113,7 +114,7 @@ class CatalogSearch:
     registered_to: str = ""
     system_registered_from: str = ""
     system_registered_to: str = ""
-    #: '' for any sensor.
+    #: '' for any sensor; several separated by 「、」 (sensors.SEPARATOR) for any of them.
     sensor: str = ""
     #: Upper limit of the angle; None for none.
     max_angle: Optional[float] = None
@@ -219,7 +220,12 @@ def where_of(catalog: CatalogConfig, types: FieldTypes, search: CatalogSearch,
     if f.get("registered"):
         parts += period("registered", search.registered_from, search.registered_to)
     if f.get("sensor") and search.sensor:
-        parts.append(f"{f['sensor']} = {quote(search.sensor)}")
+        sensors = sensor_list(search.sensor)
+        if len(sensors) == 1:
+            parts.append(f"{f['sensor']} = {quote(sensors[0])}")
+        elif sensors:
+            # Several (「ICEYE-X27、ASNARO-2」: 文で操作's SAR, or typed): any of them.
+            parts.append(f"{f['sensor']} IN ({', '.join(quote(s) for s in sensors)})")
     if f.get("systemRegistered"):
         parts += period("systemRegistered", search.system_registered_from, search.system_registered_to)
     if f.get("angle") and is_number(search.max_angle):
