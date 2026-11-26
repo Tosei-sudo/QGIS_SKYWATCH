@@ -315,3 +315,146 @@ def test_settings_dialog_shows_the_copies(share):
         assert dialog.copies.text() == "使わない（設定ファイルの localCopy が false）" and not dialog.clear_copies.isEnabled()
     finally:
         dialog.reject()
+
+
+# ---- Windows: files in use, an antivirus reading the file just written (tsudo 2026-11-27) ----
+
+@pytest.fixture
+def windows(monkeypatch):
+    """
+    Files "open" (`locked`): as Windows, they cannot be removed nor replaced,
+    and a rename onto or from them is refused (PermissionError, WinError 32);
+    `refusals` more renames of any file are refused first (an antivirus).
+    """
+    locked, refusals, waits = set(), [0], []
+    remove, replace = os.remove, os.replace
+
+    def refused(path):
+        return PermissionError(13, "プロセスはファイルにアクセスできません。別のプロセスが使用中です。", path)
+
+    def fake_remove(path, *a, **k):
+        if os.path.abspath(path) in locked:
+            raise refused(path)
+        return remove(path, *a, **k)
+
+    def fake_replace(src, dst, *a, **k):
+        if os.path.abspath(src) in locked or os.path.abspath(dst) in locked:
+            raise refused(dst)
+        if refusals[0] > 0:
+            refusals[0] -= 1
+            raise refused(dst)
+        return replace(src, dst, *a, **k)
+
+    monkeypatch.setattr(os, "remove", fake_remove)
+    monkeypatch.setattr(os, "replace", fake_replace)
+    monkeypatch.setattr(local_copy_io.time, "sleep", lambda s: waits.append(s))
+    return locked, refusals, waits
+
+
+def test_a_rename_refused_for_a_while_is_tried_again(share, windows):
+    locked, refusals, waits = windows
+    path = image(share / "img.tif")
+    refusals[0] = 3
+    made = make_copy(path, local_copy_io.current)
+    assert made.kind == COPIED and os.path.isfile(made.copy) and waits == list(local_copy_io.REPLACE_WAITS[:3])
+    # Refused for good (more than about 10 s): not copied, nothing left.
+    refusals[0] = 100
+    other = image(share / "other.tif")
+    with pytest.raises(local_copy_io.CopyError):
+        make_copy(other, local_copy_io.current)
+    assert not os.path.exists(copy_folder(other))
+
+
+def test_a_new_copy_beside_an_older_one_still_open(share, windows):
+    locked, refusals, waits = windows
+    path = image(share / "img.tif")
+    first = make_copy(path, local_copy_io.current)
+    # Its copy still open (a layer closed, its GDAL dataset not), and the image replaced on the share since.
+    locked.add(os.path.abspath(first.copy))
+    st = os.stat(path)
+    os.utime(path, (st.st_atime, st.st_mtime + 60))
+    assert local_copy_io.copy_of(path) is None
+    second = make_copy(path, local_copy_io.current)
+    assert second.kind == COPIED and os.path.dirname(second.copy) == copy_folder(path) + "-2"
+    assert local_copy_io.copy_of(path) == second.copy and local_copy_io.original_of(second.copy) == path
+    # The older one, partly deleted, is never taken as whole; deleted once it is let go.
+    locked.clear()
+    assert local_copy_io.drop(os.path.dirname(first.copy)) and local_copy_io.copy_of(path) == second.copy
+
+
+def test_a_copy_partly_deleted_keeps_its_meta_last(share, windows):
+    locked, refusals, waits = windows
+    path = image(share / "img.tif")
+    with open(path[:-4] + ".RPB", "w") as f:
+        f.write("x")
+    made = make_copy(path, local_copy_io.current)
+    folder = os.path.dirname(made.copy)
+    locked.add(os.path.abspath(made.copy))
+    assert not local_copy_io.drop(folder)
+    # The .RPB went, the image (open) and META stay: not a whole copy any more, so not used.
+    assert sorted(os.listdir(folder)) == ["img.tif", META]
+    assert local_copy_io.copy_of(path) is None
+
+
+def test_the_copies_shown_stay_whole_when_the_plugin_stops(share):
+    """The plugin reloaded or updated: a layer still reading a copy goes on knowing it is one."""
+    path, other = image(share / "img.tif"), image(share / "other.tif")
+    shown, unused = make_copy(path, local_copy_io.current), make_copy(other, local_copy_io.current)
+    layer = QgsRasterLayer(path, "img", "gdal")
+    QgsProject.instance().addMapLayer(layer)
+    local_copy_io.switch_layers(path, shown.copy)
+    assert local_copy_io.end_session() == 1
+    assert os.path.isfile(shown.copy) and os.path.isfile(os.path.join(os.path.dirname(shown.copy), META))
+    assert not os.path.exists(os.path.dirname(unused.copy))
+    # Known again from its META (the plugin's memory is gone).
+    assert local_copy_io.original_of(shown.copy) == path
+    from mikage.qgis_io.obs_images import image_path
+
+    assert image_path(layer) == path
+    QgsProject.instance().removeAllMapLayers()
+    assert local_copy_io.end_session() == 0 and not os.path.exists(local_copy_io.base_folder())
+
+
+def test_no_room_is_tried_again_once_room_is_made(share, monkeypatch):
+    path = image(share / "img.tif")
+    layer = QgsRasterLayer(path, "img", "gdal")
+    QgsProject.instance().addMapLayer(layer)
+    tried = []
+    monkeypatch.setattr(local_copy_io, "make_copy", lambda p, *a, **k: tried.append(p) or local_copy_io.Outcome(NO_ROOM, p, bytes=1))
+    q = local_copy_io.queue
+    ended = []
+    q.finished = lambda outcome, error: ended.append(outcome.kind)
+    q.request([layer], None, OverviewOptions())
+    assert wait_for(lambda: ended, 10000)
+    wait_for(lambda: False, 300)
+    assert tried == [path] and q.given_up(path) == NO_ROOM
+    q.request([layer])
+    assert tried == [path] and q.pending() == []
+    # 「使っていないコピーを消去」: tried again.
+    local_copy_io.clear_unused()
+    q.request([layer])
+    assert wait_for(lambda: len(tried) == 2, 10000)
+
+
+def test_a_copy_cancelled_is_not_started_again(share, monkeypatch):
+    path = image(share / "img.tif", size=(3000, 2000))
+    layer = QgsRasterLayer(path, "img", "gdal")
+    QgsProject.instance().addMapLayer(layer)
+    tried = []
+
+    def slow(p, options, busy, progress, cancelled):
+        tried.append(p)
+        while not cancelled():
+            time.sleep(0.01)
+        raise Cancelled()
+
+    monkeypatch.setattr(local_copy_io, "make_copy", slow)
+    built = []
+    overviews_io.queue.finished = lambda outcome, error: built.append(outcome.kind if outcome else error)
+    q = local_copy_io.queue
+    assert overviews_io.queue.request([layer], OverviewOptions()) == []
+    assert wait_for(lambda: tried, 10000)
+    # Cancelled in QGIS's task list: read from the share, its pyramids from there; not copied again.
+    q._task.cancel()
+    assert wait_for(lambda: built, 60000) and built == [overviews_io.BUILT]
+    assert tried == [path] and q.given_up(path) == "取消" and overviews_io.local_path(layer) == path
