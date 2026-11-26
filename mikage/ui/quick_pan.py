@@ -229,7 +229,9 @@ class QuickPanBox(QGroupBox):
             lines = [tr("「{ms}」のパンクロとして使用中（非表示）").format(ms=ms.name() if ms is not None else "?")]
         else:
             lines = [tr("パンクロ: {pan}").format(pan=pan.name() if pan is not None else "?")]
-        if link.fitting:
+        if link.fitting and link.model is not None:
+            lines.append(tr("色の関係を調べ直し中…（終わるまで前の結果で表示）"))
+        elif link.fitting:
             lines.append(tr("色の関係を調査中…（終わるまで元の画像のまま）"))
         elif link.failed:
             lines.append(tr("色の関係の調査に失敗: {reason}").format(reason=link.failed))

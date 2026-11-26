@@ -98,3 +98,82 @@ def test_stops_close_together_are_told_once(watch, monkeypatch):
     stop_screen(0.4)
     assert wait_for(lambda: len(heard) == 2, 5000)
     assert "にも 1 回" in heard[1]
+
+
+def test_what_the_main_thread_was_doing_is_named(watch):
+    """2026-11-27: the line names the plugin's functions the main thread was in (here this test's), innermost first."""
+    w, heard = watch
+
+    def read_slowly():
+        time.sleep(0.6)
+
+    stop_screen(0, read_slowly)
+    assert wait_for(lambda: heard, 5000)
+    assert "画面の処理: test_qgis_stall_watch.read_slowly" in heard[0], heard[0]
+    # Before the background work, so the cause comes first.
+    assert heard[0].index("画面の処理") < heard[0].index("裏の処理")
+
+
+def test_places_are_described():
+    assert stall_watch.describe_places([]) == ""
+    assert stall_watch.describe_places([stall_watch.QGIS_OWN] * 3).startswith("画面の処理: QGIS 自身")
+    # The most seen first; a second only when seen in a quarter of the looks or more.
+    assert stall_watch.describe_places(["a.f"] * 6 + ["b.g"] * 2) == "画面の処理: a.f、b.g"
+    assert stall_watch.describe_places(["a.f"] * 9 + ["b.g"]) == "画面の処理: a.f"
+    assert stall_watch.place_of(None) == stall_watch.QGIS_OWN
+
+
+def test_place_of_a_frame_inside_and_outside_the_plugin():
+    import sys
+
+    def inner():
+        return stall_watch.place_of(sys._getframe())
+
+    def outer():
+        return inner()
+
+    place = outer()
+    assert place.startswith("test_qgis_stall_watch.inner ← outer ← "), place
+    # Another's code under the plugin's: named as the call the plugin is in.
+    import json
+
+    seen = []
+
+    class Probe:
+        def __repr__(self):
+            seen.append(stall_watch.place_of(sys._getframe(1)))
+            return "1"
+
+    json.dumps({"a": 1}, default=str)  # (json's encoder is C: no frame of its own)
+    import reprlib
+
+    reprlib.repr(Probe())
+    assert seen and "（reprlib." in seen[0], seen
+
+
+def test_requests_are_reported(watch, monkeypatch):
+    """通信の記録: the requests since the last line, the tables that took longest first."""
+    from mikage.core import request_stats
+
+    w, heard_stops = watch
+    heard = []
+
+    def got(message, tag, _level):
+        if tag == LOG_TAG and message.startswith("通信"):
+            heard.append(message)
+
+    QgsApplication.messageLog().messageReceived.connect(got)
+    try:
+        base = "https://gis.example/arcgis/rest/services/Requests/FeatureServer/0"
+        request_stats.STATS.note(base, {}, 0.2, 3000, name="撮像依頼台帳")
+        request_stats.STATS.note(base + "/query", {"where": "1=1"}, 3.2, 6_300_000, name="撮像依頼台帳")
+        request_stats.STATS.note(base + "/query", {"where": "STATUS = '有効'"}, 0.5, 20_000)
+        w.report()
+        assert len(heard) == 1
+        assert "3 回" in heard[0] and "6.3 MB" in heard[0], heard[0]
+        assert "撮像依頼台帳 検索 2 回（全件 1）計 3.7 秒・最長 3.2 秒" in heard[0], heard[0]
+        # Nothing since: no line.
+        w.report()
+        assert len(heard) == 1
+    finally:
+        QgsApplication.messageLog().messageReceived.disconnect(got)
