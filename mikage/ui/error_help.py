@@ -112,8 +112,19 @@ def watch(label: QLabel) -> QLabel:
     return label
 
 
+#: The 「対処法」 button's object name, and the property with the code it opens.
+BUTTON = "mikageErrorHelp"
+_CODE = "mikage_error_code"
+
+
 class BarHelp(QObject):
-    """The 「対処法」 button on the message bar's items that carry a code."""
+    """The 「対処法」 button on the message bar's items that carry a code.
+
+    The bar says `widgetAdded` each time an item comes on top, not only when it
+    is pushed: a message under a newer one comes back when that one is closed or
+    its time is up. So an item keeps one button, found again then, for the code
+    its text has at that time (two or more side by side before, tsudo 2026-11-27).
+    """
 
     def __init__(self, bar, parent: Optional[QObject] = None):
         super().__init__(parent)
@@ -125,13 +136,21 @@ class BarHelp(QObject):
             item = sip.cast(widget, QgsMessageBarItem)
             code = shown_code(f"{item.title()} {item.text()}")
             layout = item.layout()
-            if code is None or layout is None:
+            if layout is None:
                 return
-            button = QPushButton(tr("対処法"), item)
-            button.setObjectName("mikageErrorHelp")
+            button = item.findChild(QPushButton, BUTTON, Qt.FindChildOption.FindDirectChildrenOnly)
+            if code is None:
+                if button is not None:
+                    layout.removeWidget(button)
+                    button.deleteLater()
+                return
+            if button is None:
+                button = QPushButton(tr("対処法"), item)
+                button.setObjectName(BUTTON)
+                button.clicked.connect(lambda _checked=False, b=button: open_code(b.property(_CODE) or ""))
+                layout.addWidget(button)
+            button.setProperty(_CODE, code)
             button.setToolTip(tr("{c} の原因と対処法をヘルプで見る").format(c=code))
-            button.clicked.connect(lambda _checked=False, c=code: open_code(c))
-            layout.addWidget(button)
         except (TypeError, RuntimeError, AttributeError):
             pass
 
