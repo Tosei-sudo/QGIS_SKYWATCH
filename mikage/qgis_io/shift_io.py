@@ -17,12 +17,16 @@ geotransform into an image placed by GCPs or RPC made QGIS place it by that
 alone, 1-unit pixels from (0, 0) (1° in WGS 84), so the whole map was one
 magnified gray pixel until the move was taken back (tsudo 2026-11-18).
 The layer keeps its CRS (one set by hand too) and its correction's state
-(the view and a 範囲を固定 range) across the move.
+(the view and a 範囲を固定 range) across the move. While the layer is pointed
+at its new source, QGIS draws it for a moment with its renderer's fallback:
+`moving(layer)` tells what listens to the layer's signals (クイックパンシャープン)
+that this is a move, and `signals().moved` tells when it is done.
 """
 from __future__ import annotations
 
 import os
 import uuid
+from contextlib import contextmanager
 from typing import Optional
 
 from osgeo import gdal
@@ -31,6 +35,44 @@ from ..core.errors import FileFailed
 
 SOURCE = "satobs/shift_source"
 SHIFT = "satobs/shift"
+
+#: The ids of the layers being pointed at a new source now (see `moving`).
+_moving: set = set()
+_signals = None
+
+
+def signals():
+    """`moved(layer_id)`: a layer has been moved (pointed at its new source, its CRS and correction put back)."""
+    global _signals
+    if _signals is None:
+        from qgis.PyQt.QtCore import QObject, pyqtSignal
+
+        class Signals(QObject):
+            moved = pyqtSignal(str)
+
+        _signals = Signals()
+    return _signals
+
+
+def moving(layer) -> bool:
+    """
+    Whether the layer is being moved now: its renderer for the moment QGIS's
+    own (the correction put back at the end), its CRS maybe not yet its own.
+    """
+    try:
+        return layer is not None and layer.id() in _moving
+    except RuntimeError:  # deleted
+        return False
+
+
+@contextmanager
+def _move_of(layer):
+    layer_id = layer.id()
+    _moving.add(layer_id)
+    try:
+        yield
+    finally:
+        _moving.discard(layer_id)
 
 
 def shifts_folder() -> str:
@@ -175,28 +217,30 @@ def point_at(layer, target: str, source: str, shift: tuple, properties: Optional
     crs = layer.crs()
     corrected = er.enhance_renderer(layer)
     state = corrected.state if corrected is not None else None
-    # QGIS keeps the layer's style across a new source (the correction as its fallback renderer, put back below).
-    layer.setDataSource(target, layer.name(), "gdal", QgsDataProvider.ProviderOptions())
-    if crs.isValid() and layer.crs() != crs:
-        # A CRS set by hand (the file has none, or another) is the layer's, not the file's.
-        layer.setCrs(crs)
-    _alpha_as_source(layer)
-    for key, value in (properties or {}).items():
-        if value is None:
-            layer.removeCustomProperty(key)
-        else:
-            layer.setCustomProperty(key, value)
-    if target == source:
-        layer.removeCustomProperty(SOURCE)
-        layer.removeCustomProperty(SHIFT)
-    else:
-        layer.setCustomProperty(SOURCE, source)
-        if dx or dy:
-            layer.setCustomProperty(SHIFT, f"{dx!r},{dy!r}")
-        else:
+    with _move_of(layer):
+        # QGIS keeps the layer's style across a new source (the correction as its fallback renderer, put back below).
+        layer.setDataSource(target, layer.name(), "gdal", QgsDataProvider.ProviderOptions())
+        if crs.isValid() and layer.crs() != crs:
+            # A CRS set by hand (the file has none, or another) is the layer's, not the file's.
+            layer.setCrs(crs)
+        _alpha_as_source(layer)
+        for key, value in (properties or {}).items():
+            if value is None:
+                layer.removeCustomProperty(key)
+            else:
+                layer.setCustomProperty(key, value)
+        if target == source:
+            layer.removeCustomProperty(SOURCE)
             layer.removeCustomProperty(SHIFT)
-    if layer.customProperty(er.PROPERTY):
-        er.restore_layer(layer, state)
+        else:
+            layer.setCustomProperty(SOURCE, source)
+            if dx or dy:
+                layer.setCustomProperty(SHIFT, f"{dx!r},{dy!r}")
+            else:
+                layer.removeCustomProperty(SHIFT)
+        if layer.customProperty(er.PROPERTY):
+            er.restore_layer(layer, state)
+    signals().moved.emit(layer.id())
     layer.triggerRepaint()
     # The VRT moved from is no longer needed.
     if old and old != target:
