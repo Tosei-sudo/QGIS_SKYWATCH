@@ -37,6 +37,7 @@ from ..qgis_io.request_layers import layer_rows, requests_layer
 from ..qgis_io.tasks import run_task
 from . import last_inputs
 from .docks import PluginDock, ask_no, plain_label, plain_tip
+from .emphasis import emphasize
 from .flow_layout import FlowLayout
 from .check_filter import CheckFilter
 from .list_views import ListViews
@@ -168,7 +169,7 @@ class RequestDock(PluginDock):
         top.addWidget(self.views.button)
 
         edit = FlowLayout()
-        self.new_button = QPushButton(self.tr("新規…"))
+        self.new_button = emphasize(QPushButton(self.tr("新規…")))
         self.new_button.clicked.connect(lambda: self.edit(new=True))
         self.edit_button = QPushButton(self.tr("編集…"))
         self.edit_button.clicked.connect(lambda: self.edit())

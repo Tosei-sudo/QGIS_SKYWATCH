@@ -38,6 +38,7 @@ from ..qgis_io import settings
 from ..qgis_io.tasks import run_task
 from . import shortcuts
 from .docks import PluginDock, plain_label
+from .emphasis import LIGHT, emphasize
 from .plan_drag_tool import PlanDragTool
 from .plan_overlay import PlanOverlay
 from .plan_timeline import PlanTimeline
@@ -144,6 +145,7 @@ class ImagingPlanDock(
         self.pick.setCheckable(True)
         self.pick.setToolTip(self.tr("地図をクリックして対象の地点を指定"))
         self.pick.toggled.connect(self._pick_toggled)
+        emphasize(self.pick, LIGHT)
         target_row = QHBoxLayout()
         target_row.addWidget(self.target, 1)
         target_row.addWidget(self.pick)
@@ -295,7 +297,7 @@ class ImagingPlanDock(
         self.body.addWidget(splitter, 1)
 
         buttons = QHBoxLayout()
-        self.run_button = QPushButton(self.tr("計算"))
+        self.run_button = emphasize(QPushButton(self.tr("計算")))
         self.run_button.setToolTip(self.tr("計算（Ctrl+Enter）"))
         self.run_button.clicked.connect(self.run)
         self.cancel_button = QPushButton(self.tr("取消"))
@@ -382,7 +384,7 @@ class ImagingPlanDock(
         self.csv_button = QPushButton(self.tr("CSV 保存"))
         self.csv_button.setToolTip(self.tr("一覧を CSV で保存"))
         self.csv_button.clicked.connect(self.save_csv)
-        self.layer_button = QPushButton(self.tr("レイヤーとして追加"))
+        self.layer_button = emphasize(QPushButton(self.tr("レイヤーとして追加")), LIGHT)
         self.layer_button.setToolTip(self.tr("撮像範囲をレイヤーとして追加（撮像時刻付き。時系列コントローラーで絞り込める）"))
         self.layer_button.clicked.connect(self.add_layer)
         self.zoom_button = QPushButton(self.tr("範囲へ移動"))

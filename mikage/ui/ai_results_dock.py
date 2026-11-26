@@ -72,6 +72,7 @@ from ..qgis_io.pixel_place import original_placement, pixel_in
 from ..qgis_io.review_io import rejection_ring
 from ..qgis_io.tasks import current_feedback, error_text, run_task
 from .docks import PluginDock, ask_no, plain_label
+from .emphasis import LIGHT, emphasize
 from .last_inputs import InputMemory
 from .list_views import column_menus
 
@@ -250,13 +251,13 @@ class AiResultsDock(PluginDock):
         self.body.addLayout(buttons)
 
         judge = QHBoxLayout()
-        self.next_button = QPushButton(_tr("次の要確認へ"))
+        self.next_button = emphasize(QPushButton(_tr("次の要確認へ")), LIGHT)
         self.next_button.setToolTip(_tr("要確認のうち確信度の最も低い結果を選んで表示"))
         self.next_button.clicked.connect(lambda: self.next_to_review())
-        self.accept_button = QPushButton(_tr("正（記録して次へ）"))
+        self.accept_button = emphasize(QPushButton(_tr("正（記録して次へ）")))
         self.accept_button.setToolTip(_tr("選んだ結果を観測記録として記録（学習の教師データになる）し、次の要確認へ"))
         self.accept_button.clicked.connect(lambda: self.accept_rows(self.selected_rows()))
-        self.reject_button = QPushButton(_tr("誤検出（次へ）"))
+        self.reject_button = emphasize(QPushButton(_tr("誤検出（次へ）")))
         self.reject_button.setToolTip(_tr("選んだ結果を誤検出として、その周りを確認範囲（何もない所）に記録し、次の要確認へ。"
                                           "学習ではその周りを背景として学習。確認範囲を削除すると取り消し"))
         self.reject_button.clicked.connect(lambda: self.reject_rows(self.selected_rows()))
