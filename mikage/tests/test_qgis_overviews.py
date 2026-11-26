@@ -661,3 +661,66 @@ def test_before_open_moves_aux_for(location, tmp_path, monkeypatch):
         assert not overviews_io.before_open(path) and moved == [path]
     finally:
         overviews_io.current = OverviewOptions()
+
+
+def test_levels_lie_as_the_image_bands_do(tmp_path, no_cache):
+    """
+    A pixel-interleaved image gets a pixel-interleaved .ovr: GDAL's default
+    (bands one after another) built it band by band and read the whole
+    image about 2.7 times over (2026-11-26). Band-interleaved images and
+    one-band images keep GDAL's default.
+    """
+    mem = gdal.GetDriverByName("MEM")
+    options = OverviewOptions()
+    pixel = mem.Create("", 10, 10, 3, gdal.GDT_UInt16, ["INTERLEAVE=PIXEL"])
+    band = mem.Create("", 10, 10, 3, gdal.GDT_UInt16, ["INTERLEAVE=BAND"])
+    one = mem.Create("", 10, 10, 1, gdal.GDT_UInt16)
+    assert overviews_io._config(pixel, options)["INTERLEAVE_OVERVIEW"] == "PIXEL"
+    assert "INTERLEAVE_OVERVIEW" not in overviews_io._config(band, options)
+    assert "INTERLEAVE_OVERVIEW" not in overviews_io._config(one, options)
+    for interleave in ("PIXEL", "BAND"):
+        path = str(tmp_path / f"{interleave.lower()}.tif")
+        ds = gdal.GetDriverByName("GTiff").Create(path, 3000, 2000, 3, gdal.GDT_UInt16, ["TILED=YES", f"INTERLEAVE={interleave}"])
+        ds.SetGeoTransform([139.6, 0.0001, 0, 35.7, 0, -0.0001])
+        for b in range(3):
+            ds.GetRasterBand(b + 1).WriteArray(np.full((2000, 3000), 100 + b, dtype=np.uint16))
+        ds = None
+        assert build_external(path, options).kind == BUILT
+        ovr = gdal.Open(path + ".ovr")
+        assert ovr.GetMetadataItem("INTERLEAVE", "IMAGE_STRUCTURE") == interleave
+        # The levels are right for every band.
+        opened = gdal.Open(path)
+        assert int(opened.GetRasterBand(3).GetOverview(0).ReadAsArray().mean()) == 102
+        ovr = opened = None
+
+
+def test_put_beside_by_someone_else_meanwhile(tmp_path, no_cache, monkeypatch):
+    """
+    In a shared folder another PC may put the .ovr beside the image while
+    this one builds it: theirs is kept, and the layers opened before read
+    the image again to use it (2026-11-26).
+    """
+    path = image(tmp_path / "shared.tif")
+    layer = QgsRasterLayer(path, "shared", "gdal")
+    assert layer.isValid() and not layer.dataProvider().hasPyramids()
+    build = overviews_io._build_in_temp
+
+    def theirs_first(src, work, *args):
+        built = build(src, work, *args)
+        with open(built, "rb") as f, open(path + ".ovr", "wb") as out:
+            out.write(f.read())
+        return built
+
+    monkeypatch.setattr(overviews_io, "_build_in_temp", theirs_first)
+    QgsProject.instance().addMapLayers([layer])
+    q = OverviewQueue()
+    ended = []
+    q.finished = lambda outcome, error: ended.append((outcome, error))
+    try:
+        assert q.request([layer], OverviewOptions()) == [path]
+        assert wait_for(lambda: ended, 60000)
+        assert ended[0][0].kind == overviews_io.OTHERS and ended[0][1] is None
+        assert layer.dataProvider().hasPyramids()
+        assert not [n for n in os.listdir(tmp_path) if n.endswith(".part")]
+    finally:
+        QgsProject.instance().removeAllMapLayers()

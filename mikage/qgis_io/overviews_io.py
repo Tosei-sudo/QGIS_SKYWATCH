@@ -77,6 +77,8 @@ TITLE = "ピラミッド"
 BUILT, CACHED, HAS_OVERVIEWS, SMALL, READ_ONLY = "built", "cached", "has", "small", "read-only"
 #: Built into the temporary folder (location "temp").
 TEMPORARY = "temp"
+#: Put beside the image by someone else while this one was being built (a shared folder): theirs is used.
+OTHERS = "others"
 #: location "cache" without a cache folder, or without GDAL's functions for it.
 NO_CACHE, UNSUPPORTED = "no-cache", "unsupported"
 
@@ -375,6 +377,13 @@ def _config(ds, options: OverviewOptions) -> dict[str, str]:
             config["PREDICTOR_OVERVIEW"] = "3"
         elif not gdal.GetDataTypeName(dtype).startswith("C"):
             config["PREDICTOR_OVERVIEW"] = "2"
+    # The levels' bands lie as the image's do. GDAL lays an .ovr's bands one after another by default, and
+    # then builds them one band at a time: each pass decoded every block of a pixel-interleaved image again
+    # (all its bands) and read the image about 2.7 times over (on a shared folder, through the network),
+    # whatever GDAL's cache, unless the whole image fitted in it. QGIS drawing a colour image reads the three
+    # bands of a level block by block too, so it reads such an .ovr in fewer reads (about half; tsudo, 2026-11-26).
+    if ds.RasterCount > 1 and (ds.GetMetadataItem("INTERLEAVE", "IMAGE_STRUCTURE") or "").upper() == "PIXEL":
+        config["INTERLEAVE_OVERVIEW"] = "PIXEL"
     # YCbCr only for exactly three bands (RGB): GDAL refuses it for four (RGBN, RGBA), which stay plain JPEG (#80).
     if compress == "JPEG" and ds.RasterCount == 3:
         config["PHOTOMETRIC_OVERVIEW"] = "YCBCR"
@@ -431,12 +440,18 @@ def build_external(path: str, options: OverviewOptions, progress: Callable[[floa
     try:
         built = _build_in_temp(src, work, options, factors, config, progress, cancelled)
         if os.path.exists(target):
-            # Built meanwhile by someone else: theirs is kept.
-            return Outcome(HAS_OVERVIEWS, path)
+            # Built meanwhile by someone else (a shared folder): theirs is kept, and the layers read again to use it.
+            return Outcome(OTHERS, path)
         # Copied beside the image under another name first, so a half-written .ovr is never read.
         shutil.copyfile(built, part)
         progress(99.0)
-        os.replace(part, target)
+        try:
+            os.replace(part, target)
+        except OSError:
+            if os.path.exists(target):
+                # Put there meanwhile by someone else and open on their PC (Windows cannot replace it then).
+                return Outcome(OTHERS, path)
+            raise
         return Outcome(BUILT, path, tuple(factors))
     finally:
         shutil.rmtree(work, ignore_errors=True)
@@ -1051,6 +1066,10 @@ class OverviewQueue:
                 reload_layers(outcome.path)
                 if bar is not None:
                     bar.pushMessage(TITLE, f"{name}.ovr を作成（画像の隣。画像本体はそのまま）", Qgis.MessageLevel.Info, 5)
+            elif outcome is not None and outcome.kind == OTHERS:
+                reload_layers(outcome.path)
+                if bar is not None:
+                    bar.pushMessage(TITLE, f"{name}.ovr はほかの人が先に作成（それを使う）", Qgis.MessageLevel.Info, 5)
             elif outcome is not None and outcome.kind in (CACHED, TEMPORARY):
                 reload_layers(outcome.path)
                 if outcome.ovr:
