@@ -158,7 +158,8 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 | --- | --- | --- | --- | --- |
 | `aiModels` | 配列 | 検出: `url`（必須）・`task`（`detect`・`obb`・`segment`）・`inputSize`・`classes`（配列か `"coco"`）・`format`・`channels`・`mean`・`std`・`maxDetections`・`strides`・`score`・`iou`（確信度と重なりのしきい値、0 と 1 の間）・`kinds`（クラス → 種別、プラグインだけ）。SAM: `encoder`・`decoder`・`inputSize` | なし | [AI](../features/ai.md#ai物体検出クリック抽出) |
 | `detectionOutputs` | 配列 | 検出結果の転記先。`url`、`fields`（`imageId`・`class`・`score`・`status` など）、`statusValues`、`constants`、`token`、`aiResults`（`false` で「AI結果」に読まない。既定 `true`） | なし | [AI](../features/ai.md#ai物体検出クリック抽出)・[AI結果](../features/ai.md#ai結果外部aiプラグイン内の物体検出) |
-| `aiResultSources` | 配列 | 外部 AI の結果。`url`、`fields`（`imageId`・`id`・`class`・`score`・`model`・`detectedAt`・`name`・`kind`・`activity`・`length`・`heading`・`width`・`note`）、`kinds`、`minScore`（0〜1）、`continueRadius`・`candidateRadius`（m）、`maxResults`、`activity`・`confidence`（取り込み時の既定）、`where`、`token` | なし | [AI結果](../features/ai.md#ai結果外部aiプラグイン内の物体検出) |
+| `aiResultSources` | 配列 | 外部 AI の結果。`url`、`fields`（`imageId`・`id`・`class`・`score`・`model`・`detectedAt`・`name`・`kind`・`activity`・`length`・`heading`・`width`・`note`）、`kinds`、`minScore`（0〜1）、`continuation`（この出どころだけの継続の判定。形は `aiContinuation` と同じで、書いたキーだけ優先）、`continueRadius`・`candidateRadius`（m。古い書き方）、`maxResults`、`activity`・`confidence`（取り込み時の既定）、`where`、`token` | なし | [AI結果](../features/ai.md#ai結果外部aiプラグイン内の物体検出) |
+| `aiContinuation` | オブジェクトか `false` | AI結果を取り込むときの継続の判定。`rules`（自動継続のルールの配列。ルールの中の条件はすべて満たし、どれか 1 つのルールで自動継続: `label`・`near`（m）・`centerInRecord`・`recordInAi`・`overlap`（0〜1）・`kind`（`same`・`related`・`sibling`・`any`）・`lengthGap`（0〜1）・`headingGap`（°）・`minScore`（0〜1））、`candidateRadius`（m）、`unique`。外部 AI・転記先・プラグイン内の検出すべてに効く。`false` で照合しない | 50 m 以内（か長さの半分）・分類が同じか上下・長さの差 30% 以内、候補は 300 m | [継続の判定](../features/ai.md#継続の判定aicontinuation) |
 
 #### 編集の記録
 
