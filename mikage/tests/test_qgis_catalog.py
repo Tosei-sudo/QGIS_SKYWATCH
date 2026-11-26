@@ -916,7 +916,9 @@ def test_a_record_whose_path_is_a_folder_opens_the_images_its_sensor_names(plugi
 
 def test_close_previous_closes_the_images_opened_before_once_the_next_are_open(plugin, monkeypatch):
     """tsudo 2026-11-10: looking through the list one image after another, the image opened before closes (kept per user)."""
+    from qgis.core import QgsFeature, QgsVectorLayer
     from mikage.core.catalog.search import record_of
+    from mikage.qgis_io.ai_results_io import RESULTS_OF
     from mikage.qgis_io.catalog_io import RECORD_GROUP
     from mikage.qgis_io.obs_images import open_images
 
@@ -956,10 +958,22 @@ def test_close_previous_closes_the_images_opened_before_once_the_next_are_open(p
     tile_ids = [t.id() for t in tiles]
     group = root.findGroup("G")
     assert group is not None and group.customProperty(RECORD_GROUP) == "G"
+    # Its AI results (tsudo 2026-11-26): the external ones QGIS put in the group (above the file chosen), its detection at the top.
+    results = QgsVectorLayer("Point?crs=EPSG:4326", "外部AI結果 船舶検出（G）", "memory")
+    results.setCustomProperty(RESULTS_OF, "G")
+    project.addMapLayer(results, False)
+    group.insertLayer(0, results)
+    detected = QgsVectorLayer("Polygon?crs=EPSG:4326&field=class:string&field=score:double&field=image_id:string&field=model:string"
+                              "&field=detected_at:datetime", "物体検出（船舶）", "memory")
+    f = QgsFeature(detected.fields())
+    f["image_id"] = "G"
+    detected.dataProvider().addFeatures([f])
+    project.addMapLayer(detected)
+    ai_ids = [results.id(), detected.id()]
     [third] = dock.open_records([a_as("A3")])
-    # The folder record's layers went, and its group with them; the new image is there.
+    # The folder record's layers went, its AI results and its group with them; the new image is there.
     third_id = third.id()
-    assert all(project.mapLayer(i) is None for i in tile_ids) and root.findGroup("G") is None
+    assert all(project.mapLayer(i) is None for i in tile_ids + ai_ids) and root.findGroup("G") is None
     assert {third_id, first.id(), second.id()} <= set(project.mapLayers())
     # Nothing opened (no place): what was opened stays.
     assert dock.open_records([r for r in dock.records if r.id == "C"]) == []

@@ -63,7 +63,7 @@ from ..core.ai_results import (
 )
 from ..core.obs.api import AUTO, CANDIDATE, Continuation, ContinuationFound as Found, continuations
 from ..core.obs.api import living, outline_of
-from ..qgis_io.ai_results_io import RESULTS_OF, ROW, fetch, geometry_of, mark_imported, place_of, results_layer, ring_of
+from ..qgis_io.ai_results_io import RESULTS_OF, ROW, add_above, fetch, geometry_of, mark_imported, place_of, results_layer, ring_of
 from ..qgis_io.ai_transfer_io import sent_ids
 from ..qgis_io.catalog_io import CATALOG_URL
 from ..qgis_io.detection_results import detection_layers, detection_results, image_ids_of, is_detection_layer, local_source
@@ -742,11 +742,12 @@ class AiResultsDock(PluginDock):
         self.layers = []
         if stale:
             project.removeMapLayers(stale)
+        image = self._image_layer() if any(results for _s, results, _r in per_source) else None
         for source, results, rows in per_source:
             if not results:
                 continue
             layer = results_layer(results, rows, source, self.image_id or "", self.imported)
-            project.addMapLayer(layer)
+            add_above(layer, image, project)
             layer.selectionChanged.connect(lambda *_a, lyr=layer: self._map_selected(lyr))
             self.layers.append(layer)
 

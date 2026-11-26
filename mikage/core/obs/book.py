@@ -98,7 +98,7 @@ def joined_image(parts: Sequence[ObservedImage], name: str = "") -> ObservedImag
 
 
 class Prefs:
-    """Small values kept per user (QgsSettings in QGIS): the images listed without their file, per store."""
+    """Small values kept per user (QgsSettings in QGIS): the images listed without their file, per store (in QGIS only while it runs)."""
 
     def __init__(self):
         self.values: dict[str, str] = {}
