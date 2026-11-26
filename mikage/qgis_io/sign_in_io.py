@@ -46,6 +46,8 @@ HEADER_METHOD = "APIHeader"
 RENEW_AHEAD_MS = 4 * 60 * 1000
 #: After a token could not be asked, asked again after this (ms).
 RETRY_MS = 2 * 60 * 1000
+#: How often a token asked by a request (on its own thread) is looked for, to write it into the portal's authcfg (ms).
+WATCH_MS = 5 * 1000
 
 
 def oauth2_config(rule: SignInRule) -> str:
@@ -197,8 +199,6 @@ class SignInKeeper(QObject):
 
     #: What the screens say of the entries changed.
     changed = pyqtSignal()
-    #: An `iwa` portal has a new token (emitted on the thread that asked it: queued to the main thread).
-    _token_had = pyqtSignal(str)
 
     def __init__(self, context):
         super().__init__(context)
@@ -211,7 +211,13 @@ class SignInKeeper(QObject):
         self._renew = QTimer(self)
         self._renew.setSingleShot(True)
         self._renew.timeout.connect(self.check)
-        self._token_had.connect(self._write_token)
+        #: iwa portal → the token last written into its authcfg
+        self._written: dict[str, str] = {}
+        # A token asked by any request (on its thread) is written from here, on the main thread: no signal is emitted
+        # from the requests' threads (a queued emit holding the GIL can deadlock with Qt's locks: qgis_io/network.py).
+        self._watch = QTimer(self)
+        self._watch.setInterval(WATCH_MS)
+        self._watch.timeout.connect(self._write_tokens)
         context.configChanged.connect(self._config_changed)
 
     def _config_changed(self) -> None:
@@ -222,9 +228,8 @@ class SignInKeeper(QObject):
         iwa = [r for r in rules if r.method == "iwa"]
         usable = bool(iwa) and windows_auth.available()
         tokens = PortalTokens(lambda url, form: windows_auth.ask(url, form, timeout=TOKEN_TIMEOUT)) if usable else None
-        if tokens is not None:
-            tokens.listener = lambda rule: self._token_had.emit(rule.portal)
         sign_in.set_tokens(tokens)
+        self._written = {}
         states = {r.portal or r.domains[0]: SignInState(r) for r in rules}
         if iwa and not usable:
             for r in iwa:
@@ -249,19 +254,31 @@ class SignInKeeper(QObject):
         sign_in.set_authcfgs(authcfgs)
         self.states = states
         self.changed.emit()
+        if self._headers:
+            self._watch.start()
+        else:
+            self._watch.stop()
         if usable:
             # Once every other part has taken the new settings: the token first, so the layers read at start have it.
             generation = self._generation
             QTimer.singleShot(0, lambda: self.check() if generation == self._generation else None)
 
-    def _write_token(self, portal: str) -> None:
-        """A new token of an `iwa` portal: into its authcfg (QGIS's own requests), and asked again before it ends."""
-        rule, tokens = self._rules.get(portal), sign_in.tokens()
-        if rule is None or tokens is None:
+    def _write_tokens(self) -> None:
+        """The `iwa` portals' new tokens (asked by any request) into their authcfgs (QGIS's own requests), and asked again before they end."""
+        tokens = sign_in.tokens()
+        if tokens is None:
             return
-        if portal in self._headers:
-            make_header_config(rule, tokens.cached(rule))
-        self._plan_renewal()
+        wrote = False
+        for portal in list(self._headers):
+            rule = self._rules.get(portal)
+            token = tokens.cached(rule) if rule is not None else None
+            if token and token != self._written.get(portal):
+                authcfg, _why = make_header_config(rule, token)
+                if authcfg:
+                    self._written[portal] = token
+                    wrote = True
+        if wrote:
+            self._plan_renewal()
 
     def _plan_renewal(self, after_ms: Optional[float] = None) -> None:
         """The next token asked a little before the first kept ends (or after `after_ms`)."""
@@ -313,6 +330,7 @@ class SignInKeeper(QObject):
             if generation == self._generation:
                 self.states.update(found)
                 self.changed.emit()
+                self._write_tokens()
                 self._plan_renewal(RETRY_MS if any(s.problem for s in found.values()) else None)
 
         def failed(message: str) -> None:
@@ -333,8 +351,10 @@ class SignInKeeper(QObject):
         """The plugin is unloaded: nothing of `signIn` stays in QGIS's requests (the iwa authcfgs without their token)."""
         self._generation += 1
         self._renew.stop()
+        self._watch.stop()
         for portal in list(self._headers):
             self._take_out(portal, self._rules.get(portal))
+        self._written = {}
         self._rules = {}
         sign_in.set_rules([])
         sign_in.set_tokens(None)

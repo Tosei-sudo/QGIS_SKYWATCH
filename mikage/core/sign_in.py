@@ -299,8 +299,6 @@ class PortalTokens:
         self._users: dict[str, PortalUser] = {}
         self._locks: dict[str, threading.Lock] = {}
         self._lock = threading.Lock()
-        #: Told of each new token (the rule; on the thread that asked it).
-        self.listener: Optional[Callable[[SignInRule], None]] = None
 
     def _lock_of(self, portal: str) -> threading.Lock:
         with self._lock:
@@ -363,8 +361,6 @@ class PortalTokens:
         now = self.clock()
         self._tokens[rule.portal] = (token, ends)
         self._asked[rule.portal] = now
-        if self.listener is not None:
-            self.listener(rule)
         return token
 
     def _ask_token(self, rule: SignInRule) -> tuple[str, float]:
