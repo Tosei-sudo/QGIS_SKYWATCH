@@ -310,6 +310,42 @@ def test_unloading_drops_the_tasks_held():
     assert ran == [] and tasks._held == [] and not tasks._holding
 
 
+def test_a_task_started_while_an_answer_is_shown_runs_once_it_is_shown():
+    """
+    2026-11-26: a task started in another task's answer (データに質問 asking
+    again after its SQL failed) stayed queued for good once in a few runs
+    under load: QGIS's task manager, cleaning up the task that finished, took
+    back the new task's runnable (at the address of the one it had kept). It is
+    handed to QGIS once the answer has been shown; one cancelled meanwhile is
+    told so, as QGIS tells it.
+    """
+    from qgis.core import QgsApplication
+
+    from mikage.qgis_io import tasks
+
+    seen, chained = [], []
+
+    def first_done(result):
+        seen.append(result)
+        # Not given to QGIS while its answer is shown.
+        chained.append(run_task("次", lambda t: "次の答え", seen.append))
+        assert QgsApplication.taskManager().taskId(chained[0]) == -1 and chained[0] in tasks._after_answer
+        dropped = run_task("取り消す", lambda t: seen.append("走った"), seen.append, lambda m: seen.append(f"失敗: {m}"))
+        dropped.cancel()
+
+    run_task("最初", lambda t: "最初の答え", first_done)
+    assert wait_for(lambda: "次の答え" in seen and "失敗: 取消" in seen)
+    assert seen[0] == "最初の答え" and "走った" not in seen and tasks._after_answer == []
+    # Unloaded while one waits: dropped with the others.
+    def unloaded_meanwhile(_result):
+        run_task("待つ", lambda t: seen.append("待った"))
+        tasks.cancel_all()
+
+    run_task("最初", lambda t: 1, unloaded_meanwhile)
+    wait_for(lambda: False, 300)
+    assert "待った" not in seen and tasks._after_answer == []
+
+
 class KeepAlive(Handler):
     """HTTP/1.1: the connection stays open between requests (as ArcGIS Server's, IIS's)."""
 

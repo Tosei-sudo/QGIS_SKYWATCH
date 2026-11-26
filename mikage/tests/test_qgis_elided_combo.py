@@ -202,5 +202,7 @@ def test_the_other_image_of_two_dates_does_not_widen_the_enhance_dock(tmp_path):
                 assert box.currentText() in LONG and box.tip().startswith(box.currentText() + "\n")
         finally:
             project.removeAllMapLayers()
+            # As the plugin's unload: what it holds let go (the map's orienter, answering the project otherwise).
+            dock.close_down()
             dock.deleteLater()
     assert widths[0] == widths[1]

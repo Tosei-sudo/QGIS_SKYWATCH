@@ -157,7 +157,7 @@ def test_shots_handed_out_are_marked_in_the_schedule_and_not_changed(plugin):
     dock.calendar.setSelectedDate(QDate(day.year, day.month, day.day))
     dock.show()
     dock.reload(refresh=True)
-    assert wait_for(lambda: dock._loaded and dock.task is None and dock.day == day.isoformat() and dock.outages), dock.status.text()
+    assert wait_for(lambda: dock._loaded and not dock.busy and dock.day == day.isoformat() and dock.outages), dock.status.text()
     notes = [dock.model.item(i, SCHEDULE_COLUMNS.index("理由")).text() for i in range(dock.model.rowCount())]
     assert notes and all(n.startswith("衛星の障害の影響あり（使えない方向）") for n in notes), notes
     assert "衛星の障害の影響あり 2 件（予定は変えない" in dock.status.text()
@@ -232,7 +232,7 @@ def test_shots_handed_to_a_stopped_system_are_marked(plugin):
     dock.calendar.setSelectedDate(QDate(day.year, day.month, day.day))
     dock.show()
     dock.reload(refresh=True)
-    assert wait_for(lambda: dock._loaded and dock.task is None and dock.day == day.isoformat() and dock.outages), dock.status.text()
+    assert wait_for(lambda: dock._loaded and not dock.busy and dock.day == day.isoformat() and dock.outages), dock.status.text()
     notes = [dock.model.item(i, SCHEDULE_COLUMNS.index("理由")).text() for i in range(dock.model.rowCount())]
     assert notes and all(n.startswith("システムの障害の影響あり（受付停止）") for n in notes), notes
     assert "システムの障害の影響あり 2 件（予定は変えない" in dock.status.text(), dock.status.text()

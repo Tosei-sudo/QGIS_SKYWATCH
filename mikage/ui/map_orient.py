@@ -156,11 +156,12 @@ class MapOrienter(QObject):
         return None
 
     def unload(self) -> None:
-        for signal, slot in ((self.project.layersWillBeRemoved, self._removed), (self.project.removeAll, self.forget),
-                             (self.project.readProject, self.forget), (self.canvas.destinationCrsChanged, self._crs_changed),
-                             (self.canvas.rotationChanged, self._rotation_changed)):
+        # (the map may be gone already: a dock deleted after it lets go then)
+        for source, signal, slot in ((self.project, "layersWillBeRemoved", self._removed), (self.project, "removeAll", self.forget),
+                                     (self.project, "readProject", self.forget), (self.canvas, "destinationCrsChanged", self._crs_changed),
+                                     (self.canvas, "rotationChanged", self._rotation_changed)):
             try:
-                signal.disconnect(slot)
+                getattr(source, signal).disconnect(slot)
             except (TypeError, RuntimeError):
                 pass
         try:
@@ -334,18 +335,34 @@ class MapOrienter(QObject):
 
 
 def shared_orienter(canvas, user) -> MapOrienter:
-    """The map's MapOrienter, held by `user` (a dock) until `release_orienter`: one north arrow, one map to put back."""
+    """
+    The map's MapOrienter, held by `user` (a dock) until `release_orienter`
+    (or until the dock itself is deleted): one north arrow, one map to put back.
+    """
     o = _SHARED.get(id(canvas))
     if o is None or o.canvas is not canvas or not o.users:
         o = MapOrienter(canvas)
         _SHARED[id(canvas)] = o
-    o.users.add(id(user))
+    key = id(user)
+    if key not in o.users:
+        o.users.add(key)
+        # A dock deleted without letting go (closed by QGIS, a test's): let go then, or the orienter would go on
+        # answering the project's signals (layers removed, a project read) for a map no dock shows any more.
+        destroyed = getattr(user, "destroyed", None)
+        if destroyed is not None:
+            destroyed.connect(lambda *_a, o=o, key=key: _let_go(o, key))
     return o
 
 
 def release_orienter(orienter: MapOrienter, user) -> None:
     """`user` no longer needs the orienter: the last one unloads it."""
-    orienter.users.discard(id(user))
+    _let_go(orienter, id(user))
+
+
+def _let_go(orienter: MapOrienter, key: int) -> None:
+    if key not in orienter.users:
+        return
+    orienter.users.discard(key)
     if not orienter.users:
         if _SHARED.get(id(orienter.canvas)) is orienter:
             del _SHARED[id(orienter.canvas)]

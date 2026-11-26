@@ -355,7 +355,18 @@ def test_one_orienter_for_a_map_until_the_last_dock_lets_go():
 
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     assert not canvas.findChildren(NorthArrow)
-    assert shared_orienter(canvas, catalog) is not o
+    again = shared_orienter(canvas, catalog)
+    assert again is not o
+    release_orienter(again, catalog)
+    # A dock deleted without letting go: let go then (no orienter left answering the project for it).
+    from qgis.PyQt.QtWidgets import QWidget
+
+    dock = QWidget()
+    held = shared_orienter(canvas, dock)
+    dock.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    assert not held.users and shared_orienter(canvas, catalog) is not held
+    release_orienter(shared_orienter(canvas, catalog), catalog)
 
 
 def test_the_toolbar_of_its_own_turns_the_map_and_switches_the_correction_and_dra(opened, plugin):  # noqa: F811

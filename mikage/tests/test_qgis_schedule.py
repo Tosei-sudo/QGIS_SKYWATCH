@@ -106,7 +106,7 @@ def test_the_days_plan_answered_by_hand_and_by_file(plugin):
     dock = p.api.schedule
     assert dock.windowTitle() == "撮像予定"
     dock.show()
-    assert wait_for(lambda: dock._loaded and dock.task is None), dock.status.text()
+    assert wait_for(lambda: dock._loaded and not dock.busy), dock.status.text()
     assert dock.day == today.isoformat() and len(dock.rows) == 3
     # Unless chosen otherwise, all but 見送り (tsudo, 2026-11-16: 「初期値を、見送り以外にしてほしい」).
     assert dock.state_filter.text() == "見送り以外" and dock.state_filter.chosen() == ["採用", "不明", "不採用", "要求外"]
@@ -127,7 +127,7 @@ def test_the_days_plan_answered_by_hand_and_by_file(plugin):
     assert dock.adopt_button.isEnabled()
     dock.reason.setText("電話で確認")
     dock.adopt_button.click()
-    assert wait_for(lambda: dock.task is None and "採用 1 件を記録" in dock.status.text()), dock.status.text()
+    assert wait_for(lambda: not dock.busy and "採用 1 件を記録" in dock.status.text()), dock.status.text()
     assert states(dock)[("東京湾", "SYS-A")] == "採用"
     tokyo = next(r for r in history.rows if r["attributes"]["REQ_NAME"] == "東京湾")["attributes"]
     assert (tokyo["ADOPTION"], tokyo["ADOPTION_REASON"], tokyo["ADOPTION_SOURCE"]) == ("採用", "電話で確認", "手入力")
@@ -142,7 +142,7 @@ def test_the_days_plan_answered_by_hand_and_by_file(plugin):
     dock.system_filter.setCurrentIndex(dock.system_filter.findData("SYS-A"))
     assert {r.system for r in dock.shown} == {"SYS-A"}
     dock.import_file(str(path), ask=False)
-    assert wait_for(lambda: dock.task is None and "a_result.csv: " in dock.status.text()), dock.status.text()
+    assert wait_for(lambda: not dock.busy and "a_result.csv: " in dock.status.text()), dock.status.text()
     assert states(dock) == {("東京湾", "SYS-A"): "不採用", ("定常 東京", "SYS-A"): "要求外", ("定常 2", "SYS-A"): "要求外"}
     # The day's tally is of every system (SYS-B's 大阪湾 still awaited); the list of SYS-A's only.
     assert dock.status.text() == (f"{today.isoformat()}: 計画 2（要求外 2）・不明 1・不採用 1・見送り 1（表示 3 件）。"
@@ -151,7 +151,7 @@ def test_the_days_plan_answered_by_hand_and_by_file(plugin):
     assert own.planned_at is not None and _when(own.planned_at).endswith("10:30") and own.rings
     # Read again: its 要求外 rows replaced, not doubled.
     dock.import_file(str(path), ask=False)
-    assert wait_for(lambda: dock.task is None and dock.status.text().count("a_result.csv") == 1), dock.status.text()
+    assert wait_for(lambda: not dock.busy and dock.status.text().count("a_result.csv") == 1), dock.status.text()
     assert sum(1 for r in history.rows if r["attributes"]["RESULT"] == "要求外") == 2
 
     # The state filter, and the words.
@@ -178,7 +178,7 @@ def test_the_days_plan_answered_by_hand_and_by_file(plugin):
     dialog._extent_drawn(QgsRectangle(135.0, 34.0, 135.2, 34.2))
     assert dialog.area_label.text() == "範囲あり"
     dialog.save()
-    assert wait_for(lambda: dock.task is None and "要求外「B 定常」を追加" in dock.status.text()), dock.status.text()
+    assert wait_for(lambda: not dock.busy and "要求外「B 定常」を追加" in dock.status.text()), dock.status.text()
     mine = next(r for r in dock.rows if r.name == "B 定常")
     assert (mine.system, mine.adoption_source, mine.result) == ("SYS-B", "手入力", "要求外") and mine.rings
     assert jst_day(mine.planned_at) == today
@@ -186,7 +186,7 @@ def test_the_days_plan_answered_by_hand_and_by_file(plugin):
     dock.table.selectRow(gone)
     assert dock.delete_button.isEnabled()
     dock.delete_unrequested(ask=False)
-    assert wait_for(lambda: dock.task is None and "要求外 1 件を削除" in dock.status.text()), dock.status.text()
+    assert wait_for(lambda: not dock.busy and "要求外 1 件を削除" in dock.status.text()), dock.status.text()
     assert "定常 2" not in {r.name for r in dock.rows}
 
     # As a layer, coloured by state.
@@ -195,7 +195,7 @@ def test_the_days_plan_answered_by_hand_and_by_file(plugin):
     assert {c.value() for c in layer.renderer().categories()} == {"採用", "不明", "不採用", "見送り", "要求外"}
     # Another day: nothing planned.
     dock.set_day(today + timedelta(days=3))
-    assert wait_for(lambda: dock.task is None and dock.day == (today + timedelta(days=3)).isoformat())
+    assert wait_for(lambda: not dock.busy and dock.day == (today + timedelta(days=3)).isoformat())
     assert dock.rows == [] and dock.status.text().endswith("計画なし") and dock.overlay._painted == []
     dock.close_all()
 
@@ -221,7 +221,7 @@ def test_a_json_file_read_by_the_systems_schema(plugin):
     (tmp_path / "b.result.schema.json").write_text(json.dumps(B_SCHEMA), encoding="utf-8")
     dock = p.api.schedule
     dock.show()
-    assert wait_for(lambda: dock._loaded and dock.task is None), dock.status.text()
+    assert wait_for(lambda: dock._loaded and not dock.busy), dock.status.text()
     at = int(time.time() * 1000)
     path = tmp_path / "b_answer.json"
     path.write_text(json.dumps({"planDate": today.strftime("%Y%m%d"), "results": [
@@ -229,7 +229,7 @@ def test_a_json_file_read_by_the_systems_schema(plugin):
         encoding="utf-8")
     dock.system_filter.setCurrentIndex(dock.system_filter.findData("SYS-B"))
     dock.import_file(str(path), ask=False)
-    assert wait_for(lambda: dock.task is None and "b_answer.json: " in dock.status.text()), dock.status.text()
+    assert wait_for(lambda: not dock.busy and "b_answer.json: " in dock.status.text()), dock.status.text()
     assert states(dock) == {("大阪湾", "SYS-B"): "不採用", ("Z-9", "SYS-B"): "要求外"}
     osaka = next(r for r in dock.rows if r.name == "大阪湾")
     assert (osaka.adoption_reason, osaka.adoption_source) == ("衛星の都合", "b_answer.json")
@@ -239,7 +239,7 @@ def test_a_json_file_read_by_the_systems_schema(plugin):
     reading = []
     dock._confirm_reading = lambda r, label: reading.append(r) or False
     dock.import_file(str(path))
-    assert wait_for(lambda: dock.task is None and reading), dock.status.text()
+    assert wait_for(lambda: not dock.busy and reading), dock.status.text()
     assert reading[0].problems == ["スキーマ: $.results[0].state: 'MAYBE' は ['ACCEPT', 'REJECT', 'PENDING'] 以外",
                                    "1 行目: 採否「MAYBE」が不明（列の読み替え map に MAYBE=採用 のように書く）"]
     dock.close_all()
@@ -257,7 +257,7 @@ def test_an_old_history_table_says_what_it_lacks(plugin, monkeypatch):
         r["geometry"] = None
     dock = p.api.schedule
     dock.show()
-    assert wait_for(lambda: dock._loaded and dock.task is None), dock.status.text()
+    assert wait_for(lambda: dock._loaded and not dock.busy), dock.status.text()
     assert "（管理者に連絡: 出力履歴の ADOPTION・ADOPTION_REASON・PLANNED_AT・EXTERNAL_ID・ADOPTION_SOURCE）" in dock.status.text()
     assert not dock.import_button.isEnabled() and not dock.add_button.isEnabled()
     dock.state_filter.choose([])
@@ -292,9 +292,9 @@ def test_set_day_reads_the_day(plugin):
     written(history, day.isoformat())
     dock = p.api.schedule
     dock.show()
-    assert wait_for(lambda: dock._loaded and dock.task is None)
+    assert wait_for(lambda: dock._loaded and not dock.busy)
     dock.set_day(day)
-    assert wait_for(lambda: dock.task is None and dock.day == day.isoformat())
+    assert wait_for(lambda: not dock.busy and dock.day == day.isoformat())
     assert {r.name for r in dock.rows} == {"東京湾", "大阪湾", "横浜"}
     dock.close_all()
 
@@ -315,7 +315,7 @@ def test_the_image_of_a_plan_taken_is_shown(plugin):
             a.update(CAPTURED="未撮像", IMAGE_ID="IMG-OLD")
     dock = p.api.schedule
     dock.show()
-    assert wait_for(lambda: dock._loaded and dock.task is None), dock.status.text()
+    assert wait_for(lambda: dock._loaded and not dock.busy), dock.status.text()
     dock.state_filter.choose([])
     column = COLUMNS.index("画像ID")
     images = {r.name: dock.model.item(i, column).text() for i, r in enumerate(dock.shown)}
@@ -360,7 +360,7 @@ def test_a_result_file_naming_rows_by_their_link_id(plugin):
     assert problems == []
     dock = p.api.schedule
     dock.show()
-    assert wait_for(lambda: dock._loaded and dock.task is None), dock.status.text()
+    assert wait_for(lambda: dock._loaded and not dock.busy), dock.status.text()
     tokyo = next(i for i, r in enumerate(dock.shown) if r.name == "東京湾")
     assert dock.model.item(tokyo, 1).toolTip() == "外部連携ID: TOKYO0000001"
     dock.search.setText("tokyo0000001")
@@ -369,7 +369,7 @@ def test_a_result_file_naming_rows_by_their_link_id(plugin):
     path = tmp_path / "a_link.csv"
     path.write_text("REF,ST\nSW-TOKYO0000001,OK\nSW-yokohama0001,OK\n", encoding="utf-8")
     dock.import_file(str(path), system=system, ask=False)
-    assert wait_for(lambda: dock.task is None and "a_link.csv: " in dock.status.text()), dock.status.text()
+    assert wait_for(lambda: not dock.busy and "a_link.csv: " in dock.status.text()), dock.status.text()
     assert states(dock)[("東京湾", "SYS-A")] == "採用"
     assert f"外部連携IDで {yesterday} の出力の行に照合した 1 行" in dock.status.text()
     earlier = next(r["attributes"] for r in history.rows if r["attributes"].get("LINK_ID") == "YOKOHAMA0001")
@@ -397,7 +397,7 @@ def test_a_result_file_of_another_day_goes_on_its_days(plugin, monkeypatch):
     history.add({k: v for k, v in history_attributes(stray, DEFAULT_HISTORY_FIELDS).items() if v is not None}, None)
     dock = p.api.schedule
     dock.show()
-    assert wait_for(lambda: dock._loaded and dock.task is None), dock.status.text()
+    assert wait_for(lambda: dock._loaded and not dock.busy), dock.status.text()
     assert dock.day == today.isoformat()
     dock.system_filter.setCurrentIndex(dock.system_filter.findData("SYS-A"))
     path = tmp_path / "a_tomorrow.csv"
@@ -408,7 +408,7 @@ def test_a_result_file_of_another_day_goes_on_its_days(plugin, monkeypatch):
     asked = []
     monkeypatch.setattr(schedule_dock, "ask_no", lambda parent, title, text, **_k: asked.append(text) or False)
     dock.import_file(str(path))
-    assert wait_for(lambda: dock.task is None and asked), dock.status.text()
+    assert wait_for(lambda: not dock.busy and asked), dock.status.text()
     assert asked[0].splitlines() == [
         "A・a_tomorrow.csv",
         f"{tomorrow.isoformat()}: 採用 1・不採用 0・要求外 0", f"{later.isoformat()}: 採用 0・不採用 0・要求外 1",
@@ -417,7 +417,7 @@ def test_a_result_file_of_another_day_goes_on_its_days(plugin, monkeypatch):
     assert dock.status.text() == "取り込みを取りやめ"
 
     dock.import_file(str(path), ask=False)
-    assert wait_for(lambda: dock.task is None and f"a_tomorrow.csv（{tomorrow.isoformat()}・{later.isoformat()}）: " in dock.status.text()), \
+    assert wait_for(lambda: not dock.busy and f"a_tomorrow.csv（{tomorrow.isoformat()}・{later.isoformat()}）: " in dock.status.text()), \
         dock.status.text()
     # The file's day is shown, its rows answered there; today's rows are as they were.
     assert dock.day == tomorrow.isoformat() and dock.chosen_day() == tomorrow
@@ -430,7 +430,7 @@ def test_a_result_file_of_another_day_goes_on_its_days(plugin, monkeypatch):
     own = [r["attributes"] for r in history.rows if r["attributes"]["RESULT"] == "要求外"]
     assert [(a["TARGET_DAY"], a["REQ_NAME"]) for a in own] == [(later.isoformat(), "定常 東京")]
     dock.set_day(later)
-    assert wait_for(lambda: dock.task is None and dock.day == later.isoformat())
+    assert wait_for(lambda: not dock.busy and dock.day == later.isoformat())
     assert states(dock) == {("定常 東京", "SYS-A"): "要求外"} and _when(dock.rows[0].planned_at).endswith("10:30")
     dock.close_all()
     # A file of a week, told short (the status line, the confirmation).
@@ -457,7 +457,7 @@ def test_a_plan_taken_in_an_image_rated_unusable_is_marked(plugin):
             r["attributes"].update(CAPTURED="撮像済み", IMAGE_ID="IMG-42", ADOPTION="採用")
     dock = p.api.schedule
     dock.show()
-    assert wait_for(lambda: dock._loaded and dock.task is None), dock.status.text()
+    assert wait_for(lambda: dock._loaded and not dock.busy), dock.status.text()
     dock.state_filter.choose([])
     tokyo = next(i for i, r in enumerate(dock.shown) if r.name == "東京湾")
     taken = dock.model.item(tokyo, COLUMNS.index("撮像"))

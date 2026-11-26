@@ -147,6 +147,24 @@ def test_finds_pixels_off_the_main_thread_with_what_was_read_on_it(tmp_path):
     assert got[0] == pytest.approx(expected, abs=1e-6)
 
 
+def test_forget_closes_the_gdal_datasets_of_placements_still_held(tmp_path):
+    """
+    A placement kept by a dock's records outlived the cache: its GDAL dataset
+    was closed at Python's exit, after QGIS and GDAL, and crashed the process
+    ("corrupted size vs. prev_size", every test passed). The unload closes it.
+    """
+    placement = pixel_place.placement_of(QgsRasterLayer(geo_image(tmp_path / "a.tif"), "a"))
+    before = placement.pixel(139.7, 35.6)
+    worker = threading.Thread(target=lambda: placement.pixel(139.7, 35.6))
+    worker.start()
+    worker.join()
+    assert getattr(placement._local, "ds", None) is not None
+    pixel_place.forget()
+    assert getattr(placement._local, "ds", None) is None and getattr(placement._local, "transformer", None) is None
+    # Made again when needed.
+    assert placement.pixel(139.7, 35.6) == pytest.approx(before)
+
+
 def test_an_image_moved_keeps_its_name_and_time(tmp_path):
     """Before 2026-11-19 an image outside the catalog moved by 位置ずらし was 「<uuid>.vrt」 without its time."""
     path = geo_image(tmp_path / "SCENE_20261003T010000.tif")

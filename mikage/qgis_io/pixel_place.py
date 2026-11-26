@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import math
 import threading
+import weakref
 from dataclasses import dataclass, field
 from typing import Callable, Optional, Sequence
 
@@ -59,6 +60,11 @@ class Placement:
     model_crs: Optional[QgsCoordinateReferenceSystem] = None
 
     def __post_init__(self):
+        self._local = threading.local()
+        _alive.add(self)
+
+    def let_go(self) -> None:
+        """Its GDAL datasets and transformers (of every thread) closed now; made again when next needed."""
         self._local = threading.local()
 
     # ---- GDAL, per thread ----
@@ -217,6 +223,8 @@ def placement_of(layer: QgsRasterLayer, project: Optional[QgsProject] = None) ->
 
 #: Placements read, by layer id: (its source and CRS then, the placement). Main thread only.
 _read: dict[str, tuple] = {}
+#: Every placement made and still held anywhere (`forget` closes their GDAL datasets).
+_alive: weakref.WeakSet[Placement] = weakref.WeakSet()
 
 
 def cached_placement(layer: QgsRasterLayer, project: Optional[QgsProject] = None) -> Optional[Placement]:
@@ -231,8 +239,15 @@ def cached_placement(layer: QgsRasterLayer, project: Optional[QgsProject] = None
 
 
 def forget() -> None:
-    """Drops the placements read (the plugin unloaded: no GDAL dataset is left to Python's exit)."""
+    """
+    Drops the placements read, and closes the GDAL datasets of every one still
+    held (the plugin unloaded: no GDAL dataset is left to Python's exit, where
+    one closed after GDAL itself crashed the process: a placement kept by a
+    dock's records outlived the cache).
+    """
     _read.clear()
+    for placement in list(_alive):
+        placement.let_go()
 
 
 def choose(placements: Sequence[Placement], lon: float, lat: float) -> Optional[Placement]:

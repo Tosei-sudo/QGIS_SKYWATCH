@@ -21,6 +21,7 @@ import traceback
 from typing import Any, Callable, Optional
 
 from qgis.core import Qgis, QgsApplication, QgsFeedback, QgsMessageLog, QgsTask
+from qgis.PyQt.QtCore import QTimer
 
 from ..core import audit, errors
 from ..core.esri import EsriError
@@ -141,10 +142,13 @@ class FunctionTask(QgsTask):
             _current.task = None
 
     def finished(self, ok: bool) -> None:
+        global _answering
         started = time.perf_counter()
+        _answering += 1
         try:
             self._finished(ok)
         finally:
+            _answering -= 1
             took = (time.perf_counter() - started) * 1000
             if took >= SLOW_MS:
                 QgsMessageLog.logMessage(f"{self.description()}: 結果の表示に {took:.0f} ms（その間 QGIS の画面が止まる）",
@@ -232,6 +236,10 @@ def restore_collection() -> None:
 
 #: Running tasks are kept here so Python does not collect them early.
 _running: set[FunctionTask] = set()
+#: How deep the main thread is in tasks' `finished` (their answers being shown); tasks started meanwhile wait in
+#: _after_answer for it to return (`_hand_over`).
+_answering = 0
+_after_answer: list[FunctionTask] = []
 #: Tasks made while QGIS is still starting, started once it has (hold_tasks / release_tasks).
 _held: list[FunctionTask] = []
 _holding = False
@@ -279,9 +287,35 @@ def run_task(description: str, work: Callable[[FunctionTask], Any], done: Option
     task.taskTerminated.connect(lambda: _running.discard(task))
     if _holding:
         _held.append(task)
+    elif _answering:
+        # Started while another task's answer is shown (a question asked again after its SQL failed, the next
+        # step of a chain): handed to QGIS once that `finished` has returned. QGIS 3.34's task manager, cleaning
+        # up the task that finished, takes back from its threads the runnable it kept for it, already deleted by
+        # then; the new task's runnable, made meanwhile, could be at the same address and was taken back
+        # instead, before it ran: the new task stayed queued for good (データに質問 hung once in a few runs
+        # under load, seen with the tasks' addresses).
+        _after_answer.append(task)
+        if len(_after_answer) == 1:
+            QTimer.singleShot(0, _hand_over)
     else:
         QgsApplication.taskManager().addTask(task)
     return task
+
+
+def _hand_over() -> None:
+    """The tasks started while an answer was shown, to QGIS now (one cancelled meanwhile: told so, as QGIS tells it)."""
+    waiting, _after_answer[:] = list(_after_answer), []
+    for task in waiting:
+        if task.discarded:
+            _running.discard(task)
+        elif _holding:
+            _held.append(task)
+        elif task.isCanceled() or task.status() not in (QgsTask.TaskStatus.Queued, QgsTask.TaskStatus.OnHold):
+            _running.discard(task)
+            task.error = task.error or "取消"
+            task.finished(False)
+        else:
+            QgsApplication.taskManager().addTask(task)
 
 
 def cancel_all(wait_ms: int = 5000) -> int:
@@ -290,8 +324,9 @@ def cancel_all(wait_ms: int = 5000) -> int:
     `wait_ms` in all for them to stop (the plugin is unloaded: its docks and
     the local store go next, #88). The number cancelled.
     """
-    held = set(_held)
+    held = set(_held) | set(_after_answer)
     _held.clear()
+    _after_answer.clear()
     for task in held:
         task.discarded = True
         _running.discard(task)

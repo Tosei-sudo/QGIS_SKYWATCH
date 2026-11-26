@@ -418,6 +418,11 @@ class ScheduleDock(PluginDock):
         self._update_buttons()
         return True
 
+    @property
+    def busy(self) -> bool:
+        """Reading or saving, or about to read again (a day chosen while it read): what is shown may still change."""
+        return self.task is not None or self._again.isActive()
+
     def _read_again(self) -> None:
         refresh, then = self._again_args
         self._again_args = (False, None)
