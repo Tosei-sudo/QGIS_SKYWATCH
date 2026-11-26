@@ -23,6 +23,20 @@ the custom properties stay). The image itself is only read.
 - Room: at most `maxGB` (copies not in use go first, least recently used),
   and the disk keeps 5 % (at least 2 GB) free; otherwise the image is read
   from the share as before.
+- An image not copied (an error, no room, changed while copied, the copy
+  cancelled) is read from the share, and not copied again in this QGIS until
+  it changes there (another size or time; 「使っていないコピーを消去」 for no
+  room). Its pyramids were asked for again from the share, which asked for
+  its copy again, without end (tsudo 2026-11-27: 「手元への画像コピーが失敗
+  するときがある」「リトライし続けているならそれもやめてほしい」).
+- Windows: a file just written is read by the antivirus for a while, and a
+  file open in QGIS (a layer, its pixels' GDAL datasets) cannot be removed
+  or replaced. A rename refused is tried again for about 10 s; a copy's
+  folder that cannot be emptied (an older copy still open) is left as it is
+  and the new copy goes beside it (`<name>-2`…); a copy is deleted with its
+  `mikage-copy.json` last, so one partly deleted is never taken as whole and
+  goes the next time room is made; copies still read when the plugin stops
+  (reloaded, updated) are kept whole.
 - The layer remembers the image (ORIGINAL): 観測記録, 開いた画像の履歴, AI
   results and 「前の画像を閉じる」 know it by that place (obs_images.image_path),
   and a project saved names the image, not the copy (project_written).
@@ -46,7 +60,7 @@ from qgis.core import (
 
 from ..core import errors
 from ..core.local_copy import (
-    GB, META, NETWORK_TYPES, CopyInfo, LocalCopyOptions, big_enough, copy_name, meta_of, mount_type, place_key,
+    GB, MB, META, NETWORK_TYPES, CopyInfo, LocalCopyOptions, big_enough, copy_name, meta_of, mount_type, place_key,
     relative_name, reserve_for, root_of, same_folder_files, still_same, to_evict, unc_path,
 )
 from . import overviews_io
@@ -60,6 +74,23 @@ CHUNK = 8 * 1024 * 1024
 
 #: Outcomes of a copy.
 COPIED, NO_ROOM, CHANGED = "copied", "no-room", "changed"
+#: Pauses (s) between tries of a rename Windows refuses (an antivirus reading the file just written, as
+#: core/win64.RENAME_WAITS; a large image takes longer): about 10 s in all.
+REPLACE_WAITS = (0.05, 0.1, 0.2, 0.4, 0.8, 1.5, 3.0, 4.0)
+
+
+def _log(text: str, level=Qgis.MessageLevel.Info) -> None:
+    """A step of the copies in the log (ログメッセージの「MIKAGE」タブ, 「手元のコピー: …」; any thread), to follow what happened
+    (tsudo 2026-11-27: 「できる限り検証のため詳しいログを出しておいて」)."""
+    QgsMessageLog.logMessage(f"{TITLE}: {text}", LOG_TAG, level, notifyUser=False)
+
+
+def _mb(n: int) -> str:
+    return f"{n / 1024 ** 2:,.0f} MB" if n < GB else f"{n / GB:.2f} GB"
+
+
+def _stamp(t: float) -> str:
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(t)) + f".{int(t * 1000) % 1000:03d}"
 
 
 class CopyError(errors.Coded, RuntimeError):
@@ -162,16 +193,30 @@ def network_place(path: str) -> bool:
 
 def wanted(path: str, options: Optional[LocalCopyOptions] = None) -> bool:
     """Whether an image is to be copied: `localCopy` on, on a network folder (or a rewrite says so), at least `minMB`."""
+    return not why_not(path, options)
+
+
+def why_not(path: str, options: Optional[LocalCopyOptions] = None) -> str:
+    """Why an image is not to be copied ('' when it is): as wanted, the reason for the log."""
     options = options or current
-    if not options.enabled or not path or "://" in path or path.startswith("/vsi") or original_of(path):
-        return False
+    if not options.enabled:
+        return "localCopy が false"
+    if not path or "://" in path or path.startswith("/vsi"):
+        return "URL の画像"
+    if original_of(path):
+        return "手元のコピーそのもの"
     choice = place_choice(path)
-    if choice is False or (choice is None and not network_place(path)):
-        return False
+    if choice is False:
+        return "読み替えの localCopy が false"
+    if choice is None and not network_place(path):
+        return "ネットワーク上のフォルダでない"
     try:
-        return big_enough(os.path.getsize(path), options)
-    except OSError:
-        return False
+        size = os.path.getsize(path)
+    except OSError as error:
+        return f"大きさを読めない（{error}）"
+    if not big_enough(size, options):
+        return f"小さい（{_mb(size)}。minMB {options.min_mb}）"
+    return ""
 
 
 # ---- the copies -----------------------------------------------------------------------------------
@@ -189,12 +234,77 @@ def _read_meta(folder: str) -> Optional[CopyInfo]:
         return None
 
 
-def _write_meta(info: CopyInfo) -> None:
+def _write_meta(info: CopyInfo, waits: Sequence[float] = ()) -> None:
     path = os.path.join(info.folder, META)
     part = path + ".part"
     with open(part, "w", encoding="utf-8") as f:
         json.dump(info.to_json(), f, ensure_ascii=False)
-    os.replace(part, path)
+    replace(part, path, waits)
+
+
+def _refused(error: OSError) -> bool:
+    """Whether Windows refused a file in use (by QGIS, or an antivirus reading it): access denied, a sharing violation."""
+    return isinstance(error, PermissionError) or getattr(error, "winerror", None) in (5, 32, 33)
+
+
+def replace(part: str, target: str, waits: Sequence[float] = REPLACE_WAITS,
+            cancelled: Callable[[], bool] = lambda: False) -> None:
+    """os.replace, tried again after each of `waits` while Windows refuses it (a file in use); the last refusal raised."""
+    tries = 0
+    for wait in (*waits, None):
+        try:
+            os.replace(part, target)
+            if tries:
+                _log(f"{os.path.basename(target)} の名前の付け替えが {tries + 1} 回目にできた")
+            return
+        except OSError as error:
+            tries += 1
+            if wait is None or not _refused(error) or cancelled():
+                _log(f"{os.path.basename(part)} → {os.path.basename(target)} の名前の付け替えができない（{tries} 回目、{error}）",
+                     Qgis.MessageLevel.Warning)
+                raise
+            _log(f"{os.path.basename(target)} の名前の付け替えを Windows が拒否（{error}）。{wait:g} 秒待ってやり直す（{tries} 回目）")
+            time.sleep(wait)
+
+
+def drop(folder: str) -> bool:
+    """
+    Deletes a copy's folder, its `mikage-copy.json` last (a folder partly
+    deleted, a file still open on Windows, is never taken as a whole copy:
+    copy_of finds its files missing, and room made later deletes it again).
+    Whether it is gone.
+    """
+    if not os.path.lexists(folder):
+        return True
+    meta = os.path.join(folder, META)
+    left = []
+    for root, dirs, files in os.walk(folder, topdown=False):
+        for name in files:
+            f = os.path.join(root, name)
+            if f == meta:
+                continue
+            try:
+                os.remove(f)
+            except OSError as error:
+                left.append(f"{os.path.relpath(f, folder)}（{error}）")
+        for name in dirs:
+            try:
+                os.rmdir(os.path.join(root, name))
+            except OSError as error:
+                left.append(f"{name}/（{error}）")
+    if not left:
+        try:
+            if os.path.exists(meta):
+                os.remove(meta)
+            os.rmdir(folder)
+        except OSError as error:
+            left.append(str(error))
+    if left:
+        # (Windows: a file still open, in QGIS or its GDAL, or read by an antivirus.)
+        _log(f"{folder} を消せず（使用中のファイル）: " + "、".join(left[:5]) + ("…" if len(left) > 5 else ""),
+             Qgis.MessageLevel.Warning)
+        return False
+    return not os.path.lexists(folder)
 
 
 def _remember(copy: str, original: str) -> None:
@@ -233,24 +343,65 @@ def copy_of(path: str, options: Optional[LocalCopyOptions] = None) -> Optional[s
     options = options or current
     if not options.enabled or not path or "://" in path or path.startswith("/vsi"):
         return None
-    folder = os.path.join(base_folder(options), copy_name(path))
-    info = _read_meta(folder)
-    if info is None or place_key(info.source) != place_key(path):
+    found = []
+    for folder in _folders_of(path, base_folder(options)):
+        info = _read_meta(folder)
+        if info is not None and place_key(info.source) == place_key(path):
+            found.append(info)
+    if not found:
         return None
     try:
         st = os.stat(path)
     except OSError:
         return None
-    if not still_same(info, st.st_size, st.st_mtime):
-        return None
-    if not all(os.path.isfile(os.path.join(folder, *f.split("/"))) for f in info.files):
-        return None
+    # The one used last of those whole and of the image as it is (an older one may be left open: drop).
+    for info in sorted(found, key=lambda i: i.used, reverse=True):
+        if not still_same(info, st.st_size, st.st_mtime):
+            _log(f"{info.folder} は使わない: 共有フォルダの画像が変わった（大きさ {info.size:,} → {st.st_size:,}、"
+                 f"更新日時 {_stamp(info.mtime)} → {_stamp(st.st_mtime)}）")
+            continue
+        missing = [f for f in info.files if not os.path.isfile(os.path.join(info.folder, *f.split("/")))]
+        if missing:
+            _log(f"{info.folder} は使わない: ファイルが欠けている（{'、'.join(missing)}）")
+            continue
+        try:
+            _write_meta(CopyInfo(info.folder, info.source, info.size, info.mtime, info.files, info.bytes, time.time()))
+        except OSError:
+            pass
+        _remember(info.image, info.source)
+        return info.image
+    return None
+
+
+def _folders_of(path: str, base: str) -> list[str]:
+    """The folders an image's copies may be in: `<name>`, and `<name>-2`… made while an older one could not be deleted."""
+    name = copy_name(path)
     try:
-        _write_meta(CopyInfo(info.folder, info.source, info.size, info.mtime, info.files, info.bytes, time.time()))
+        entries = [e.name for e in os.scandir(base) if e.is_dir(follow_symlinks=False)]
     except OSError:
-        pass
-    _remember(info.image, info.source)
-    return info.image
+        return []
+    return [os.path.join(base, n) for n in entries if n == name or (n.startswith(name + "-") and n[len(name) + 1:].isdigit())]
+
+
+def _fresh_folder(path: str, base: str, busy: set) -> str:
+    """
+    An empty folder for an image's new copy: its own (`<name>`), emptied, or
+    when that cannot be (Windows: an older copy still open) or is read now
+    (`busy`), the first of `<name>-2`… that can.
+    """
+    name = copy_name(path)
+    skipped = []
+    for i in range(1, 100):
+        folder = os.path.join(base, name if i == 1 else f"{name}-{i}")
+        if place_key(folder) in busy:
+            skipped.append(f"{os.path.basename(folder)}（表示中）")
+            continue
+        if drop(folder):
+            if skipped:
+                _log(f"{os.path.basename(path)} の前のコピーのフォルダ {'、'.join(skipped)} を空けられないので {folder} にコピー")
+            return folder
+        skipped.append(f"{os.path.basename(folder)}（使用中のファイル）")
+    raise CopyError("手元のフォルダを空けられない", detail=os.path.join(base, name))
 
 
 def copies(folder: Optional[str] = None) -> list[CopyInfo]:
@@ -287,10 +438,12 @@ def clear_unused(project: Optional[QgsProject] = None) -> tuple[int, int]:
     for info in copies():
         if place_key(info.folder) in busy:
             continue
-        shutil.rmtree(info.folder, ignore_errors=True)
-        if not os.path.exists(info.folder):
+        if drop(info.folder):
             n += 1
             size += info.bytes
+    _log(f"使っていないコピーを消去: {n} 件、{_mb(size)}（表示中 {len(busy)} 件は残す）")
+    # Room made: the images not copied for want of it may be tried again.
+    queue.forget(NO_ROOM)
     return n, size
 
 
@@ -313,6 +466,7 @@ def make_copy(path: str, options: LocalCopyOptions, busy: set = frozenset(),
     (in_use). Raises Cancelled when `cancelled()` turns true (nothing is
     left), CopyError when it cannot be copied.
     """
+    started = time.perf_counter()
     try:
         before = os.stat(path)
     except OSError as error:
@@ -334,14 +488,31 @@ def make_copy(path: str, options: LocalCopyOptions, busy: set = frozenset(),
         usage = shutil.disk_usage(base)
     except OSError as error:
         raise CopyError("手元のフォルダを作れない", detail=str(error)) from None
-    evict = to_evict(copies(base), total, int(options.max_gb * GB), set(busy))
+    have = copies(base)
+    evict = to_evict(have, total, int(options.max_gb * GB), set(busy))
     freed = sum(c.bytes for c in evict or [])
+    room = (f"コピー {_mb(total)}、今のコピー {len(have)} 件 {_mb(sum(c.bytes for c in have))}（表示中 {len(busy)} 件）、"
+            f"上限 {options.max_gb:g} GB、ディスクの空き {_mb(usage.free)}（残す {_mb(reserve_for(usage.total))}）")
     if evict is None or usage.free + freed - total < reserve_for(usage.total):
+        _log(f"{os.path.basename(path)} は入らないのでコピーしない: {room}" +
+             ("。表示していないコピーを全部消しても上限を超える" if evict is None else ""), Qgis.MessageLevel.Warning)
         return Outcome(NO_ROOM, path, bytes=total)
-    for old in evict:
-        shutil.rmtree(old.folder, ignore_errors=True)
-    folder = os.path.join(base, copy_name(path))
-    shutil.rmtree(folder, ignore_errors=True)
+    if evict:
+        gone = [old for old in evict if drop(old.folder)]
+        _log(f"場所を空けるため使っていないコピーを {len(gone)} / {len(evict)} 件消去（{_mb(sum(c.bytes for c in gone))}）: "
+             + "、".join(os.path.basename(c.source) for c in evict))
+        try:
+            # As deleted (a copy still open on Windows stays).
+            usage = shutil.disk_usage(base)
+        except OSError:
+            pass
+        if usage.free - total < reserve_for(usage.total):
+            _log(f"{os.path.basename(path)} は入らないのでコピーしない（消せないコピーがある）: ディスクの空き {_mb(usage.free)}",
+                 Qgis.MessageLevel.Warning)
+            return Outcome(NO_ROOM, path, bytes=total)
+    folder = _fresh_folder(path, base, set(busy))
+    _log(f"コピー開始: {path} → {folder}（{len(files)} ファイル {_mb(total)}: {'、'.join(os.path.basename(f) for f in files)}。"
+         f"共有フォルダの画像 {before.st_size:,} バイト、更新日時 {_stamp(before.st_mtime)}。{room}）")
     names = [relative_name(path, f) for f in files]
     done = 0
     try:
@@ -360,25 +531,34 @@ def make_copy(path: str, options: LocalCopyOptions, busy: set = frozenset(),
                     dst.write(chunk)
                     done += len(chunk)
                     progress(min(99.0, done * 99.0 / max(total, 1)))
-            os.replace(part, target)
+            # (Windows: the antivirus reads the file just written, and the rename waits for it.)
+            replace(part, target, REPLACE_WAITS, cancelled)
         after = os.stat(path)
         if not still_same(CopyInfo(folder, path, before.st_size, before.st_mtime, (), 0, 0), after.st_size, after.st_mtime):
-            shutil.rmtree(folder, ignore_errors=True)
+            _log(f"{os.path.basename(path)} はコピー中に共有フォルダで変わった（大きさ {before.st_size:,} → {after.st_size:,}、"
+                 f"更新日時 {_stamp(before.st_mtime)} → {_stamp(after.st_mtime)}）。コピーは消して共有フォルダから表示",
+                 Qgis.MessageLevel.Warning)
+            drop(folder)
             return Outcome(CHANGED, path)
         image = os.path.join(folder, *names[0].split("/"))
         copied = gdal.OpenEx(image, gdal.OF_RASTER | gdal.OF_READONLY)
         ok = copied is not None and (copied.RasterXSize, copied.RasterYSize, copied.RasterCount) == shape
         copied = None
         if not ok:
-            raise CopyError("コピーを画像として読めない", detail=image)
-        _write_meta(CopyInfo(folder, path, before.st_size, before.st_mtime, tuple(names), done, time.time()))
+            raise CopyError("コピーを画像として読めない", detail=f"{image}（{gdal.GetLastErrorMsg() or '大きさかバンド数が違う'}）")
+        _write_meta(CopyInfo(folder, path, before.st_size, before.st_mtime, tuple(names), done, time.time()), REPLACE_WAITS)
     except OSError as error:
-        shutil.rmtree(folder, ignore_errors=True)
+        _log(f"{os.path.basename(path)} のコピーに失敗（{_mb(done)} まで）: {error!r}", Qgis.MessageLevel.Warning)
+        drop(folder)
         raise CopyError(detail=str(error)) from None
-    except BaseException:
-        shutil.rmtree(folder, ignore_errors=True)
+    except BaseException as error:
+        _log(f"{os.path.basename(path)} のコピーを中止（{_mb(done)} まで）: " +
+             ("取り消し" if isinstance(error, Cancelled) else repr(error)), Qgis.MessageLevel.Info)
+        drop(folder)
         raise
     _remember(image, path)
+    took = time.perf_counter() - started
+    _log(f"コピー完了: {image}（{_mb(done)}、{took:.1f} 秒、{done / MB / max(took, 0.001):.0f} MB/秒）")
     progress(100.0)
     return Outcome(COPIED, path, image, done)
 
@@ -401,10 +581,14 @@ def switch_layer(layer: QgsRasterLayer, copy: str, original: str) -> bool:
     layer.setCustomProperty(ORIGINAL, original)
     layer.setDataSource(QgsProviderRegistry.instance().encodeUri("gdal", {"path": copy}), layer.name(), "gdal", options)
     if not layer.isValid():
+        why = layer.error().summary() if layer.error() else ""
         layer.setDataSource(QgsProviderRegistry.instance().encodeUri("gdal", {"path": original}), layer.name(), "gdal", options)
         layer.removeCustomProperty(ORIGINAL)
+        _log(f"レイヤー「{layer.name()}」を手元のコピーに切り替えられず共有フォルダのまま（{copy} を開けない: "
+             f"{why or gdal.GetLastErrorMsg() or '理由不明'}）", Qgis.MessageLevel.Warning)
         ok = False
     else:
+        _log(f"レイヤー「{layer.name()}」を手元のコピーから表示: {copy}")
         ok = True
     if crs.isValid() and layer.crs() != crs:
         layer.setCrs(crs)
@@ -487,8 +671,12 @@ class CopyQueue:
         self._task: Optional[FunctionTask] = None
         self._current: Optional[str] = None
         self.message_bar = None
-        #: Images switched to their copy since the last message.
+        #: Images switched to their copy since the last message: copied now, and copied before (reopened).
         self._switched = 0
+        self._reused = 0
+        #: Images not copied in this QGIS (place_key → (why, size, time of the image then)): read from the share,
+        #: not copied again until the image changes there (tsudo 2026-11-27: 「リトライし続けているならそれもやめてほしい」).
+        self._given_up: dict = {}
         #: The images being copied whose pyramids were asked for (place_key → `overviews`): built once copied.
         self._pyramids: dict = {}
         #: Called with each Outcome, or the error (tests).
@@ -517,20 +705,34 @@ class CopyQueue:
             if not path:
                 continue
             key = place_key(path)
+            name = os.path.basename(path)
             if key in busy:
                 taken.add(key)
                 if pyramids is not None:
                     self._pyramids[key] = pyramids
+                _log(f"{name}（レイヤー「{layer.name()}」）はコピー{'中' if self._current and place_key(self._current) == key else '待ち'}"
+                     "。終わったらこのレイヤーも手元から表示")
                 continue
-            if not wanted(path, options):
+            why = why_not(path, options)
+            if why:
+                if why not in ("ネットワーク上のフォルダでない", "手元のコピーそのもの") or place_choice(path) is not None:
+                    _log(f"{name}（レイヤー「{layer.name()}」）はコピーしない: {why}")
                 continue
             made = copy_of(path, options)
             if made:
                 # Copied before (this QGIS, or kept): read there at once.
+                _log(f"{name}（レイヤー「{layer.name()}」）は前のコピーを使う: {made}")
                 if switch_layers(path, made):
-                    self._switched += 1
+                    self._reused += 1
                     self._tell()
                 continue
+            given = self.given_up(path)
+            if given:
+                _log(f"{name}（レイヤー「{layer.name()}」）は前に手元にコピーできなかったのでコピーしない（{given}）。"
+                     "共有フォルダから表示")
+                continue
+            _log(f"{name}（レイヤー「{layer.name()}」）をコピー待ちに追加（待ち {len(self._waiting) + 1} 件"
+                 f"{'、コピー中 ' + os.path.basename(self._current) if self._current else ''}）")
             self._waiting.append((path, options))
             busy.add(key)
             taken.add(key)
@@ -540,6 +742,37 @@ class CopyQueue:
         if start:
             self._next()
         return taken
+
+    def given_up(self, path: str) -> Optional[str]:
+        """Why an image was not copied in this QGIS (NO_ROOM, CHANGED, an error, "取消"), while it is as it was then; else None."""
+        known = self._given_up.get(place_key(path))
+        if known is None:
+            return None
+        why, size, mtime = known
+        try:
+            st = os.stat(path)
+        except OSError:
+            return why
+        if st.st_size == size and abs(st.st_mtime - mtime) < 2.0:
+            return why
+        # Changed on the share since (replaced, or written to the end): tried again.
+        self._given_up.pop(place_key(path), None)
+        return None
+
+    def forget(self, why: Optional[str] = None) -> None:
+        """The images not copied (for `why`, or all) may be tried again (room made: clear_unused)."""
+        for key, known in list(self._given_up.items()):
+            if why is None or known[0] == why:
+                del self._given_up[key]
+
+    def _give_up(self, path: str, why: str) -> None:
+        try:
+            st = os.stat(path)
+            self._given_up[place_key(path)] = (why, st.st_size, st.st_mtime)
+        except OSError:
+            self._given_up[place_key(path)] = (why, -1, 0.0)
+        _log(f"{os.path.basename(path)} はこの QGIS ではもうコピーしない（{why}）。共有フォルダの画像が変わったら"
+             "またコピーする（空き不足は「使っていないコピーを消去」でも）")
 
     def cancel_all(self) -> None:
         """Stops all (the plugin is unloaded)."""
@@ -557,6 +790,7 @@ class CopyQueue:
         path, options = self._waiting.pop(0)
         self._current = path
         busy = in_use()
+        _log(f"{os.path.basename(path)} のコピーを始める（あと {len(self._waiting)} 件待ち）")
 
         def work(task: FunctionTask) -> Outcome:
             return make_copy(path, options, busy, task.progress, task.isCanceled)
@@ -571,9 +805,18 @@ class CopyQueue:
         bar = self.message_bar
         pyramids = self._pyramids.pop(place_key(path), None) if path else None
         try:
-            switched = switch_layers(outcome.path, outcome.copy) if outcome is not None and outcome.kind == COPIED else []
+            copied = outcome is not None and outcome.kind == COPIED
+            if path and not copied:
+                # Not copied (cancelled too): not tried again for this image as it is now, as its pyramids are asked
+                # for below from the share (which asked for its copy again, and failed again, without end).
+                self._give_up(path, outcome.kind if outcome is not None else (error or "失敗"))
+            switched = switch_layers(outcome.path, outcome.copy) if copied else []
             if switched:
                 self._switched += 1
+            elif copied:
+                _log(f"{name} のコピーはできたが、その画像のレイヤーはもう開いていない（次に開くときに使う）")
+            if error is not None:
+                _log(f"{name} のコピーが終わらず: {error}", Qgis.MessageLevel.Info if error == "取消" else Qgis.MessageLevel.Warning)
             if switched and pyramids is not None:
                 # Its pyramids, from the copy (put beside the image on the share too where they would have gone).
                 overviews_io.queue.request(switched, pyramids, bar)
@@ -591,7 +834,8 @@ class CopyQueue:
             elif error is not None and error != "取消":
                 # The task logged it with its detail.
                 if bar is not None:
-                    bar.pushMessage(TITLE, f"{name} を手元にコピーできない（共有フォルダから表示）: {error}", Qgis.MessageLevel.Warning, 10)
+                    bar.pushMessage(TITLE, f"{name} を手元にコピーできない（共有フォルダから表示。この QGIS ではもうコピーしない）: {error}",
+                                    Qgis.MessageLevel.Warning, 10)
             if self.finished is not None:
                 self.finished(outcome, error)
         finally:
@@ -600,37 +844,58 @@ class CopyQueue:
                 self._tell()
 
     def _tell(self) -> None:
-        """Once nothing is waiting: how many images are now read from this PC."""
-        n, self._switched = self._switched, 0
-        if n and self.pending():
-            self._switched = n
+        """Once nothing is waiting: how many images are now read from this PC (copied now, or copied before)."""
+        if self.pending() or not (self._switched or self._reused):
             return
-        if n and self.message_bar is not None:
-            self.message_bar.pushMessage(
-                TITLE, f"{n} 枚の画像を手元にコピーし、手元から表示（共有フォルダの画像はそのまま。"
-                       f"{'QGIS を閉じると消去' if current.location == 'temp' else '次回も使う'}）",
-                Qgis.MessageLevel.Info, 5)
+        n, again, self._switched, self._reused = self._switched, self._reused, 0, 0
+        if self.message_bar is None:
+            return
+        if n:
+            text = f"{n + again} 枚の画像を手元にコピーし、手元から表示（共有フォルダの画像はそのまま。" \
+                   f"{'QGIS を閉じると消去' if current.location == 'temp' else '次回も使う'}）"
+        else:
+            text = f"{again} 枚の画像を前に手元にコピーしたもので表示（共有フォルダの画像はそのまま）"
+        self.message_bar.pushMessage(TITLE, text, Qgis.MessageLevel.Info, 5)
 
 
 #: The plugin's queue.
 queue = CopyQueue()
 
 
-def end_session() -> int:
+def end_session(project: Optional[QgsProject] = None) -> int:
     """
     Deletes this QGIS's temporary copies (`location` "temp": the plugin is
-    unloaded as QGIS closes). What is still open goes at the next start.
-    How many copies are left.
+    unloaded as QGIS closes). Those still read by a layer are kept whole (the
+    plugin reloaded or updated: they are still copies after; on Windows they
+    could not be deleted anyway), and go at the next start. How many are left.
     """
     if current.location != "temp":
         return 0
     folder = base_folder()
     if not os.path.isdir(folder):
         return 0
-    shutil.rmtree(folder, ignore_errors=True)
+    try:
+        busy = in_use(project)
+    except Exception:  # noqa: BLE001 (QGIS closing)
+        busy = set()
+    try:
+        entries = [e.path for e in os.scandir(folder) if e.is_dir(follow_symlinks=False)]
+    except OSError:
+        entries = []
+    gone = kept = 0
+    for entry in entries:
+        if place_key(entry) in busy:
+            kept += 1
+        elif drop(entry):
+            gone += 1
+    try:
+        if not os.listdir(folder):
+            os.rmdir(folder)
+    except OSError:
+        pass
     left = len(copies(folder)) if os.path.isdir(folder) else 0
-    if left:
-        QgsMessageLog.logMessage(f"手元のコピーのうち使用中の {left} 件は次の起動時に消去（{folder}）", LOG_TAG, Qgis.MessageLevel.Info)
+    _log(f"プラグインの停止: 一時フォルダのコピー {gone} 件を消去、表示中の {kept} 件は残す（{folder}。次の起動時に消去）"
+         if kept else f"プラグインの停止: 一時フォルダのコピー {gone} 件を消去（{folder}）")
     with _copies_lock:
         _copies.clear()
     return left
