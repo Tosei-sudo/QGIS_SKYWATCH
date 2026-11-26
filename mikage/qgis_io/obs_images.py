@@ -121,7 +121,20 @@ def image_path(layer: QgsMapLayer) -> str:
         path = parts.get("path") or parts.get("url") or ""
     except Exception:  # noqa: BLE001
         path = ""
-    return re.sub(r"^/vsicurl/", "", str(path or ""))
+    return _original(re.sub(r"^/vsicurl/", "", str(path or "")))
+
+
+def _original(path: str) -> str:
+    """
+    An image read from its copy on this PC (手元にコピーして見る, localCopy):
+    the image on the share, as records and the history know it (the copy is
+    read for everything else: its metadata, its pixels).
+    """
+    if not path:
+        return path
+    from .local_copy_io import original_of
+
+    return original_of(path) or path
 
 
 def file_name(layer: QgsMapLayer) -> str:

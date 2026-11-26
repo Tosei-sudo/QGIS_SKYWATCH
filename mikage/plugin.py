@@ -29,7 +29,7 @@ from .features.base import Feature, disconnect, icon
 from .plugin_api import OBSERVATION_FUNCTIONS, PluginApi  # noqa: F401 (scripts and tests import them from here)
 from .processing_provider import analysis_algorithm, append_algorithm, cloud_algorithm, detect_algorithm
 from .processing_provider.provider import SatObsProvider
-from .qgis_io import map_tools, network, overviews_io, tasks
+from .qgis_io import local_copy_io, map_tools, network, overviews_io, tasks
 from .qgis_io.context import PluginContext
 from .qgis_io.geometry import to_wgs84
 from .qgis_io.preload import LOG_TAG, Preloader
@@ -677,11 +677,13 @@ class MikagePlugin:
             self.shortcuts.unload()
             self.shortcuts = None
         overviews_io.queue.cancel_all()
-        # overviews.location "temp": its .ovr go as QGIS closes (what is still open, at the next start).
-        try:
-            overviews_io.end_session()
-        except Exception:  # noqa: BLE001 (never keeps the plugin from unloading)
-            pass
+        local_copy_io.queue.cancel_all()
+        # overviews.location "temp": its .ovr go as QGIS closes (what is still open, at the next start); localCopy's too.
+        for end in (overviews_io.end_session, local_copy_io.end_session):
+            try:
+                end()
+            except Exception:  # noqa: BLE001 (never keeps the plugin from unloading)
+                pass
         # Before the docks and the local store go: a task ending later would write into them (#88).
         tasks.cancel_all()
         from .qgis_io import obs_images, pixel_place

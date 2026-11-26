@@ -1,6 +1,7 @@
 """
 地図の描画: 地図の描画を速くする設定 (`rasterSpeed`: GDAL's options, QGIS's once), MIKAGE の速い描画（試作）,
-the overviews of the images added (`overviews`) and complex SAR images shown as amplitude (`complexImages`).
+the overviews of the images added (`overviews`), large images on network folders read from a copy on this PC
+(`localCopy`) and complex SAR images shown as amplitude (`complexImages`).
 """
 from __future__ import annotations
 
@@ -11,7 +12,7 @@ from qgis.PyQt.QtWidgets import QPushButton
 
 from ..core.enhance.api import image_rule_for
 from ..core.raster_speed import shown as shown_option
-from ..qgis_io import complex_sar, fast_draw, overviews_io, raster_speed
+from ..qgis_io import complex_sar, fast_draw, local_copy_io, overviews_io, raster_speed
 from ..qgis_io.preload import LOG_TAG
 from .base import Feature, disconnect, tr
 
@@ -43,6 +44,9 @@ class Rendering(Feature):
         # Images added in any way get overviews too (`overviews.scope` "all"), once the settings file is read;
         # complex SAR images are shown as amplitude first (`complexImages`). Before the docks' own layersAdded (imageRules).
         QgsProject.instance().layersAdded.connect(self._overview_layers_added)
+        # 手元にコピーして見る (`localCopy`): a project saved names the images on the share, not their copies here.
+        QgsProject.instance().writeProject.connect(self._project_written)
+        QgsProject.instance().writeMapLayer.connect(self._layer_written)
 
     def qgis_started(self) -> None:
         self._qgis_started = True
@@ -129,6 +133,7 @@ class Rendering(Feature):
         if self.context is None:
             return
         overviews_io.configure_cache(self.context.config.overviews)
+        local_copy_io.configure(self.context.config.local_copy)
         if not self._overviews_ready:
             self._overviews_ready = True
             # Those added before the settings file was read (a project opened at start): its `location` and `scope` apply.
@@ -159,7 +164,23 @@ class Rendering(Feature):
         """Complex SAR images first get their amplitude VRT (`complexImages`), whose overviews are then built, not those of I and Q."""
         layers = list(layers)
         complex_sar.layers_added(layers, self._complex_mode, self.iface.messageBar())
+        # Large images on network folders, however they were added, copied to this PC to be read there (`localCopy`).
+        local_copy_io.queue.request(layers, self.iface.messageBar())
         overviews_io.layers_added(layers, self.iface.messageBar())
+
+    def _project_written(self, doc) -> None:
+        try:
+            local_copy_io.project_written(doc)
+        except Exception as error:  # noqa: BLE001 (never keeps a project from being saved)
+            QgsMessageLog.logMessage(tr("手元のコピーの画像をプロジェクトに元の場所で書けず: {e}").format(e=error), LOG_TAG,
+                                     Qgis.MessageLevel.Warning)
+
+    def _layer_written(self, layer, element, doc) -> None:
+        try:
+            local_copy_io.layer_written(layer, element, doc)
+        except Exception as error:  # noqa: BLE001 (never keeps a project from being saved)
+            QgsMessageLog.logMessage(tr("手元のコピーの画像をプロジェクトに元の場所で書けず: {e}").format(e=error), LOG_TAG,
+                                     Qgis.MessageLevel.Warning)
 
     def unload(self) -> None:
         # GDAL as it was before the plugin (QGIS's options stay: they are QGIS's own defaults).
@@ -175,3 +196,5 @@ class Rendering(Feature):
             self.fast_draw.deleteLater()
             self.fast_draw = None
         disconnect(QgsProject.instance().layersAdded, self._overview_layers_added)
+        disconnect(QgsProject.instance().writeProject, self._project_written)
+        disconnect(QgsProject.instance().writeMapLayer, self._layer_written)
