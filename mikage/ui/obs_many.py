@@ -386,7 +386,7 @@ class ManyPanel(QGroupBox):
         heading = bearing((lon0, lat0), (lon, lat))
         if not done:
             self.turning = (lon0, lat0, heading)
-            self.dock.draw()
+            self.dock.draw_live()
             return
         self.turning = None
         self.put([(lon0, lat0, heading)])
@@ -600,18 +600,28 @@ class ManyPanel(QGroupBox):
 
     def paint_into(self, s: Scene, color, cursor: Optional[tuple]) -> None:
         """What is being put down, on the map: the things waiting, the drag round, the row laid out, the 見本 under the pointer."""
+        self.paint_waiting(s, color)
+        self.paint_live(s, color, cursor)
+
+    def paint_waiting(self, s: Scene, color) -> None:
+        """The things put down and waiting to be saved (they stay put: painted with the records)."""
         book = self._book()
         image = book.current if book else None
         if image is None or not self.mode:
             return
-        sample = self._sample()
-        c = color(sample.kind)
         for image_id, e, _g in list(self.waiting):
             if image_id == image.id:
                 s.marks.append(Mark("obs", e.lon, e.lat, color(e.kind), "…", ends=ends_of(e.lon, e.lat, e.length, e.heading),
                                     heading=e.heading, outline=outline_of(e.lon, e.lat, e.length, e.width, e.heading)))
-        if not self.dock.active:
+
+    def paint_live(self, s: Scene, color, cursor: Optional[tuple]) -> None:
+        """What follows the pointer: the drag round, the row laid out, the 見本 under the pointer."""
+        book = self._book()
+        image = book.current if book else None
+        if image is None or not self.mode or not self.dock.active:
             return
+        sample = self._sample()
+        c = color(sample.kind)
         if self.mode == "stamp":
             if self.turning is not None:
                 lon, lat, heading = self.turning

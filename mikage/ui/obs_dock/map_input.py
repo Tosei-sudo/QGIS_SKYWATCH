@@ -82,19 +82,31 @@ class MapInputPart:
         if self.rear is not None or (self.area_mode and self.area_corner is not None and self.area_ring is None) or (
                 self.many.mode and self.active and not self.area_mode):
             self.cursor = (lon, lat)
-            self.draw()
+            self.draw_live()
 
     def map_dragged(self, mark: Mark, lon: float, lat: float, done: bool) -> None:
         """A record's mark dragged: its place corrected when let go."""
         if self.book is None or not mark.key:
             return
         if not done:
+            started = self.dragging is None or self.dragging[0] != mark.key
             self.dragging = (mark.key, lon, lat)
-            self.draw()
+            # Once taken off the records' picture, it follows the pointer alone.
+            self.draw() if started else self.draw_live()
             return
-        self.dragging = None
         key = mark.key
-        self.do(self.tr("位置の修正"), lambda b: b.move(key, lon, lat), watch=True)
+        # Shown where it was let go until saved (a shared store saves in a task), then as the book has it.
+        self.dragging = (key, lon, lat)
+
+        def saved(_result=None) -> None:
+            if self.dragging is not None and self.dragging[0] == key:
+                self.dragging = None
+
+        def failed(_message: str) -> None:
+            saved()
+            self.draw()
+
+        self.do(self.tr("位置の修正"), lambda b: b.move(key, lon, lat), saved, watch=True, failed=failed)
 
     def _extent_changed(self) -> None:
         if self.overlay.isVisible():

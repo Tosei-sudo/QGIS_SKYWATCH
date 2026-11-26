@@ -32,6 +32,7 @@ from mikage.tests.qgis_fakes import FakeIface, wait_for  # noqa: E402
 from mikage.features.observations import Observations  # noqa: E402
 from mikage.tests.feature_harness import small_plugin  # noqa: E402
 from mikage.ui.obs_report_dialog import ReportDialog  # noqa: E402
+from mikage.ui.row_buttons import RowButtons  # noqa: E402
 
 URL = "https://example.com/arcgis/rest/services/Obs/FeatureServer/0"
 URL2 = "https://example.com/arcgis/rest/services/Obs2/FeatureServer/0"
@@ -783,10 +784,25 @@ def _chosen_rows(dock) -> list[int]:
     return sorted({i.row() for i in dock.table.selectionModel().selectedRows()})
 
 
+class _PaintedButton:
+    """A button painted in a row of 「この画像」 (ui/row_buttons.py): pressed by a click on it, pressed in as painted."""
+
+    def __init__(self, table, row: int, text: str):
+        self.table, self.row = table, row
+        self.buttons = table.findChild(RowButtons)
+        [self.i] = [i for i, b in enumerate(self.buttons.of(row)) if b.text == text]
+
+    def click(self) -> None:
+        at = self.buttons.rects(self.row)[self.i].center()
+        QTest.mouseClick(self.table.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, at)
+
+    def isChecked(self) -> bool:  # noqa: N802 (as a QToolButton's)
+        return bool(self.buttons.of(self.row)[self.i].checked)
+
+
 def _flow_button(table, row: int):
     """The 「流れ」 button of a row of 「この画像」."""
-    [button] = [b for b in table.cellWidget(row, table.columnCount() - 1).findChildren(QToolButton) if b.text() == "流れ"]
-    return button
+    return _PaintedButton(table, row, "流れ")
 
 
 def test_a_record_clicked_stays_chosen_after_the_read_in_a_task(plugin, tmp_path):

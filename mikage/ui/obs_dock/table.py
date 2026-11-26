@@ -9,22 +9,32 @@ from typing import Any, Callable, Optional
 
 from qgis.PyQt.QtCore import QItemSelection, QItemSelectionModel, Qt
 from qgis.PyQt.QtGui import QColor
-from qgis.PyQt.QtWidgets import QApplication, QHBoxLayout, QTableWidgetItem, QToolButton, QWidget
+from qgis.PyQt.QtWidgets import QApplication, QTableWidgetItem
 
 from ...core.obs.api import Observation, class_by_name, find, kind_of, path_of, quantity_of, read_quantity
 from ..text_assist_ui import SummaryDialog
 from ..obs_overlay import UNSEEN_COLOR
+from ..row_buttons import RowButton
 from .common import REPORTED_ROW, WAITING_ROW
 
 
 class TablePart:
     """観測記録ドックの一覧."""
 
-    def _set_head(self, *names: str) -> None:
+    def _set_head(self, *names: str, rows: int = 0) -> None:
+        """
+        The list emptied with these columns, room made for `rows` rows at
+        once (added one by one, each row cost a pass of the list: 300 rows
+        took a third of a second, tsudo 2026-11-26); `_end_rows` drops the
+        room not filled.
+        """
         self.table.clear()
         self.table.setColumnCount(len(names))
         self.table.setHorizontalHeaderLabels(list(names))
         self.table.setRowCount(0)
+        self.table.setRowCount(rows)
+        self._filled = 0
+        self.row_buttons.clear()
         self._row_actions = []
         self._row_records = []
         self._row_keys = []
@@ -32,11 +42,18 @@ class TablePart:
         self.remove_chosen_button.hide()
         self.alert_add_button.hide()
 
+    def _end_rows(self) -> None:
+        """The rows made room for and not filled dropped (those left out: another 大分類, someone else's)."""
+        if self.table.rowCount() > self._filled:
+            self.table.setRowCount(self._filled)
+
     def _row(self, cells: list, on_click: Optional[Callable] = None, on_double: Optional[Callable] = None,
-             style: str = "", widget: Optional[QWidget] = None, selected: bool = False,
+             style: str = "", buttons: Optional[list[RowButton]] = None, selected: bool = False,
              records: Optional[list[Observation]] = None, reported: bool = False, waiting: bool = False, key: str = "") -> None:
-        r = self.table.rowCount()
-        self.table.insertRow(r)
+        r = getattr(self, "_filled", self.table.rowCount())
+        if r >= self.table.rowCount():
+            self.table.insertRow(r)
+        self._filled = r + 1
         for i, c in enumerate(cells):
             item = QTableWidgetItem("" if c is None else str(c))
             if style == "deleted":
@@ -66,8 +83,8 @@ class TablePart:
                 item.setForeground(QColor("#1e3a8a"))
                 item.setToolTip(self.tr("送信待ち（まだ送っていない）"))
             self.table.setItem(r, i, item)
-        if widget is not None:
-            self.table.setCellWidget(r, self.table.columnCount() - 1, widget)
+        if buttons:
+            self.row_buttons.set_row(r, buttons)
         self._row_actions.append((on_click, on_double))
         self._row_records.append(list(records or []))
         self._row_keys.append(key)
@@ -256,19 +273,6 @@ class TablePart:
         except ValueError:
             return self.tr("数量は 1 以上の整数で入力（「{text}」は読めない）").format(text=text.strip())
 
-    def _small(self, *buttons: tuple) -> QWidget:
-        box = QWidget()
-        lay = QHBoxLayout(box)
-        lay.setContentsMargins(0, 0, 0, 0)
-        for text, tip, slot, *on in buttons:
-            b = QToolButton()
-            b.setText(text)
-            b.setToolTip(tip)
-            if on:
-                # A toggle (「流れ」): pressed while what it shows is shown.
-                b.setCheckable(True)
-                b.setChecked(bool(on[0]))
-                b.setStyleSheet("QToolButton:checked { background: #dbeafe; border: 1px solid #2563eb; color: #1e3a8a; font-weight: bold; }")
-            b.clicked.connect(lambda _on=False, slot=slot: slot())
-            lay.addWidget(b)
-        return box
+    def _small(self, *buttons: tuple) -> list[RowButton]:
+        """A row's buttons (text, tip, slot, and for a toggle like 「流れ」 whether it is pressed), painted in its last cell."""
+        return [RowButton(text, tip, slot, bool(on[0]) if on else None) for text, tip, slot, *on in buttons]

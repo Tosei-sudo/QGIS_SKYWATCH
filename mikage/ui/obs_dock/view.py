@@ -77,9 +77,18 @@ class ViewPart:
             self._read_around()
         if not self.status.text() and book.status:
             self.status.setText(book.status)
+        # The flows, the classification and what carries over: worked out once for the list, the form and the map.
+        outer, self._memo = getattr(self, "_memo", None), {}
+        try:
+            self._render_shown(book, image)
+        finally:
+            self._memo = outer
+
+    def _render_shown(self, book, image) -> None:
+        """The image's list, its counts and buttons, the form's offers, the flow and the map (render, an image chosen)."""
         # Only what the list shows (大分類), which is all 「すべて継続」「すべて消失」 and 「確認範囲内…を消失」 record.
         shown_carry = self._carry_shown()
-        carried = [c for c in book.carried() if shown_carry is None or shown_carry(c)]
+        carried = [c for c in self._once("carried", book.carried) if shown_carry is None or shown_carry(c)]
         inside = book.inside_carried(carried)
         hidden = book.unseen_carried(carried)
         self.carry_label.setText(self.tr("前後の画像のモノ {n} 件").format(n=len(carried)) if carried else "")
@@ -92,10 +101,10 @@ class ViewPart:
         self.unseen_inside_button.setVisible(bool(hidden))
         self.unseen_inside_button.setText(self.tr("不可範囲内 {n} 件を不可に").format(n=len(hidden)))
         self.unseen_area_button.setVisible(book.keeps_unseen_areas())
-        shown = book.records if self.deleted_check.isChecked() else book.living()
+        shown = book.records if self.deleted_check.isChecked() else self._once("living", book.living)
         here = sorted((o for o in shown if image and o.image_id == image.id), key=lambda o: o.object_name)
-        objects = book.flows()
-        taxa = book.taxonomy()
+        objects = self._once("flows", book.flows)
+        taxa = self._once("taxonomy", book.taxonomy)
         every = len([o for o in here if o.deleted_at is None])
         # What the form offers.
         self.objects_model.setStringList(list(dict.fromkeys(f.name for f in objects if f.name)))
@@ -127,16 +136,20 @@ class ViewPart:
         # rows (a car park: 2026-11-18, 300 rows took 20 s) costs a pass over every row per cell.
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        self.table.setUpdatesEnabled(False)
         try:
             self._render_image(here, carried, inside, hidden)
         finally:
             header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+            self.table.setUpdatesEnabled(True)
         self._shown_as = shown_as
         if kept is not None:
             self._choose_rows(*kept)
             # Where the list was scrolled to, too (shown anew, it starts at the top).
             self.table.updateGeometries()
             self.table.verticalScrollBar().setValue(scrolled)
+        else:
+            self.table.verticalScrollBar().setValue(0)
         self._render_flow()
         self.many.follow_book()
         self._show_offline()
@@ -180,8 +193,10 @@ class ViewPart:
     def _render_image(self, here: list[Observation], carried: list[CarryOver], inside: list[CarryOver],
                       hidden: Optional[list[CarryOver]] = None) -> None:
         tr = self.tr
-        self._set_head(tr("モノ"), tr("種別"), tr("活動"), tr("長さ（× 幅）・向き"), tr("備考"), tr("記録者"), tr("更新"), "")
         book = self.book
+        areas = book.image_areas(deleted=self.deleted_check.isChecked())
+        self._set_head(tr("モノ"), tr("種別"), tr("活動"), tr("長さ（× 幅）・向き"), tr("備考"), tr("記録者"), tr("更新"), "",
+                       rows=len(here) + len(carried) + len(areas))
         mine = self.my_names() if self.mine_only.isChecked() else None
 
         def measure(o: Observation) -> str:
@@ -193,39 +208,40 @@ class ViewPart:
         waiting = self.waiting_ids()
         for o in here:
             gone = o.deleted_at is not None
-            widget = self._small((tr("復元"), tr("削除した記録を復元"), lambda o=o: self.restore([o]))) if gone else \
+            buttons = self._small((tr("復元"), tr("削除した記録を復元"), lambda o=o: self.restore([o]))) if gone else \
                 self._small((tr("流れ"), tr("このモノの流れ（帯グラフ・表・地図の軌跡）を一覧の下に表示。もう一度押すと閉じる"),
                              lambda o=o: self.toggle_flow(o.object_id), o.object_id == self.chosen))
             self._row([o.object_name + quantity_mark(o), o.kind, o.activity if o.present else tr(state_text(o)), measure(o), o.note, self._made_by(o),
                        local_time(o.updated_at), ""],
                       None if gone else (lambda o=o: self._open_row(o, editing=o)),
-                      style="deleted" if gone else "unseen" if o.unseen else "", widget=widget, records=[] if gone else [o], reported=o.id in self.reported,
+                      style="deleted" if gone else "unseen" if o.unseen else "", buttons=buttons, records=[] if gone else [o], reported=o.id in self.reported,
                       waiting=o.id in waiting, key=f"o:{o.id}")
         inside_ids = {id(c) for c in inside}
         hidden_ids = {id(c) for c in hidden or []}
         for c in carried:
             s = c.source
-            widget = self._small((tr("継続"), tr("この画像でも継続として記録"), lambda s=s: self.carry(s.object_id, True)),
+            buttons = self._small((tr("継続"), tr("この画像でも継続として記録"), lambda s=s: self.carry(s.object_id, True)),
                                  (tr("消失"), tr("この画像での消失を記録"), lambda s=s: self.carry(s.object_id, False)))
             side = tr("前") if c.side == "before" else tr("後")
             self._row([s.object_name + quantity_mark(s), s.kind, f"{s.activity}（{side}の画像 {local_time(s.image_time)}）", measure(s),
                        tr("不可範囲内（記録なし）") if id(c) in hidden_ids else tr("確認範囲内（記録なし）") if id(c) in inside_ids else "",
                        s.recorded_by, "", ""],
                       lambda s=s: self._open_row(s, source=s),
-                      style="unseen" if id(c) in hidden_ids else "inside" if id(c) in inside_ids else "ghost", widget=widget, key=f"c:{s.object_id}")
-        taxa = book.taxonomy() if self.class_filter else []
-        for a in book.image_areas(deleted=self.deleted_check.isChecked()):
+                      style="unseen" if id(c) in hidden_ids else "inside" if id(c) in inside_ids else "ghost", buttons=buttons, key=f"c:{s.object_id}")
+        taxa = self._once("taxonomy", book.taxonomy) if self.class_filter else []
+        for a in areas:
             if a.kind and not self._shown_kind(a.kind, taxa):
                 continue
             if mine and not is_mine(a.recorded_by, mine):
                 continue
             gone = a.deleted_at is not None
             what = tr("不可範囲") if a.unseen else tr("確認範囲")
-            widget = self._small((tr("復元"), tr("削除した{what}を復元").format(what=what), lambda a=a: self.restore_areas([a]))) if gone else \
+            buttons = self._small((tr("復元"), tr("削除した{what}を復元").format(what=what), lambda a=a: self.restore_areas([a]))) if gone else \
                 self._small((tr("削除"), tr("この不可範囲を削除（中の「不可」の記録も削除）") if a.unseen else tr("この確認範囲を削除"),
                              lambda a=a: self.remove_areas([a])))
             self._row([area_label(a), a.kind, "", "", a.note, a.recorded_by, local_time(a.updated_at), ""], lambda a=a: self._fit_area(a),
-                      style="deleted" if gone else "unseen" if a.unseen else "area", widget=widget, key=f"a:{a.id}")
+                      style="deleted" if gone else "unseen" if a.unseen else "area", buttons=buttons, key=f"a:{a.id}")
+        self._end_rows()
         if self.table.rowCount() == 0:
             self._row([tr("自分の記録なし。「自分の記録のみ」を外すと全員の記録を表示") if mine else
                        tr("該当する記録なし（大分類の絞り込み中）") if self.class_filter else tr("記録なし。「クリック記録」を押して地図をクリック")])
@@ -261,7 +277,7 @@ class ViewPart:
 
     def _render_flow(self) -> None:
         book = self.book
-        rows = [o for o in book.living() if o.object_id == self.chosen] if self.chosen else []
+        rows = [o for o in self._once("living", book.living) if o.object_id == self.chosen] if self.chosen else []
         show = bool(rows)
         self.flow_box.setVisible(show)
         if not show:
@@ -304,7 +320,7 @@ class ViewPart:
         self._render_rekind()
         self.merge_select.clear()
         self.merge_select.addItem(tr("統合先のモノ…"), "")
-        for f in book.flows():
+        for f in self._once("flows", book.flows):
             if f.object_id != flow.object_id:
                 self.merge_select.addItem(f"{f.name}（{f.kind}・{local_time(f.last)}）", f.object_id)
 

@@ -21,13 +21,14 @@ and the record open in the form.
 from __future__ import annotations
 
 import math
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Callable, Optional, Sequence
 
 from qgis.core import QgsPointXY
 from qgis.gui import QgsMapCanvas, QgsMapCanvasItem
 from qgis.PyQt.QtCore import QPointF, QRectF, Qt
-from qgis.PyQt.QtGui import QBrush, QColor, QFont, QFontMetricsF, QPainterPath, QPen, QPolygonF
+from qgis.PyQt.QtGui import QBrush, QColor, QFont, QFontMetricsF, QImage, QPainter, QPainterPath, QPen, QPolygonF
 
 from ..qgis_io.geometry import from_wgs84
 
@@ -94,16 +95,76 @@ class Scene:
     rubber_outline: Optional[list] = None
 
 
+class _Labels:
+    """
+    Each label as painted (its text in its colour inside a white edge) kept
+    as a small picture and pasted again (tsudo 2026-11-26: a few hundred
+    records stuttered): stroking the letters' outlines was 8 tenths of a
+    paint, done again at every move of the map. The same pixels as the
+    letters stroked where they are (but for their place rounded to a pixel).
+    """
+
+    #: Pictures kept (the oldest let go past it): a few hundred records' names, their activities and dates.
+    LIMIT = 4000
+
+    def __init__(self) -> None:
+        self._kept: OrderedDict = OrderedDict()
+
+    def get(self, text: str, color: str, font: QFont, ratio: float) -> tuple[QImage, float, float, float]:
+        """The picture of a label, where its top left lies from the start of its line, and the line's length."""
+        key = (text, color, font.key(), ratio)
+        got = self._kept.get(key)
+        if got is not None:
+            self._kept.move_to_end(key)
+            return got
+        path = QPainterPath()
+        path.addText(QPointF(0, 0), font, text)
+        # The white edge (a 3 px pen) reaches 1.5 px out of the letters; a pixel more for the smoothing.
+        box = path.boundingRect().adjusted(-3, -3, 3, 3)
+        left, top = math.floor(box.left()), math.floor(box.top())
+        width, height = math.ceil(box.right()) - left, math.ceil(box.bottom()) - top
+        image = QImage(max(1, math.ceil(width * ratio)), max(1, math.ceil(height * ratio)), QImage.Format.Format_ARGB32_Premultiplied)
+        image.setDevicePixelRatio(ratio)
+        image.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(image)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.translate(-left, -top)
+        painter.setPen(QPen(QColor("white"), 3))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawPath(path)
+        painter.fillPath(path, QColor(color))
+        painter.end()
+        got = (image, float(left), float(top), QFontMetricsF(font).horizontalAdvance(text))
+        self._kept[key] = got
+        if len(self._kept) > self.LIMIT:
+            self._kept.popitem(last=False)
+        return got
+
+
+_LABELS = _Labels()
+
+
+def _ratio(painter) -> float:
+    """The pixels per point of what is painted on (2 on a screen at 200 %)."""
+    device = painter.device()
+    try:
+        return float(device.devicePixelRatioF()) if device is not None else 1.0
+    except AttributeError:
+        return 1.0
+
+
 def _halo_text(painter, at: QPointF, text: str, color: str, font: QFont, align_left: bool = False) -> None:
     if not text:
         return
-    w = QFontMetricsF(font).horizontalAdvance(text)
-    path = QPainterPath()
-    path.addText(QPointF(at.x() if align_left else at.x() - w / 2, at.y()), font, text)
-    painter.setPen(QPen(QColor("white"), 3))
-    painter.setBrush(Qt.BrushStyle.NoBrush)
-    painter.drawPath(path)
-    painter.fillPath(path, QColor(color))
+    ratio = _ratio(painter)
+    image, left, top, w = _LABELS.get(text, color, font, ratio)
+    x = at.x() if align_left else at.x() - w / 2
+    # On a whole pixel of the screen (pasted between two, it would be smoothed over both).
+    painter.drawImage(QPointF(round((x + left) * ratio) / ratio, round((at.y() + top) * ratio) / ratio), image)
+
+
+#: How far (pixels) past the map's edges a mark is still painted: its label (centred on it) and its ring reach out.
+NEAR_EDGE = 200
 
 
 class ScenePainter:
@@ -125,7 +186,8 @@ class ScenePainter:
     def hollow(self) -> bool:
         return self.style == "outline"
 
-    def paint(self, painter, s: Scene) -> None:
+    def paint(self, painter, s: Scene, view: Optional[QRectF] = None) -> None:
+        """`view`: the part of the painter seen (its pixels); marks far off it are not painted (nor hit)."""
         k = self.scale
         painter.setRenderHint(painter.RenderHint.Antialiasing, True)
         self.painted = []
@@ -150,21 +212,22 @@ class ScenePainter:
             pen.setDashPattern([3, 2])
             painter.setPen(pen)
             painter.drawPolyline(points)
-        for mark in marks:
-            if mark.outline:
-                self._outline(painter, mark.outline, mark.color, mark.role in ("ghost", "slot"))
-        for mark in marks:
-            if mark.ends:
-                self._line(painter, mark)
-        for mark in marks:
-            self._mark(painter, mark)
+        placed = self._placed(marks, view)
+        for mark, _at, _ends, outline in placed:
+            if outline:
+                self._outline(painter, outline, mark.color, mark.role in ("ghost", "slot"))
+        for mark, _at, ends, _outline in placed:
+            if ends:
+                self._line(painter, mark, ends)
+        for mark, at, _ends, _outline in placed:
+            self._mark(painter, mark, at)
         if s.pending:
             self._cross(painter, self.to_pixel(*s.pending))
         if s.first:
             first = self.to_pixel(*s.first)
             self._cross(painter, first)
             if s.rubber_outline:
-                self._outline(painter, s.rubber_outline, "#e11d48", True)
+                self._outline(painter, [self.to_pixel(p[0], p[1]) for p in s.rubber_outline], "#e11d48", True)
             for p in s.placed:
                 self._cross(painter, self.to_pixel(*p))
             if s.placed:
@@ -183,6 +246,29 @@ class ScenePainter:
                 painter.drawLine(first, cursor)
                 mid = QPointF((first.x() + cursor.x()) / 2, (first.y() + cursor.y()) / 2 - 10 * k)
                 _halo_text(painter, mid, s.rubber_label, "#111111", self._bold)
+
+    def _placed(self, marks: Sequence[Mark], view: Optional[QRectF]) -> list[tuple]:
+        """
+        Each mark with its place, its ends and its corners in pixels (worked
+        out once for the three passes), those far off `view` left out: zoomed
+        in on a few of many records, the others cost nothing.
+        """
+        near = view.adjusted(-NEAR_EDGE, -NEAR_EDGE, NEAR_EDGE, NEAR_EDGE) if view is not None else None
+        out = []
+        for m in marks:
+            at = self.to_pixel(m.lon, m.lat)
+            if near is not None and not near.contains(at) and not (m.ends or m.outline):
+                continue
+            ends = (self.to_pixel(*m.ends[0]), self.to_pixel(*m.ends[1])) if m.ends else None
+            outline = [self.to_pixel(p[0], p[1]) for p in m.outline] if m.outline else None
+            if near is not None and not near.contains(at):
+                # A long thing (a ship at a close scale) may cross the map with its middle off it.
+                points = [*(ends or ()), *(outline or ())]
+                xs, ys = [p.x() for p in points], [p.y() for p in points]
+                if not near.intersects(QRectF(QPointF(min(xs), min(ys)), QPointF(max(xs), max(ys)))):
+                    continue
+            out.append((m, at, ends, outline))
+        return out
 
     def _area(self, painter, ring, label: str, color: str, fill: QColor, hatched: bool = False) -> None:
         points = [self.to_pixel(p[0], p[1]) for p in ring]
@@ -203,9 +289,9 @@ class ScenePainter:
             corner = QPointF(min(p.x() for p in points) + 2, min(p.y() for p in points) - 4)
             _halo_text(painter, corner, label, color, self._font, align_left=True)
 
-    def _outline(self, painter, corners, color: str, dashed: bool) -> None:
+    def _outline(self, painter, corners: list[QPointF], color: str, dashed: bool) -> None:
         k = self.scale
-        points = QPolygonF([self.to_pixel(p[0], p[1]) for p in corners])
+        points = QPolygonF(corners)
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.setPen(QPen(QColor("white"), 4 * k))
         painter.drawPolygon(points)
@@ -224,10 +310,9 @@ class ScenePainter:
         painter.drawLine(QPointF(at.x() - r, at.y()), QPointF(at.x() + r, at.y()))
         painter.drawLine(QPointF(at.x(), at.y() - r), QPointF(at.x(), at.y() + r))
 
-    def _line(self, painter, mark: Mark) -> None:
+    def _line(self, painter, mark: Mark, ends: tuple[QPointF, QPointF]) -> None:
         k = self.scale
-        front = self.to_pixel(*mark.ends[0])
-        rear = self.to_pixel(*mark.ends[1])
+        front, rear = ends
         ghost = mark.role in ("ghost", "slot")
         if not self.hollow:
             painter.setPen(QPen(QColor("white"), (4 if ghost else 6) * k))
@@ -254,9 +339,8 @@ class ScenePainter:
             painter.setBrush(QBrush(QColor(255, 255, 255, 150) if ghost else QColor(mark.color)))
         painter.drawPolygon(QPolygonF([tip, left, right]))
 
-    def _mark(self, painter, mark: Mark) -> None:
+    def _mark(self, painter, mark: Mark, at: QPointF) -> None:
         k = self.scale
-        at = self.to_pixel(mark.lon, mark.lat)
         self.painted.append((at, mark))
         color = QColor(mark.color)
         if mark.role == "obs" and mark.unseen:
@@ -329,18 +413,36 @@ class ScenePainter:
 
 
 class ObservationOverlay(QgsMapCanvasItem):
-    """Paints a Scene over the whole canvas."""
+    """
+    Paints a Scene over the whole canvas: the records' part (`scene_`) once
+    as a picture, pasted again while neither it nor the map's extent changes
+    (the canvas paints its items at every move of a drag of the map, every
+    hover while measuring: with a few hundred records each paint took a
+    fifth of a second, tsudo 2026-11-26), and what follows the pointer
+    (`live_`: the line being measured, the place clicked, a record dragged,
+    what 「見本で記録」 puts down) painted over it each time.
+    """
 
     def __init__(self, canvas: QgsMapCanvas, style: str = "normal"):
         super().__init__(canvas)
         self.canvas_ = canvas
         self.scene_ = Scene()
+        self.live_ = Scene()
         self.setZValue(1100)
-        self._painter = ScenePainter(self.to_pixel, style=style if style in STYLES else "normal")
+        style = style if style in STYLES else "normal"
+        self._painter = ScenePainter(self.to_pixel, style=style)
+        self._live_painter = ScenePainter(self.to_pixel, style=style)
+        #: The records' part as last painted: (what it was painted for, the picture or None, where its marks are).
+        self._kept: Optional[tuple] = None
+        #: Bumped when the records' part changes (the picture is painted anew).
+        self._version = 0
+        #: The canvas's CRS from WGS 84 while painting (one for all the points of a paint).
+        self._to_map = None
 
     @property
     def painted(self) -> list[tuple[QPointF, Mark]]:
-        return self._painter.painted
+        kept = self._kept[2] if self._kept is not None else []
+        return [*kept, *self._live_painter.painted]
 
     @property
     def style(self) -> str:
@@ -348,15 +450,27 @@ class ObservationOverlay(QgsMapCanvasItem):
 
     def set_style(self, style: str) -> None:
         """「印」: 'normal', 'outline' or 'hidden' (see the module's note)."""
-        self._painter.style = style if style in STYLES else "normal"
+        style = style if style in STYLES else "normal"
+        self._painter.style = self._live_painter.style = style
         if style == "hidden":
             # Nothing hidden can be clicked or dragged until painted again.
-            self._painter.painted = [p for p in self._painter.painted if p[1].editing]
+            if self._kept is not None:
+                self._kept = (self._kept[0], self._kept[1], [p for p in self._kept[2] if p[1].editing])
+            self._live_painter.painted = [p for p in self._live_painter.painted if p[1].editing]
         self.update()
 
-    def set_scene(self, scene: Scene) -> None:
-        self.scene_ = scene
+    def set_scene(self, scene: Scene, live: Optional[Scene] = None) -> None:
+        """The records' part (painted anew only when it changed) and what follows the pointer (`live`, else nothing)."""
+        if scene != self.scene_:
+            self.scene_ = scene
+            self._version += 1
+        self.live_ = live if live is not None else Scene()
         self.updatePosition()
+        self.update()
+
+    def set_live(self, live: Scene) -> None:
+        """Only what follows the pointer changed: the records' picture is pasted as it was."""
+        self.live_ = live
         self.update()
 
     def updatePosition(self) -> None:  # noqa: N802 (QGIS's name)
@@ -368,7 +482,7 @@ class ObservationOverlay(QgsMapCanvasItem):
         return QRectF(0, 0, size.width(), size.height())
 
     def to_pixel(self, lon: float, lat: float) -> QPointF:
-        transform = from_wgs84(self.canvas_.mapSettings().destinationCrs())
+        transform = self._to_map or from_wgs84(self.canvas_.mapSettings().destinationCrs())
         try:
             p = transform.transform(QgsPointXY(lon, lat))
         except Exception:  # noqa: BLE001 (a place the CRS cannot show)
@@ -387,8 +501,44 @@ class ObservationOverlay(QgsMapCanvasItem):
                 best, best_d = mark, d
         return best
 
+    def _painted_for(self, settings, ratio: float) -> tuple:
+        """What the records' picture shows: its part, the style, the map's extent, size and CRS, the screen's pixels."""
+        extent = settings.visibleExtent()
+        size = self.canvas_.size()
+        return (self._version, self._painter.style, extent, settings.rotation(), settings.outputSize(), settings.destinationCrs(),
+                (size.width(), size.height()), ratio, self.toCanvasCoordinates(extent.center()))
+
+    def _picture(self, ratio: float) -> tuple[Optional[QImage], list]:
+        """The records' part painted on a picture the size of the canvas (None when there is nothing to paint)."""
+        s = self.scene_
+        if not (s.marks or s.areas or s.unseen_areas or s.track or s.tracks or s.pending or s.area_pending or s.first):
+            self._painter.painted = []
+            return None, []
+        rect = self.boundingRect()
+        image = QImage(max(1, math.ceil(rect.width() * ratio)), max(1, math.ceil(rect.height() * ratio)),
+                       QImage.Format.Format_ARGB32_Premultiplied)
+        image.setDevicePixelRatio(ratio)
+        image.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(image)
+        try:
+            self._painter.paint(painter, s, rect)
+        finally:
+            painter.end()
+        return image, list(self._painter.painted)
+
     def paint(self, painter, option=None, widget=None) -> None:
-        self._painter.paint(painter, self.scene_)
+        settings = self.canvas_.mapSettings()
+        self._to_map = from_wgs84(settings.destinationCrs())
+        try:
+            ratio = _ratio(painter)
+            key = self._painted_for(settings, ratio)
+            if self._kept is None or self._kept[0] != key:
+                self._kept = (key, *self._picture(ratio))
+            if self._kept[1] is not None:
+                painter.drawImage(QPointF(0, 0), self._kept[1])
+            self._live_painter.paint(painter, self.live_, self.boundingRect())
+        finally:
+            self._to_map = None
 
 
 def color_of(kind_top: str, kinds: Sequence[str]) -> str:
