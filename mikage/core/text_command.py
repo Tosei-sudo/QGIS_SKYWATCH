@@ -35,7 +35,7 @@ from datetime import date, timedelta
 from typing import Any, Optional, Sequence
 
 from .catalog.api import kinds_in, sensors_named
-from .plan.api import plain, series_of
+from .plan.api import kinds, plain, series_of
 from .text_assist import Message, TextTask
 from .text_request import name_pattern, period_of, satellites_of
 from .text_tasks import period_in
@@ -86,7 +86,7 @@ OPERATIONS: tuple[Operation, ...] = (
     Operation("quotas", "年間上限", "年間撮像上限の消費と残りを見る", "年間撮像上限…",
               ("年間上限", "年間撮像上限", "撮像上限", "上限の残り"), ("year",), True, "年間撮像上限", "開く",
               "「年間撮像上限」をその年で表示"),
-    Operation("catalog", "画像検索", "画像カタログで撮像済みの画像を探す（場所・期間・衛星・SAR/レーダーか光学か）", "画像カタログ",
+    Operation("catalog", "画像検索", "画像カタログで撮像済みの画像を探す（場所・期間・衛星・{kinds}）", "画像カタログ",
               ("画像を探", "画像検索", "画像カタログ", "撮った画像", "画像はある", "画像があるか"), ("place", "period", "sensors"), True,
               "画像カタログ", "検索",
               "「画像カタログ」で、その場所と期間、衛星・種別があればそのセンサーで検索"),
@@ -173,8 +173,13 @@ def by_words(text: str, ops: Sequence[Operation], more: Optional[dict] = None, s
 
 # ---- the model --------------------------------------------------------------------------------------
 
+def described(o: Operation) -> str:
+    """An operation's line for the model, with the kinds in use (画像検索: 「光学かSAR/レーダーかIR/赤外か」)."""
+    return o.describe.replace("{kinds}", kinds().describe())
+
+
 def op_list(ops: Sequence[Operation]) -> str:
-    return "\n".join(f"- {o.name}: {o.describe}" for o in ops) + f"\n- {NONE}: 上のどれにも当たらない・MIKAGE の操作ではない"
+    return "\n".join(f"- {o.name}: {described(o)}" for o in ops) + f"\n- {NONE}: 上のどれにも当たらない・MIKAGE の操作ではない"
 
 
 def command_messages(task: TextTask, ops: Sequence[Operation], text: str) -> list[Message]:
@@ -316,7 +321,9 @@ _NOT_PLACES = {
     "年内", "直近", "最近", "過去", "毎日", "全部", "全て", "すべて", "選んだ記録", "選んだ", "交代", "画面", "地図", "衛星",
     "画像", "記録", "依頼", "撮像", "予定", "計画", "結果", "システム", "観測記録", "撮像予定", "撮像計画", "撮像依頼", "今", "次",
     "前", "後", "分", "日", "週", "月", "年", "上限", "年間上限", "新着", "通報", "障害", "軌道", "雲", "艦船", "船舶", "航空機", "車両",
-    # The kinds of 画像検索 (core/catalog/sensors.py).
+    # 「地図の範囲で」: the map's extent, no place.
+    "範囲", "表示範囲", "地図の範囲",
+    # The kinds of 画像検索 (core/catalog/sensors.py); those of the settings too (place_word: kinds().stop_words()).
     "SAR", "SAR画像", "SAR衛星", "光学", "光学画像", "光学衛星", "レーダー", "レーダー画像", "レーダ画像", "可視", "可視画像",
 }
 _CHUNK = re.compile(r"([一-鿿々〆ヵヶ゠-ヿー・A-Za-z0-9\-]{1,20}?)(?:周辺|付近|近く|一帯|地区)?(?=の|で|を|へ|に|まで|周辺|付近|近く|、|$)")
@@ -334,7 +341,7 @@ def place_word(text: str, known: Sequence[str] = (), others: Sequence[str] = ())
     said = sorted((k for k in known if fold(k) and fold(k) in folded), key=lambda k: len(fold(k)), reverse=True)
     if said:
         return said[0]
-    stop = {fold(w) for w in _NOT_PLACES} | {fold(w) for w in others}
+    stop = {fold(w) for w in _NOT_PLACES} | {fold(w) for w in kinds().stop_words()} | {fold(w) for w in others}
     op_words = [fold(w) for o in OPERATIONS for w in o.words]
     for m in _CHUNK.finditer(re.sub(r"\s+", "", t)):
         word = m[1].strip("・-")
@@ -356,7 +363,7 @@ def sensor_words(text: str, sats: Sequence[Any] = (), values: Sequence[str] = ()
     What a sentence names for 画像カタログ's センサー (core/catalog/sensors.py):
     the satellites and series of the satellite catalog it names (by name, id or
     other name), and the catalog's sensors (`values`) written in it that those
-    do not already give; when it names none of them, its kinds (SAR, 光学).
+    do not already give; when it names none of them, its kinds (光学, SAR, IR: `satelliteKinds`).
     """
     named = satellites_of(text, sats) if sats else None
     out = [*named.satellites, *named.series] if named else []
@@ -401,7 +408,7 @@ class Reading:
     #: A latitude and longitude written (lon, lat).
     point: Optional[tuple[float, float]] = None
     satellites: list[str] = field(default_factory=list)
-    #: 画像検索's 衛星・種別: satellites, series, sensors and kinds (SAR, 光学) as written.
+    #: 画像検索's 衛星・種別: satellites, series, sensors and kinds (光学, SAR, IR …) as written.
     sensors: list[str] = field(default_factory=list)
     #: The catalog's sensors they name (set when it is done: features/command.py).
     catalog_sensors: list[str] = field(default_factory=list)

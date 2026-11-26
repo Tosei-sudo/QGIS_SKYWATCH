@@ -78,9 +78,10 @@ def request_of_ops(ops: Sequence[Opportunity], sats: Sequence[SatelliteSpec], ta
     req.modes = list(dict.fromkeys(s.mode for s in chosen if s.mode))
     # The satellites say what is to be taken; series and systems are not narrowed further.
     req.series = []
-    kinds = {s.sar for s in chosen}
-    req.kind = ("SAR" if kinds == {True} else "光学") if len(kinds) == 1 else "任意"
-    if req.kind != "光学":
+    kinds = {s.kind_name for s in chosen}
+    req.kind = next(iter(kinds)) if len(kinds) == 1 else "任意"
+    # 実施しない雲量 only for satellites clouds stop (光学, IR), every one of them.
+    if not chosen or any(s.sar for s in chosen):
         req.cloud_no_go = None
     req.note = shot_note(ops, sats)
     return req

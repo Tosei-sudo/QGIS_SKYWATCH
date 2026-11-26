@@ -45,6 +45,7 @@ from .plan_timeline import PlanTimeline
 from .last_inputs import InputMemory
 from .list_views import column_menus
 from .satellite_tree import SatelliteTree
+from .satellite_kinds import daylight_names, fill_kinds, kind_combo
 from .plan_dock.satellites import SatellitesPart
 from .plan_dock.targets import TargetsPart
 from .plan_dock.results import ResultsPart
@@ -183,7 +184,7 @@ class ImagingPlanDock(
         more_layout.addWidget(self.tree)
         options = QFormLayout()
         self.daylight = QComboBox()
-        self.daylight.addItem(self.tr("光学衛星は日中のみ"), "optical")
+        self.daylight.addItem(self.tr("{k}衛星は日中のみ").format(k=daylight_names()), "optical")
         self.daylight.addItem(self.tr("考慮なし"), "none")
         options.addRow(self.tr("日照条件"), self.daylight)
         self.min_sun = QDoubleSpinBox()
@@ -267,7 +268,7 @@ class ImagingPlanDock(
         self.paste_per_day.setToolTip(self.tr("24 時間に撮像できる回数。0 は制約なし"))
         self.paste_lead = self._number(0, 10000, 0, self.tr(" 時間"))
         self.paste_lead.setToolTip(self.tr("オーダーできる撮像の最短時間（何時間先から）。それより近い機会は除外。0 は制約なし"))
-        self.paste_sar = QCheckBox(self.tr("SAR（夜間も撮像）"))
+        self.paste_kind = kind_combo()
         for i, (text, widget) in enumerate([
             (self.tr("最大オフナディア角"), self.paste_max), (self.tr("観測幅"), self.paste_swath),
             (self.tr("撮像間隔"), self.paste_gap), (self.tr("1 日の上限（回）"), self.paste_per_day),
@@ -276,8 +277,9 @@ class ImagingPlanDock(
             pasted.addWidget(QLabel(text), i // 2, (i % 2) * 2)
             pasted.addWidget(widget, i // 2, (i % 2) * 2 + 1)
             widget.valueChanged.connect(self.list_sats)
-        pasted.addWidget(self.paste_sar, 2, 2, 1, 2)
-        self.paste_sar.toggled.connect(self.list_sats)
+        pasted.addWidget(QLabel(self.tr("種別")), 2, 2)
+        pasted.addWidget(self.paste_kind, 2, 3)
+        self.paste_kind.currentIndexChanged.connect(self.list_sats)
         more_layout.addLayout(pasted)
         top_layout.addWidget(more)
         top_layout.addStretch(1)
@@ -434,6 +436,9 @@ class ImagingPlanDock(
 
     def _config_changed(self) -> None:
         config = self.context.config
+        # 衛星の種別 (satelliteKinds): the pasted satellites' choice and the words of 日照条件.
+        fill_kinds(self.paste_kind)
+        self.daylight.setItemText(0, self.tr("{k}衛星は日中のみ").format(k=daylight_names()))
         self.catalogs.blockSignals(True)
         self.catalogs.clear()
         for c in config.satellite_catalogs:

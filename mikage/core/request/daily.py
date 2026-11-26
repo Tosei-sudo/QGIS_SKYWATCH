@@ -121,7 +121,7 @@ from datetime import date
 from typing import Optional, Sequence
 
 from ..plan.api import OUTAGE, OUTAGE_WARNING, SYSTEM_WARNING, outage_reason, stopped, system_limits, warning_of
-from ..plan.api import SatelliteSpec, platform_key, satellite_label
+from ..plan.api import ANY_KIND, SatelliteSpec, kinds, platform_key, satellite_label
 from .chances import Chances, clearer_text, scarce_text
 from .covered import Covered, Shares, percent, shares_of, short_day, subtracts
 from .geometry import look_of, mismatch, pass_look, satellite_rank
@@ -182,6 +182,8 @@ class Candidate:
     mixed: bool = False
     #: Set by fitting, for one `mixed`: the cover of the optical passes it was kept off (too cloudy); None when none.
     optical_cloud: Optional[float] = None
+    #: The kinds of the satellites those passes were of (光学, IR), for kind_text.
+    cloudy_kinds: tuple = ()
     #: Whether `cloud` is at the moment of a pass (from the orbits), not the daylight hours' mean.
     timed: bool = False
     #: 期間内1回 with DEADLINE_DAYS or less left (or few chances left, `scarce`): it goes whatever the weather.
@@ -354,11 +356,13 @@ def carries_over(req: ImagingRequest, day: date) -> bool:
 
 
 def wants_weather(req: ImagingRequest, sats: Sequence[SatelliteSpec]) -> bool:
-    """Whether the weather matters: 光学, or 任意 when every satellite that can take it is optical."""
-    if req.kind == "光学":
-        return True
-    if req.kind == "SAR":
-        return False
+    """
+    Whether the weather matters: a kind clouds stop (光学, IR: `satelliteKinds` clouds), or 任意 when every satellite
+    that can take it is of one (none is SAR).
+    """
+    if req.kind and req.kind != ANY_KIND:
+        own = kinds().named(req.kind)
+        return own is not None and own.clouds
     able = fitting(req, sats)
     return bool(able) and all(not s.sar for s in able)
 
@@ -368,7 +372,7 @@ def mixed_kinds(req: ImagingRequest, sats: Sequence[SatelliteSpec]) -> bool:
     Either kind (任意) that optical and SAR satellites can both take: the
     weather picks between them, on its optical passes only (改修案 1).
     """
-    if req.kind != "任意":
+    if req.kind and req.kind != ANY_KIND:
         return False
     able = fitting(req, sats)
     return any(s.sar for s in able) and any(not s.sar for s in able)
@@ -525,7 +529,27 @@ def kind_text(c: Candidate) -> str:
     """Either kind taken by SAR as its optical passes were too cloudy: 「光学は雲量 80% のため SAR」 ("" otherwise)."""
     if not c.mixed or c.result != TAKEN or c.satellite is None or not c.satellite.sar or c.optical_cloud is None:
         return ""
-    return f"光学は雲量 {round(c.optical_cloud)}% のため SAR"
+    return f"{'・'.join(c.cloudy_kinds) or cloudy_names(c)}は雲量 {round(c.optical_cloud)}% のため {c.satellite.kind_name}"
+
+
+def _names_of(c: Optional[Candidate], clouds: bool) -> str:
+    """
+    The kinds (those clouds stop, or not) of the satellites that can take a candidate, in `satelliteKinds` order
+    (all such kinds in use when it has none yet): 「光学」「光学・IR」「SAR」.
+    """
+    own = {s.kind_name for sats in (c.able.values() if c is not None else ()) for s in sats if s.sar != clouds}
+    names = [k.name for k in kinds() if k.clouds == clouds and (not own or k.name in own)]
+    return "・".join(names) or ("光学" if clouds else "SAR")
+
+
+def cloudy_names(c: Optional[Candidate] = None) -> str:
+    """The kinds clouds stop, as said: 「光学」「光学・IR」."""
+    return _names_of(c, True)
+
+
+def clear_names(c: Optional[Candidate] = None) -> str:
+    """The kinds clouds do not stop: 「SAR」."""
+    return _names_of(c, False)
 
 
 def pace_text(c: Candidate) -> str:
@@ -827,6 +851,7 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
                 if c.mixed:
                     told = [o.cloud for o in ops if o.cloud is not None]
                     c.optical_cloud = min(told) if told else None
+                    c.cloudy_kinds = tuple(dict.fromkeys((*c.cloudy_kinds, sat.kind_name)))
                 why.add(CLOUDY)
                 return None
             ops = clear
@@ -946,7 +971,7 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
     def _fit(c: Candidate) -> None:
         c.result, c.reason, c.system, c.satellite = HELD, "", None, None
         c.paced = None
-        c.shots, c.coverage, c.shot_cloud, c.optical_cloud = [], None, None, None
+        c.shots, c.coverage, c.shot_cloud, c.optical_cloud, c.cloudy_kinds = [], None, None, None, ()
         c.warnings = [w for w in c.warnings if not _manual_warning(w)]
         req = c.request
         c.able = {}
@@ -995,6 +1020,7 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
                 if overcast(c, system, sat) and not (c.near or forced):
                     # Either kind, counted: an optical satellite on a cloudy day is left for a SAR one.
                     c.optical_cloud = c.cloud
+                    c.cloudy_kinds = tuple(dict.fromkeys((*c.cloudy_kinds, sat.kind_name)))
                     why.add(CLOUDY)
                     continue
                 scenes = scenes_of(req, *(((sat.swath, sat.length) if req.modes or req.satellites else system.scene_km)))
@@ -1021,9 +1047,10 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
                 c.warnings.append(f"{c.held}（手動で採用）")
             if c.mixed and c.satellite is not None and c.satellite.sar:
                 # Either kind gone to SAR: the optical satellites it passed over for the clouds (kind_text).
-                told = [clearest(c, system, s) for s in able if overcast(c, system, s)]
-                told = [t for t in told if t is not None]
+                over = [s for s in able if overcast(c, system, s)]
+                told = [t for t in (clearest(c, system, s) for s in over) if t is not None]
                 c.optical_cloud = min(told) if told else c.optical_cloud
+                c.cloudy_kinds = tuple(dict.fromkeys((*c.cloudy_kinds, *(s.kind_name for s in over))))
             break
         if c.result != TAKEN:
             c.reason = (NO_SYSTEM if not tried_any else QUOTA if QUOTA in why else USE_DAY if USE_DAY in why
@@ -1182,10 +1209,11 @@ def cloud_tip(c: Candidate) -> str:
     """Where a candidate's cover comes from (the calculation's tooltip)."""
     if c.mixed:
         no_go = round(optical_no_go(c.request))
-        head = f"種別「任意」: 雲量は光学のパスだけに効き、{no_go}% 以上の光学のパスは使わない（SAR には効かない）"
+        cloudy = cloudy_names(c)
+        head = f"種別「任意」: 雲量は{cloudy}のパスだけに効き、{no_go}% 以上の{cloudy}のパスは使わない（{clear_names(c)} には効かない）"
         if c.forecast is None:
             return head if c.satellite is not None and c.satellite.sar else head + "。雲量予報なし"
-        return head + "。" + ("撮像時刻の予報" if c.shot_cloud is not None else "いちばん雲の少ない光学のパスの予報" if c.timed
+        return head + "。" + ("撮像時刻の予報" if c.shot_cloud is not None else f"いちばん雲の少ない{cloudy}のパスの予報" if c.timed
                              else "日中（地方時 9〜15 時）の平均")
     if not c.weather:
         return ""

@@ -27,6 +27,7 @@ from ..core.request.api import requests_of_plan
 from ..core.request.api import first_group, offered
 from ..core.request.api import remembered, with_remembered
 from ..core.request.api import REQUEST_KINDS as KINDS, STATUSES, ImagingRequest, jst_day, priority_text
+from ..core.plan.api import kinds as kinds_in_use
 from ..core.request.api import code_text, field_roles, request_of_row, row_problems
 from ..core.request.api import (RequestStoreConfig, new_request_id, waiting_ids)
 from ..core.request.api import from_area, previous_for
@@ -811,7 +812,7 @@ class RequestDock(PluginDock):
             BulkField("priority", self.tr("優先度"), priority=True, value=first.priority,
                       tip=self.tr("1 が最も高い（最優先 1〜200・高・中・低・最低）"), extra=("reset_boost", self.tr("繰り上げも解除"))),
             BulkField("status", self.tr("状態"), choices=STATUSES, value=first.status),
-            BulkField("kind", self.tr("種別"), choices=KINDS, value=first.kind),
+            BulkField("kind", self.tr("種別"), choices=tuple(KINDS), value=first.kind),
         ]
         known = self.known()
         if known["groupTable"]:
@@ -975,7 +976,8 @@ class RequestDock(PluginDock):
                            satellites=list(dict.fromkeys(s for r in made for s in r.satellites)),
                            modes=list(dict.fromkeys(m for r in made for m in r.modes)),
                            kind=made[0].kind if len(kinds) == 1 else "任意", note="")
-        if template.kind != "光学":
+        own_kind = kinds_in_use().named(template.kind)
+        if own_kind is None or not own_kind.clouds:
             template.cloud_no_go = None
         own = ("start", "end", "satellites", "modes", "kind", "cloud_no_go")
         items = [(r.name, r.rings, r.shape_kind, {"own": {k: getattr(r, k) for k in own}, "note": r.note}) for r in made]

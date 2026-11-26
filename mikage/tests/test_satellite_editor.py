@@ -19,7 +19,7 @@ BLOCK = re.compile(r'(<script type="application/json" id="plugin-constants">\n)(
 def plugin_constants() -> dict:
     """What the tool needs from the plugin, from the plugin's own definitions."""
     from mikage.core import edit_stamp, sign_in, time_zone
-    from mikage.core.plan import modes, names, satellites
+    from mikage.core.plan import kinds, modes, names, satellites
     from mikage.core.request import store
 
     return {
@@ -35,6 +35,7 @@ def plugin_constants() -> dict:
         "editTrackingUpdateRoles": list(edit_stamp.UPDATE_ROLES),
         "timeZoneSources": list(time_zone.TIME_ZONE_SOURCES),
         "signInMethods": [[k, v] for k, v in sign_in.METHODS.items()],
+        "kindNames": list(kinds.DEFAULT_KINDS.names),
     }
 
 

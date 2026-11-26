@@ -33,6 +33,7 @@ from ..qgis_io.pinned_layers import top_index
 from ..qgis_io.plan_layer import memory_layer
 from ..qgis_io.tasks import run_task
 from .docks import PluginDock
+from .satellite_kinds import always_names, daylight_names, fill_kinds, kind_combo
 from .plan_overlay import LabelItem
 from .last_inputs import InputMemory
 from .list_views import column_menus
@@ -224,9 +225,9 @@ class SatellitePassDock(PluginDock):
         more_form.addRow(self.tr("オフナディア角（以下）"), self.max_off_nadir)
         self.daylight = QComboBox()
         self.daylight.addItem(self.tr("考慮なし"), None)
-        self.daylight.addItem(self.tr("光学衛星は日中のみ（太陽高度 10° 以上）"), 10.0)
-        self.daylight.addItem(self.tr("光学衛星は日中のみ（太陽高度 0° 以上）"), 0.0)
-        self.daylight.setToolTip(self.tr("光学衛星の撮像できる範囲を、衛星直下の太陽高度がこの値以上の所だけに限定（SAR は常に表示）"))
+        self.daylight.addItem("", 10.0)
+        self.daylight.addItem("", 0.0)
+        self._daylight_texts()
         self.daylight.currentIndexChanged.connect(self.schedule)
         more_form.addRow(self.tr("日照条件"), self.daylight)
         self.ticks = QCheckBox(self.tr("軌跡に時刻を表示"))
@@ -247,12 +248,12 @@ class SatellitePassDock(PluginDock):
         for key, label in (("both", "左右"), ("right", "右のみ"), ("left", "左のみ")):
             self.paste_side.addItem(self.tr(label), key)
         self.paste_side.currentIndexChanged.connect(self.list_sats)
-        self.paste_sar = QCheckBox("SAR")
-        self.paste_sar.toggled.connect(self.list_sats)
+        self.paste_kind = kind_combo()
+        self.paste_kind.currentIndexChanged.connect(self.list_sats)
         more_form.addRow(self.tr("最大オフナディア角"), self.paste_max)
         more_form.addRow(self.tr("最小オフナディア角"), self.paste_min)
         more_form.addRow(self.tr("向き"), self.paste_side)
-        more_form.addRow(self.paste_sar)
+        more_form.addRow(self.tr("種別"), self.paste_kind)
         self.body.addWidget(more)
 
         self.status = QLabel()
@@ -321,7 +322,16 @@ class SatellitePassDock(PluginDock):
             self.overlay.clear()
             self.canvas.refresh()
 
+    def _daylight_texts(self) -> None:
+        """The words of 日照条件 for the kinds in use (光学 only in daylight; SAR・IR always)."""
+        for i, sun in ((1, 10), (2, 0)):
+            self.daylight.setItemText(i, self.tr("{k}衛星は日中のみ（太陽高度 {s}° 以上）").format(k=daylight_names(), s=sun))
+        self.daylight.setToolTip(self.tr("{k}衛星の撮像できる範囲を、衛星直下の太陽高度がこの値以上の所だけに限定（{a} は常に表示）")
+                                 .format(k=daylight_names(), a=always_names()))
+
     def _config_changed(self) -> None:
+        fill_kinds(self.paste_kind)
+        self._daylight_texts()
         if self.isVisible():
             self.load()
 
@@ -337,7 +347,7 @@ class SatellitePassDock(PluginDock):
     def pasted(self) -> list:
         top = self.paste_max.value() or BUILT_IN_DEFAULTS["maxOffNadir"]
         return satellites_from_text(self.tle.toPlainText(), maxOffNadir=top, minOffNadir=min(top, self.paste_min.value()), swath=BUILT_IN_DEFAULTS["swath"],
-                                    lookSide=self.paste_side.currentData(), sar=self.paste_sar.isChecked())
+                                    lookSide=self.paste_side.currentData(), kind=self.paste_kind.currentData())
 
     def list_sats(self, *_args) -> None:
         """Lists the satellites, keeping which were chosen (pasted ones start chosen; at first only a few satellites)."""

@@ -527,7 +527,8 @@ def request_course(p) -> Course:
           target=lambda: form().level if form() else None, reveal=form_reveal, demo=lambda: _set_level(form(), "高")),
         S("2-4", "撮り方の条件を選ぶ",
           "空欄・「任意」・「指定なし」のままなら、どれでもよいという意味です。必要なところだけ入れます。"
-          "<b>種別</b> は 光学（ふつうの写真。雲があると写らない）・SAR（電波。夜・雲でも撮れる）・任意。<b>衛星</b> は撮る衛星を決めるときだけチェックします。",
+          "<b>種別</b> は 光学（ふつうの写真。雲があると写らない）・SAR（電波。夜・雲でも撮れる）・IR（赤外線。夜も撮れるが雲があると写らない）・任意。"
+          "<b>衛星</b> は撮る衛星を決めるときだけチェックします。",
           target=lambda: [form().kind, form().tree] if form() else None, reveal=form_reveal,
           demo=lambda: form().kind.setCurrentText("光学")),
         S("2-5", "範囲を決める",

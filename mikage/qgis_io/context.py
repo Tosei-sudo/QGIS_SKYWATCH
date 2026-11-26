@@ -25,6 +25,7 @@ from ..core.plan.api import NO_NAMES, SatelliteNames, load_satellite_names
 from ..core.plan.api import Outage, load_outages
 from ..core.edit_stamp import set_tracking
 from ..core.time_zone import set_rules
+from ..core.plan.api import set_kinds
 from . import settings, training_io
 from .network import get_bytes, qgis_transport
 from .tasks import run_task
@@ -81,6 +82,8 @@ class PluginContext(QObject):
         # First of all who hear it: every request after a reload reads dates by the new file's time zones.
         self.configChanged.connect(lambda: set_rules(self.config.time_zones))
         self.configChanged.connect(lambda: set_tracking(self.config.edit_tracking))
+        # 衛星の種別 (`satelliteKinds`): the satellites, requests and sentences read after a reload know the new kinds.
+        self.configChanged.connect(lambda: set_kinds(self.config.satellite_kinds))
         #: The layers' information, kept across the clients (esri()) for ten minutes, and forgotten with the settings.
         self.layer_infos = LayerInfos()
         self.configChanged.connect(self.layer_infos.clear)

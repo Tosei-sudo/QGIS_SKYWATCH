@@ -90,12 +90,19 @@ def use_time_of(value: Any, at: str, problems: list[str]) -> UseTime:
     return UseTime(float(setup), limits["perPass"], limits["perDay"])
 
 
+#: `kind` for a system of every kind.
+ALL_KINDS = ("両方", "すべて", "任意")
+
+
 @dataclass
 class ExportSystem:
     """One entry of `requestExports`."""
     system: str
     label: str
+    #: Its satellites' kinds as written (「両方」: every kind).
     kind: str = "両方"
+    #: Its satellites' kinds (`kind`: one name of `satelliteKinds`, or several in an array); empty: every kind.
+    kinds: tuple = ()
     series: list = field(default_factory=list)
     satellites: list = field(default_factory=list)
     order: float = 0
@@ -217,9 +224,16 @@ def export_system_of(value: Any, problems: list[str], index: int) -> Optional[Ex
         problems.append(f"{at} の format は csv か json で指定")
         fmt = "csv"
     kind = value.get("kind", "両方")
-    if kind not in ("光学", "SAR", "両方"):
-        problems.append(f"{at} の kind は 光学・SAR・両方 のどれかで指定")
-        kind = "両方"
+    if isinstance(kind, str) and kind.strip() in ALL_KINDS or kind in (None, "", []):
+        kind, kinds = "両方", ()
+    elif isinstance(kind, str):
+        kind, kinds = kind.strip(), (kind.strip(),)
+    elif isinstance(kind, list) and kind and all(isinstance(k, str) and k.strip() for k in kind):
+        kinds = tuple(dict.fromkeys(k.strip() for k in kind))
+        kind = "・".join(kinds)
+    else:
+        problems.append(f"{at} の kind は種別の名前（satelliteKinds の name、光学・SAR など）かその配列、または 両方 で指定")
+        kind, kinds = "両方", ()
     limit = {}
     if is_record(value.get("limit")):
         for k in ("count", "scenes"):
@@ -295,6 +309,7 @@ def export_system_of(value: Any, problems: list[str], index: int) -> Optional[Ex
         system=name.strip(),
         label=label if isinstance(label, str) and label else name.strip(),
         kind=kind,
+        kinds=kinds,
         series=_texts(value.get("series")),
         satellites=_texts(value.get("satellites")),
         order=float(value["order"]) if is_number(value.get("order")) else float(index),
