@@ -16,9 +16,10 @@ from typing import Iterable, Optional, Sequence
 from .model import Observation
 
 DAY_MS = 86_400_000
-#: The periods offered (days; 0: since the start of today), 30 days first (tsudo 2026-11-18: 期間の既定 30 日).
-PERIODS = [(30, "30 日"), (7, "7 日"), (0, "今日"), (90, "90 日")]
-DEFAULT_DAYS = 30
+#: The periods offered (days; 0: since the start of today), 7 days first (tsudo 2026-11-18: 期間の既定 30 日;
+#: 2026-11-26: 30 日分は長いので、7 日分を既定に).
+PERIODS = [(7, "7 日"), (30, "30 日"), (0, "今日"), (90, "90 日")]
+DEFAULT_DAYS = 7
 
 
 def same_name(a: str, b: str) -> bool:
