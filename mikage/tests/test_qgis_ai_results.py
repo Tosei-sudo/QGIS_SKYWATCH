@@ -188,6 +188,47 @@ def test_an_image_not_from_the_catalog_reads_by_its_file_name_and_importing_need
     assert dock.status.text() == "画像 IMG2 が観測記録の画像一覧になし（画像を開いて）"
 
 
+def test_the_results_go_just_above_their_image_in_its_group(plugin):
+    """
+    tsudo 2026-11-26: 「前の画像を閉じる」 takes the group of a record's files
+    out once it is empty; the results drawn in it were left there, and the
+    group with them. They go just above their image, in its group, and not in
+    the group of the image chosen before.
+    """
+    from qgis.PyQt.QtWidgets import QApplication
+
+    p, iface, tmp_path = plugin
+    dock = p.api.ai_results
+    project = QgsProject.instance()
+    root = project.layerTreeRoot()
+    # The results of IMG2 read once (shown again from the cache, at once, as the next image is added).
+    dock.load("IMG2")
+    assert wait_for(lambda: "IMG2" in dock.cache)
+    # A record of several files: in its group, below another file (apart: not brought up over it as it is chosen).
+    group = root.addGroup("IMG1")
+    other = QgsRasterLayer(geotiff(tmp_path / "other.tif", "2026-10-01T01:00:00Z", west=141.0), "other")
+    project.addMapLayer(other, False)
+    group.addLayer(other)
+    first = QgsRasterLayer(geotiff(tmp_path / "IMG1.tif", "2026-10-01T01:00:00Z"), "IMG1")
+    first.setCustomProperty(IMAGE_ID, "IMG1")
+    first.setCustomProperty(CATALOG_URL, CATALOG)
+    project.addMapLayer(first, False)
+    group.addLayer(first)
+    iface.setActiveLayer(first)
+    assert wait_for(lambda: dock.image_id == "IMG1" and len(result_layers()) == 2)
+    assert [n.name() for n in group.children()] == ["other", "外部AI結果 船舶検出（IMG1）", "外部AI結果 車両点（IMG1）", "IMG1"]
+    # The next image, added as the catalog adds one (in the layer tree just after the project): its results above it, at the top.
+    second = QgsRasterLayer(geotiff(tmp_path / "IMG2.tif", "2026-10-01T01:00:00Z"), "IMG2")
+    second.setCustomProperty(IMAGE_ID, "IMG2")
+    second.setCustomProperty(CATALOG_URL, CATALOG)
+    project.addMapLayer(second, False)
+    root.insertLayer(0, second)
+    QApplication.processEvents()
+    assert dock.image_id == "IMG2"
+    assert [n.name() for n in group.children()] == ["other", "IMG1"]
+    assert [n.name() for n in root.children()][:2] == ["外部AI結果 船舶検出（IMG2）", "IMG2"]
+
+
 def test_a_result_near_a_thing_of_the_image_before_is_recorded_as_it(plugin):
     p, iface, tmp_path = plugin
     dock = p.api.ai_results

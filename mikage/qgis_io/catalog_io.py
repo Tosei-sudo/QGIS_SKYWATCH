@@ -31,8 +31,8 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Optional, Sequence
 
 from qgis.core import (
-    QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsDistanceArea, QgsFeature, QgsFields, QgsGeometry, QgsLayerMetadata, QgsMapLayer, QgsPointXY,
-    QgsProject, QgsRasterLayer, QgsRectangle, QgsVectorLayer, QgsVectorLayerTemporalProperties, QgsWkbTypes,
+    QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsDistanceArea, QgsFeature, QgsFields, QgsGeometry, QgsLayerMetadata, QgsLayerTreeGroup,
+    QgsMapLayer, QgsPointXY, QgsProject, QgsRasterLayer, QgsRectangle, QgsVectorLayer, QgsVectorLayerTemporalProperties, QgsWkbTypes,
 )
 
 from ..core import audit
@@ -44,9 +44,9 @@ from ..core.catalog.api import CatalogRecord, catalog_info, record_of, sensor_vi
 from ..core.catalog.api import areas_of, areas_of_shape, layer_origin
 from ..core.util import is_number, ms_of
 from . import settings
-from .obs_images import IMAGE_FILE, IMAGE_ID, SATELLITE, image_layer, image_path
+from .obs_images import IMAGE_FILE, IMAGE_ID, SATELLITE, file_name, image_layer, image_path
 from .overviews_io import before_open
-from .pinned_layers import top_index
+from .pinned_layers import is_pinned, top_index
 from .plan_layer import make_field, qdatetime
 
 CATALOG = "satobs/catalog"
@@ -649,24 +649,88 @@ def layers_extent(layers: Sequence[QgsMapLayer], crs: QgsCoordinateReferenceSyst
 def close_layers(layer_ids: Sequence[str], project: Optional[QgsProject] = None) -> int:
     """
     Takes images opened from the catalog out of the project (「前の画像を
-    閉じる」): the layers still there, and the groups add_record_layers made
-    for them once empty. How many layers went.
+    閉じる」): the layers still there, their images' AI results with them
+    (tsudo 2026-11-26 「AI結果レイヤーがある場合は、それも」: results_of_closed),
+    and the groups those were in once that left them empty (「グループレイヤー
+    も」: a record's group, one the image was put in by hand, the groups
+    above those once empty; never a pinned one, nor one where anything else
+    is left). How many image layers went.
     """
     project = project or QgsProject.instance()
     root = project.layerTreeRoot()
     there = [i for i in dict.fromkeys(layer_ids) if project.mapLayer(i) is not None]
-    groups = []
-    for layer_id in there:
+    if not there:
+        return 0
+    going = there + results_of_closed(there, project)
+    groups: list[QgsLayerTreeGroup] = []
+    for layer_id in going:
         node = root.findLayer(layer_id)
         parent = node.parent() if node is not None else None
-        if parent is not None and parent is not root and parent.customProperty(RECORD_GROUP) is not None and parent not in groups:
+        if isinstance(parent, QgsLayerTreeGroup) and parent is not root and not any(parent is g for g in groups):
             groups.append(parent)
-    if there:
-        project.removeMapLayers(there)
-    for group in groups:
-        if not group.children() and group.parent() is not None:
-            group.parent().removeChildNode(group)
+    project.removeMapLayers(going)
+    drop_emptied(groups, root)
     return len(there)
+
+
+def image_id_of(layer: QgsMapLayer) -> str:
+    """The id an image layer goes by (observed_image's: the catalog's, else the file name), as its AI results name it."""
+    return str(layer.customProperty(IMAGE_ID) or "") or file_name(layer)
+
+
+def results_of_closed(layer_ids: Sequence[str], project: Optional[QgsProject] = None) -> list[str]:
+    """
+    The AI results that go with images closed (「前の画像を閉じる」): the
+    layers the 「AI結果」 dock draws for them (external AI results, fetched
+    again when the image opens again) and the plugin's 「物体検出（AI）」
+    layers of those images only. Not while another layer of the same image
+    stays open, not a layer with changes not saved yet, not one with results
+    of other images too; other AI layers (AI 抽出, 分類, 変化抽出) are not
+    results of the dock's and stay.
+    """
+    from .ai_results_io import RESULTS_OF
+    from .detection_results import image_ids_of, is_detection_layer
+
+    project = project or QgsProject.instance()
+    closing = set(layer_ids)
+    layers = list(project.mapLayers().values())
+    images = {image_id_of(layer) for layer in layers if layer.id() in closing} - {""}
+    images -= {image_id_of(layer) for layer in layers if isinstance(layer, QgsRasterLayer) and layer.id() not in closing}
+    if not images:
+        return []
+    out = []
+    for layer in layers:
+        if layer.id() in closing or not isinstance(layer, QgsVectorLayer):
+            continue
+        if layer.isEditable() and layer.isModified():
+            continue
+        of = layer.customProperty(RESULTS_OF)
+        if of is not None:
+            if str(of) in images:
+                out.append(layer.id())
+        elif is_detection_layer(layer):
+            ids = image_ids_of(layer)
+            if ids and set(ids) <= images:
+                out.append(layer.id())
+    return out
+
+
+def drop_emptied(groups: Sequence[QgsLayerTreeGroup], root: QgsLayerTreeGroup) -> None:
+    """
+    Takes out the groups left empty (their layers just removed), and then the
+    groups above them left empty; a pinned group (「一番上に固定」) stays.
+    """
+    gone: list[QgsLayerTreeGroup] = []
+    for group in groups:
+        while group is not root and not any(group is g for g in gone) and not group.children() and not is_pinned(group):
+            parent = group.parent()
+            if parent is None:
+                break
+            gone.append(group)
+            parent.removeChildNode(group)
+            if not isinstance(parent, QgsLayerTreeGroup):
+                break
+            group = parent
 
 
 def remember(layer: QgsMapLayer, record: CatalogRecord, catalog: CatalogConfig, file: Optional[str] = None) -> None:
