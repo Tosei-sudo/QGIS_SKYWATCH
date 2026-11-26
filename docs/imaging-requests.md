@@ -112,7 +112,8 @@ Esri のポリゴンレイヤー（1 依頼 = 1 フィーチャ）。範囲は�
 | lookSide | `LOOK_SIDE` | 右 / 左 / 任意 |
 | orbitDir | `ORBIT_DIR` | 昇交 / 降交 / 任意 |
 | resolution | `RESOLUTION_MAX` | これより細かい分解能（m） |
-| timeOfDay | `TIME_OF_DAY` | 昼 / 夜 / 任意（主に SAR） |
+| timeOfDay | `TIME_OF_DAY` | 昼 / 夜 / 時刻 / 任意（§44） |
+| timeFrom / timeTo | `TIME_FROM` / `TIME_TO` | 時間帯「時刻」の始まり・終わり（日本時間 `HH:MM`。終わりが前なら日をまたぐ。§44。無くても動く） |
 | cloudMax | `CLOUD_NO_GO` | この雲量（%）以上なら実施しない（光学） |
 | timesMin / timesMax / timesGap | `TIMES_MIN` / `TIMES_MAX` / `TIMES_GAP` | 1 日の回数: n 回以上・m 回以下、回と回の間隔（時間）。空なら 1 回・下限と同じ・1 時間（§25） |
 | systems | `SYSTEMS` | 優先するシステムの順番（任意） |
@@ -308,7 +309,8 @@ flowchart TD
 | `seriesSatelliteIds` | 同じ衛星の ID（衛星カタログの `id`、配列） |
 | `satellite` / `satelliteId` / `mode` / `sensor` | 割り当てた衛星 / その ID / モード / センサー |
 | `offNadirMin` / `offNadirMax` / `incidenceMin` / `incidenceMax` | 角度の範囲 |
-| `lookSide` / `orbitDir` / `resolution` / `timeOfDay` | 観測方向 / 軌道方向 / 分解能 / 時間帯 |
+| `lookSide` / `orbitDir` / `resolution` / `timeOfDay` | 観測方向 / 軌道方向 / 分解能 / 時間帯（任意・昼・夜・時刻） |
+| `timeFrom` / `timeTo` | 時間帯「時刻」の始まり・終わり（日本時間 `HH:MM`、入力のまま。「時刻」でない依頼は空。§44） |
 | `cloudMax` / `cloudForecast` / `weatherFlag` | 実施しない雲量 / 雲量予報（%） / 気象の注意 |
 | `scenes` | シーン数（軌道のパスで詰めたときは撮像の連続シーン数、§24） |
 | `passTime` / `passOffNadir` / `passIncidence` / `passDirection` / `passLookSide` | 撮像の時刻・オフナディア角・入射角・軌道方向（昇交・降交）・観測方向（右・左）（§24。軌道なしで詰めた依頼は空） |
@@ -826,7 +828,7 @@ tsudo の質問「撮像依頼からその日の計算のとき、撮像地点�
 ### 24.1 パス（`core/request/passes.py`）
 
 - 「計算」のとき（裏の処理で 1 回だけ）、その日に出しうる依頼ごとに、依頼を撮れる衛星（モード）の軌道（衛星カタログの TLE）から、その日のパスを撮像計画と同じ計算（`core/plan/access.py`）で出す。手で採用・見送り・順番を変えたあとの詰め直しは、このパスを使い回す。
-- 依頼の条件で絞る: オフナディア角の上限・下限、入射角、観測方向（右・左）、軌道方向（昇交・降交）、時間帯（昼: 太陽高度 10° 以上、夜: 太陽が地平線の下。日中のみの種別（`satelliteKinds` の `daylight: true`、既定は光学）の衛星はいつも日中だけ）、その日に依頼が有効な時間（期間の始まり・終わりが日の途中ならそこまで）。衛星の `leadTime`（発注期限、時間）があれば、今から発注の間に合わないパスは除く（撮像計画と同じ）。
+- 依頼の条件で絞る: オフナディア角の上限・下限、入射角、観測方向（右・左）、軌道方向（昇交・降交）、時間帯（昼: 太陽高度 10° 以上、夜: 太陽が地平線の下、時刻: パスの時刻が指定の間（日本時間、§44）。日中のみの種別（`satelliteKinds` の `daylight: true`、既定は光学）の衛星はいつも日中だけ）、その日に依頼が有効な時間（期間の始まり・終わりが日の途中ならそこまで）。衛星の `leadTime`（発注期限、時間）があれば、今から発注の間に合わないパスは除く（撮像計画と同じ）。
 - 範囲の依頼は、それを撮れるどの衛星の 1 回の撮像（幅・連続シーンの長さ）にも収まる大きさなら中心と外形で、より大きければ外形と中に散らした約 60 点で計算する（撮像計画の 600 点より少なくして速くしている）。
 - TLE がない・読めない衛星は軌道を使わず、これまでどおり件数で詰める（読めない TLE はステータスに出す）。システムの `orbit: false` も同じ。
 
@@ -1329,3 +1331,19 @@ tsudo「既存の他に管理できそうなデータ、情報がないか検討
 - **定期照合**: `follow_job.follow_store` も同じ（設定ファイルに `imageReviews` があれば）。
 
 実装: `core/image_reviews.py`（`UnusableImages`・`unusable_over`・`unusable_text`）、`core/request/follow.py`（`follow_up`・`follow_and_save` の `unusable`）、`core/request/follow_job.py`、`ui/plan_results_dialog.py`、`ui/schedule_dock.py`。テスト: `tests/test_image_reviews.py`（`test_the_follow_up_does_not_count_an_image_unusable_over_the_area`）。
+
+## 44. 時間帯を時刻で指定（2026-11-26 追加）
+
+「撮像要求に時間帯の指定を、具体的に何時から何時でできるようにしたい」。設計方針の確認で、時刻は日本時間だけ（現地時刻は作らない）。
+
+- **依頼**: 時間帯の選択肢に「時刻」（任意・昼・夜・時刻）。「時刻」のとき、同じ条件の下に「時刻（日本時間） 10:00 〜 14:00」（最初は 10:00〜14:00。前回保存した依頼の時刻を覚える）。終わりが始まりより前なら日をまたぐ（22:00〜02:00、「（翌日まで。日をまたぐ）」）。始まりと終わりが同じなら保存しない。両端を含む。
+- **台帳**: `TIME_OF_DAY` = `時刻`、`TIME_FROM` / `TIME_TO`（`String(5)`、`10:00`）。属性が無い台帳でも動く（いまの任意・昼・夜のまま）。ただし「時刻」の依頼は保存しない（E704「時間帯の時刻の項目がない」。時刻が落ちて任意として計算されないように）。`TIME_OF_DAY` が `時刻` でも時刻が読めなければ任意。
+- **計算**（`core/request/passes.py` の `_search`）: 昼・夜と同じ所で、パスの時刻（日本時間）が時刻の間にないものを除く。除いたパスは `Passes.off_clock` に残し、ほかにパスがなければ理由は「撮像機会なし（指定の時刻にパスなし）」（`daily.OFF_CLOCK`。上限シミュレーションでは「撮像機会なし」に数える）。1 日の回数・回の間隔・近くの依頼のまとめは時刻の間のパスで今までどおり。日中のみの種別の衛星は時刻が夜にかかっても日中だけ。TLE のない衛星・`orbit: false` のシステム（件数で詰める）は時刻を確かめられないので絞らない（昼・夜と同じ）。
+- **依頼フォームの撮像機会**: 時刻の間のパスだけ数える。範囲の上を通るパスはあるのに時刻の間にないときは「撮像機会なし（今後 14 日、指定の時刻にパスなし）」。
+- **ファイル**: 項目 `timeFrom` / `timeTo`（`HH:MM`）。`timeOfDay` は `時刻`。
+- **依頼の一覧**: 列「時間帯」（任意・昼・夜・「10:00〜14:00」）。メモと同じく最初は非表示（見出しの右クリックで表示）。
+- **レイヤーから取り込み・レイヤーへ書き出し**: `TIME_FROM`・`TIME_TO`（見出し「時刻（から）」「時刻（まで）」）。時間帯の列が無く時刻だけある行は「時刻」。
+- **依頼文から下書き**: コードが「10時から14時」「10:00〜14:00」「午前10時〜午後2時」「午後2時から5時」「22時〜翌2時」「10〜14時」を時間帯「時刻」として読む（「3〜5時間」のような長さ、日付つきの「11/26 10時〜11/28 18時」は読まない）。
+- **撮像計画ドック**（手で引く計画）には足していない。
+
+実装: `core/request/model.py`（`BY_CLOCK`・`ImagingRequest.time_from`/`time_to`/`window`・`clock_minutes`・`clock_text`・`in_window`・`window_text`）、`core/request/passes.py`、`core/request/daily.py`、`core/request/chances.py`、`core/request/store.py`（`_clock_missing`）、`core/request/rows.py`、`core/request/export.py`、`core/request/last.py`、`core/text_request.py`（`clock_of`・`Clock`）、`ui/request_form.py`、`ui/request_dock.py`。テスト: `tests/test_request_time_window.py`。
