@@ -274,7 +274,9 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | `LOOK_SIDE` | 観測方向 | `String(16)` | `任意`・`右`・`左` | `lookSide` |
 | `ORBIT_DIR` | 軌道方向 | `String(16)` | `任意`・`昇交`・`降交` | `orbitDir` |
 | `RESOLUTION_MAX` | 分解能 | `Double` | これより細かい分解能（m） | `resolution` |
-| `TIME_OF_DAY` | 時間帯 | `String(16)` | `任意`・`昼`・`夜` | `timeOfDay` |
+| `TIME_OF_DAY` | 時間帯 | `String(16)` | `任意`・`昼`・`夜`・`時刻`（`時刻` は下の 2 つの時刻の間だけ撮る） | `timeOfDay` |
+| `TIME_FROM` | 時刻（から） | `String(5)` | 時間帯 `時刻` の始まり（日本時間、`10:00`）。無くても動く（時間帯の「時刻」が保存できない） | `timeFrom` |
+| `TIME_TO` | 時刻（まで） | `String(5)` | 時間帯 `時刻` の終わり（日本時間、`14:00`。始まりより前なら日をまたぐ `22:00`〜`02:00`）。無くても動く | `timeTo` |
 | `CLOUD_NO_GO` | 実施しない雲量 | `Integer` | この雲量（%）以上なら実施しない（光学） | `cloudNoGo` |
 | `TIMES_MIN` | 1日の回数下限 | `Integer` | 1 日にこの回数撮れたらその日は達成（別々のパスで。空なら 1）。無くても動く | `timesMin` |
 | `TIMES_MAX` | 1日の回数上限 | `Integer` | 空いた枠があればこの回数まで出す（空なら下限と同じ）。無くても動く | `timesMax` |

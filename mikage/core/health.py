@@ -159,7 +159,8 @@ def check(client: EsriClient, target: Target, stamps: Iterable[str] = (), stamps
     say = result.findings.append
     try:
         if _LAYER.search(target.url):
-            info = client.layer(target.url, refresh=True)
+            # Asked now: a check of the server (not what was kept a minute ago).
+            info = client.layer(target.url, now=True)
             raw = info.raw
         else:
             raw = client.ask(target.url, {})

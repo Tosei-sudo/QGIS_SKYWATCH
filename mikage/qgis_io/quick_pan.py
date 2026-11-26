@@ -27,6 +27,14 @@ a file there is the Processing algorithm 「パンシャープン」).
   another renderer (画像補正's 補正 turned off, QGIS's own style chosen), or
   when it is turned off. A renderer this put on is taken off again when it
   ends, if the correction was not changed meanwhile.
+- 位置ずらし (qgis_io.shift_io) moves the two layers together (ui/shift.py:
+  the other one follows), so the detail stays on the picture (tsudo
+  2026-11-27: 「クイックパンシャープンした状態で位置ずらしがうまくできない」:
+  the move put QGIS's own renderer on for a moment, which ended the link, the
+  pan came back, and the image kept being read from where it was). A move is
+  not an end; once done, the link reads from the new sources; the model is
+  kept when the two are where they were to each other, else fitted again
+  (the image drawn with the model before until then).
 """
 from __future__ import annotations
 
@@ -46,6 +54,7 @@ from ..core.enhance.api import METHODS, PanSharpenModel, fit_model, pan_sharpen,
 from ..core.errors import Coded
 from . import enhance_renderer as er
 from . import fast_draw
+from . import shift_io
 from .pansharpen_io import Overlap, sample_windows
 from .tasks import run_task
 
@@ -168,6 +177,9 @@ class PanLink:
         #: Why the fit failed ("" when it did not).
         self.failed = ""
         self.fitting = False
+        #: Where the multispectral image is from the pan (map units, its CRS): now, and when the model was fitted.
+        self.relative = (0.0, 0.0)
+        self.model_relative: Optional[tuple] = None
         #: The renderer this put on the layer and the one it had, while the correction is as put (taken off at the end).
         self.before: Optional[tuple] = None
         self.lock = threading.Lock()
@@ -210,6 +222,15 @@ class PanLink:
             self.ms_pixel = (ms.extent().width() / max(1, ms.width()), ms.extent().height() / max(1, ms.height()))
             self.pan_extent = pan_extent
             self.pan_pixel = (pan_extent.width() / max(1, pan.width()), pan_extent.height() / max(1, pan.height()))
+            ms_extent = ms.extent()
+            self.relative = (ms_extent.xMinimum() - pan_extent.xMinimum(), ms_extent.yMaximum() - pan_extent.yMaximum())
+
+    def as_fitted(self) -> bool:
+        """Whether the model is there and the two images are where they were to each other when it was fitted."""
+        if self.model is None or self.model_relative is None:
+            return False
+        tolerance = 1e-6 * max(self.pan_pixel[0], self.pan_pixel[1], 1e-12)
+        return all(abs(a - b) <= tolerance for a, b in zip(self.relative, self.model_relative))
 
     # ---- drawing ----
 
@@ -298,14 +319,20 @@ class PanLink:
         fit_ms = np.concatenate(stacks, axis=1)[:, :, None]
         return fit_model(fit_pan, fit_ms, list(range(fit_ms.shape[0])), np.ones(fit_pan.shape, dtype=bool), self.method, "auto")
 
-    def start_fit(self, done: Callable[["PanLink"], None]) -> None:
-        """Fits the model in a task (the image drawn as it is until then); `done(link)` on the main thread when it ends."""
+    def start_fit(self, done: Callable[["PanLink"], None], keep: bool = False) -> None:
+        """
+        Fits the model in a task (the image drawn as it is until then; `keep`:
+        with the model it has); `done(link)` on the main thread when it ends.
+        """
         self.cancel_fit()
         self._generation += 1
         generation = self._generation
-        self.model = None
+        if not keep:
+            self.model = None
+            self.model_relative = None
         self.failed = ""
         self.fitting = True
+        relative = self.relative
 
         def current() -> bool:
             return generation == self._generation
@@ -317,11 +344,14 @@ class PanLink:
             if current():
                 self.fitting = False
                 self.model = model
+                self.model_relative = relative
                 done(self)
 
         def failed(message: str) -> None:
             if current():
                 self.fitting = False
+                self.model = None
+                self.model_relative = None
                 self.failed = message
                 done(self)
 
@@ -380,6 +410,14 @@ def used_as_pan(layer) -> Optional[PanLink]:
     return next((link for link in _links.values() if link.pan_id == layer.id()), None)
 
 
+def partner(layer) -> Optional[QgsRasterLayer]:
+    """The other layer of the link `layer` is in (its pan, or the image it is the pan of), or None."""
+    link = link_of(layer) or used_as_pan(layer)
+    if link is None:
+        return None
+    return _layer(link.pan_id if link.ms_id == layer.id() else link.ms_id)
+
+
 def _saved(layer) -> dict:
     try:
         record = json.loads(str(layer.customProperty(PROPERTY) or "") or "{}")
@@ -397,9 +435,11 @@ def _fitted(link: PanLink) -> None:
 
 def _watch(link: PanLink, ms: QgsRasterLayer, pan: QgsRasterLayer) -> None:
     ms_id = link.ms_id
+    moves = shift_io.signals()
     for owner, signal, slot in ((ms, ms.rendererChanged, lambda: _renderer_changed(ms_id)),
                                 (ms, ms.dataSourceChanged, lambda: _source_changed(ms_id)),
-                                (pan, pan.dataSourceChanged, lambda: _source_changed(ms_id))):
+                                (pan, pan.dataSourceChanged, lambda: _source_changed(ms_id)),
+                                (moves, moves.moved, lambda layer_id: _moved(ms_id, layer_id))):
         signal.connect(slot)
         link.connections.append((owner, signal, slot))
 
@@ -418,7 +458,8 @@ def _unwatch(link: PanLink) -> None:
 def _renderer_changed(ms_id: str) -> None:
     """Another renderer on the multispectral layer: a new correction renderer gets the link, any other ends it."""
     link, ms = _links.get(ms_id), _layer(ms_id)
-    if link is None or ms is None:
+    if link is None or ms is None or shift_io.moving(ms):
+        # (Moved: QGIS's own renderer for a moment, the correction put back at the end; see `_moved`.)
         return
     r = er.enhance_renderer(ms)
     if r is None:
@@ -428,18 +469,36 @@ def _renderer_changed(ms_id: str) -> None:
 
 
 def _source_changed(ms_id: str) -> None:
-    """A layer of the link has a new source (位置ずらし): its pixels read from there, the model fitted again."""
+    """A layer of the link has a new source: its pixels read from there, the model fitted again (kept when they lie as they did)."""
     link, ms = _links.get(ms_id), _layer(ms_id)
     pan = _layer(link.pan_id) if link is not None else None
-    if link is None or ms is None or pan is None:
+    if link is None or ms is None or pan is None or shift_io.moving(ms) or shift_io.moving(pan):
+        # (A move: read again when it is done, `_moved`.)
         return
     try:
         link.take(ms, pan)
     except QuickPanError:
         stop(ms)
         return
-    link.start_fit(_fitted)
+    if link.as_fitted():
+        link.cancel_fit()
+    else:
+        link.start_fit(_fitted, keep=True)
     ms.triggerRepaint()
+    signals().changed.emit(ms_id)
+
+
+def _moved(ms_id: str, layer_id: str) -> None:
+    """位置ずらし has moved a layer of the link: the correction (and the link on it) back on the image, read from the new place."""
+    link, ms = _links.get(ms_id), _layer(ms_id)
+    if link is None or ms is None or layer_id not in (link.ms_id, link.pan_id):
+        return
+    r = er.enhance_renderer(ms)
+    if r is None:
+        stop(ms)
+        return
+    r.state.pan = link
+    _source_changed(ms_id)
 
 
 def start(ms: QgsRasterLayer, pan: QgsRasterLayer, method: str = "gram-schmidt", strength: float = 1.0,

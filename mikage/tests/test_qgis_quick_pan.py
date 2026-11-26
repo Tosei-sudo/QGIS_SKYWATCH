@@ -247,6 +247,48 @@ def test_a_pan_in_another_crs_is_reprojected(tmp_path):
     assert np.abs(bands[0].astype(int) - resampled[0].astype(int)).mean() > 5
 
 
+def test_a_move_keeps_it_reading_from_the_new_place(tmp_path, monkeypatch):
+    """
+    位置ずらし (tsudo 2026-11-27: 「クイックパンシャープンした状態で位置ずらしがうまくできない」):
+    the move put QGIS's own renderer on for a moment, which ended the link (the
+    pan shown again) while the image went on being read from where it was.
+    """
+    from mikage.qgis_io import shift_io
+
+    monkeypatch.setattr(shift_io, "shifts_folder", lambda: str(tmp_path))
+    pan, ms = images(tmp_path)
+    link = started(ms, pan)
+    model = link.model
+    extent = QgsRectangle(X0 + 20, Y0 - 180, X0 + 220, Y0 - 20)
+    before, _ = link.sharpened((1, 2, 3, 4), extent, 200, 160)
+    shift_io.set_shift(ms, 8, -8)
+    # Still on: the pan hidden, the correction drawing with the link, the image read where it lies now.
+    assert qp.link_of(ms) is link and not shown(pan)
+    assert er.enhance_renderer(ms).state.pan is link
+    assert link._ms.extent() == ms.extent()  # noqa: SLF001
+    # Moved alone (off the pan by 8 m): fitted again, drawn with the model before until then.
+    assert link.fitting and link.model is model and not link.as_fitted()
+    # The pan moved by as much (as 位置ずらし moves it with the image): the two as they were, the model kept.
+    shift_io.set_shift(pan, 8, -8)
+    assert not link.fitting and link.model is model and link.as_fitted()
+    moved = QgsRectangle(extent.xMinimum() + 8, extent.yMinimum() - 8, extent.xMaximum() + 8, extent.yMaximum() - 8)
+    after, _ = link.sharpened((1, 2, 3, 4), moved, 200, 160)
+    assert np.array_equal(np.stack(after), np.stack(before))
+    shift_io.set_shift(ms, 0, 0)
+    shift_io.set_shift(pan, 0, 0)
+    assert qp.link_of(ms) is link and link.as_fitted() and not link.fitting
+    after, _ = link.sharpened((1, 2, 3, 4), extent, 200, 160)
+    assert np.array_equal(np.stack(after), np.stack(before))
+    # Ended, the pan is shown again as before it was used.
+    qp.stop(ms)
+    assert shown(pan)
+    # A fit after a move that fails (no pixel with both values) draws the image as it is, not with the old model.
+    link = started(ms, pan)
+    shift_io.set_shift(ms, 5000, 0)
+    assert wait_for(lambda: not link.fitting, 10000)
+    assert link.model is None and link.failed
+
+
 def test_a_project_opens_with_it(tmp_path):
     pan, ms = images(tmp_path)
     started(ms, pan, strength=1.5)

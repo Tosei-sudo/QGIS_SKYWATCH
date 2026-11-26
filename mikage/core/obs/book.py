@@ -37,6 +37,7 @@ from .taxonomy import (
     remove_taxon, rewrite, segment_name, taxonomy_of, update_taxon, with_kinds, within,
 )
 from . import taxonomy as _tx
+from ..together import read_together
 from ..util import read_number
 
 _UNSET = object()
@@ -335,23 +336,30 @@ class ObservationBook:
             self.spec_fields = fields if fields is not None else list(self.vocabulary.spec_fields)
 
     def _reload_scoped(self, started: int) -> str:
-        self._read_classes()
         image = self.current
         wanted = [image] if image is not None else []
-        try:
-            records = self.store.load_around([self._around_key(i) for i in wanted]) if wanted else []
-        except Exception as error:  # noqa: BLE001
+
+        def caught(read):
+            try:
+                return read(), None
+            except Exception as error:  # noqa: BLE001 (each told as before)
+                return None, error
+
+        # The classes, the records around the image and its checked areas do not need each other: read at once.
+        _, (records, failed), (areas, areas_failed) = read_together(
+            self._read_classes,
+            lambda: caught(lambda: self.store.load_around([self._around_key(i) for i in wanted]) if wanted else []),
+            lambda: caught(lambda: self._find_areas(image_ids=[i.id for i in wanted]) if wanted else []))
+        if failed is not None:
             with self.lock:
                 self.records, self._around = [], {}
                 self._around_failed = {i.id: (self._around_key(i), now_ms()) for i in wanted}
                 self.loaded = True
-            return self._say(f"{self.store.label} から記録の取得に失敗: {_error_text(error)}")
+            return self._say(f"{self.store.label} から記録の取得に失敗: {_error_text(failed)}")
         message = ""
-        try:
-            areas = self._find_areas(image_ids=[i.id for i in wanted]) if wanted else []
-        except Exception as error:  # noqa: BLE001
+        if areas_failed is not None:
             areas = []
-            message = f"{self.area_store.label} から確認範囲の取得に失敗: {_error_text(error)}"
+            message = f"{self.area_store.label} から確認範囲の取得に失敗: {_error_text(areas_failed)}"
         with self.lock:
             self.records = records
             self.areas = areas

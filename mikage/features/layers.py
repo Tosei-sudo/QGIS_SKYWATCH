@@ -6,7 +6,7 @@ tracking fields of Esri layers QGIS edits itself (editTracking), and the layer p
 """
 from __future__ import annotations
 
-from qgis.core import QgsProject
+from qgis.core import QgsProject, QgsVectorLayer
 
 from ..qgis_io import edit_stamp_layers, expression_functions, time_zone_fields
 from ..ui.layer_pins import LayerPins
@@ -33,7 +33,7 @@ class Layers(Feature):
         # QGIS の式の関数 「MIKAGE」: the records the observation dock read and the named areas.
         expression_functions.set_book(lambda: getattr(self.ports.observations(), "book", None))
         expression_functions.register()
-        host.place_reader = expression_functions.PlaceReader(self.context, refresh=lambda: self.iface.mapCanvas().refreshAllLayers())
+        host.place_reader = expression_functions.PlaceReader(self.context, refresh=self._repaint_vector_layers)
         host.place_reader.start()
         # Layers whose dates are in another zone than the service says (the settings file's timeZone): a corrected field per date.
         time_zone_fields.register()
@@ -48,6 +48,16 @@ class Layers(Feature):
         project.layersAdded.connect(host.edit_stamp_layers.layers_added)
         project.layersRemoved.connect(host.edit_stamp_layers.layers_removed)
         host.edit_stamp_layers.layers_added(project.mapLayers().values())
+
+    def _repaint_vector_layers(self) -> None:
+        """
+        Place names read for 式の関数 「MIKAGE」: the map's vector layers drawn
+        again (labels and styles use them). Not the images: refreshAllLayers
+        read every image's pixels again from its file (2026-11-27).
+        """
+        for layer in self.iface.mapCanvas().layers():
+            if isinstance(layer, QgsVectorLayer):
+                layer.triggerRepaint()
 
     def _time_zones_changed(self) -> None:
         if self.host.time_zone_fields is not None:

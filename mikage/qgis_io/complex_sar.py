@@ -205,9 +205,11 @@ def convert_layer(layer, mode: str, folder: Optional[str] = None) -> bool:
     stretches it (2–98 % of its values, gray); True when it was converted.
     Layers already converted, of URLs or of other images are left as they are.
     """
+    from . import raster_facts
     from .overviews_io import local_path
     path = local_path(layer)
-    if not path or source_of(layer) or not is_complex(path):
+    # Read once per layer, with what the observation dock reads of it (raster_facts).
+    if not path or source_of(layer) or not raster_facts.complex_outputs(layer.id(), path):
         return False
     try:
         vrt = build_vrt(path, mode, folder or default_folder())

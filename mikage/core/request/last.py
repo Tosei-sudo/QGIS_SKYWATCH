@@ -2,8 +2,9 @@
 入力の初期値の記憶 for imaging requests: the conditions of the request last
 saved from the form (category, how it is achieved, the repeat, priority,
 the satellites, series, modes, systems, angles, resolution, cloud, the
-requester and the 依頼グループ) become a new request's starting values. Its name, period, area,
-status and note are always the new request's own.
+time of day with its 時刻, the requester and the 依頼グループ) become a new
+request's starting values. Its name, period, area, status and note are
+always the new request's own.
 
 Pure: the values are JSON (kept in QgsSettings by the dock).
 """
@@ -13,7 +14,10 @@ import math
 from dataclasses import replace
 from typing import Mapping
 
-from .model import ACHIEVES, CATEGORIES, KINDS, LOOK_SIDES, ORBIT_DIRS, TIMES_OF_DAY, ImagingRequest, clamp_priority, repeat_of, repeat_text
+from .model import (
+    ACHIEVES, CATEGORIES, KINDS, LOOK_SIDES, ORBIT_DIRS, TIMES_OF_DAY, ImagingRequest, clamp_priority, clock_minutes, clock_text,
+    repeat_of, repeat_text,
+)
 
 #: Fields chosen from a list: the values allowed.
 CHOICES = {
@@ -24,8 +28,10 @@ CHOICES = {
 LISTS = ("series", "satellites", "modes", "systems")
 #: Fields that are a number or None (not given).
 NUMBERS = ("off_nadir_min", "off_nadir_max", "incidence_min", "incidence_max", "resolution", "cloud_no_go", "times_max", "times_gap")
+#: The 時刻 of 時間帯 by the clock (「10:00」).
+CLOCKS = ("time_from", "time_to")
 #: Every field remembered.
-FIELDS = (*CHOICES, "repeat", "priority", *LISTS, *NUMBERS, "times_min", "requester", "group")
+FIELDS = (*CHOICES, "repeat", "priority", *LISTS, *NUMBERS, "times_min", *CLOCKS, "requester", "group")
 
 
 def remembered(r: ImagingRequest) -> dict:
@@ -61,4 +67,7 @@ def with_remembered(r: ImagingRequest, last: Mapping) -> ImagingRequest:
     for f in ("requester", "group"):
         if isinstance(last.get(f), str):
             changes[f] = last[f]
+    for f in CLOCKS:
+        if isinstance(last.get(f), str):
+            changes[f] = clock_text(clock_minutes(last[f]))
     return replace(r, **changes)

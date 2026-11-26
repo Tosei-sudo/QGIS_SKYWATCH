@@ -45,6 +45,10 @@ FEATURE_PACKAGES = ("core.ai", "core.catalog", "core.enhance", "core.obs", "core
 KERNEL = (
     "core.esri", "core.errors", "core.util", "core.time_zone", "core.time_text", "core.audit", "core.edit_stamp", "core.gpkg", "core.offline",
     "core.auth", "core.json_pieces", "core.coords", "core.shapes", "core.sql", "core.sources", "core.win64",
+    # 通信の記録: every request counted by layer for the log (core.esri notes them; qgis_io.stall_watch writes the line).
+    "core.request_stats",
+    # 同時に読む: independent reads at once (qgis_io.tasks hands each read's thread its task).
+    "core.together",
     # Which plugin this is: MIKAGE or MIKAGE 練習版 (its settings' root and folder, 練習モード only).
     "core.edition",
     # The features' doors read when asked (core/<機能>/api.py).

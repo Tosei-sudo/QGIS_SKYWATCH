@@ -128,7 +128,7 @@ ENTRIES: list[Entry] = [
           ["load", "rows", "selected_rows", "import_rows", "zoom_to", "review_queue", "next_to_review", "accept_rows", "reject_rows", "open_training"]),
     Entry("swipe", "ドックと道具", "スワイプ比較", "上のレイヤーをスワイプで比べる。", "api.swipe.set_active(True)\napi.swipe.set_position(0.3)",
           ["set_active", "set_target", "set_position", "set_orientation"]),
-    Entry("shift", "ドックと道具", "位置ずらし", "レイヤーの表示位置をメートルでずらす（道具はグループを選ぶと配下の画像すべてを同じだけ）。", "api.shift.set_shift_metres(layer, 12, -3)", ["set_active", "set_shift_metres", "shift_metres", "reset"]),
+    Entry("shift", "ドックと道具", "位置ずらし", "レイヤーの表示位置をメートルでずらす（道具はグループを選ぶと配下の画像すべてを同じだけ。クイックパンシャープン中はパンクロも一緒に）。", "api.shift.set_shift_metres(layer, 12, -3)", ["set_active", "set_shift_metres", "shift_metres", "reset"]),
     Entry("geo_fix", "ドックと道具", "クイック幾何補正", "アクティブな画像を地形（DEM）と目印の点で正しい位置に合わせる（ファイルは変えない）。保存すると画像ごとに共有。", "api.geo_fix.set_active(True)", ["set_active", "take", "add_point", "undo", "save", "take_off"]),
     Entry("segment", "ドックと道具", "クリック抽出（AI）", "クリックした物の輪郭を AI で抽出。", "api.segment.set_active(True)",
           ["set_active", "add_model_files", "click", "undo", "keep", "outlines"]),
