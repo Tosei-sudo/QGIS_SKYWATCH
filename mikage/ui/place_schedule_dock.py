@@ -25,6 +25,7 @@ from qgis.PyQt.QtCore import QCoreApplication, Qt, QTimer
 from qgis.PyQt.QtWidgets import QCheckBox, QComboBox, QFrame, QLabel, QPushButton, QScrollArea
 
 from ..core.esri import EsriError
+from ..core.together import read_together
 from ..core.request.api import bbox_of, jst_day, ScheduleRepository
 from ..core.request.api import (
     DAY_CHOICES, DAYS, PLACE_KINDS as KINDS, MOST_PLACES, NOT_HELD_BACK, REQUEST, SHOWN, Lane, Mark, Place, lanes_of, mark_name,
@@ -384,18 +385,21 @@ class PlaceScheduleDock(PluginDock):
         self.status.setText(self.tr("{a}〜{b} の計画と依頼を取得中…").format(a=first.isoformat(), b=last))
 
         def work(task):
-            rows = repo.load_days(first.isoformat(), last, task.isCanceled)
-            shots, problem = [], ""
-            if repo.store.shots:
+            def shots():
+                if not repo.store.shots:
+                    return [], ""
                 try:
-                    shots = repo.load_shots_where(shot_days_where(repo.store, first.isoformat(), last), geometry=True,
-                                                  cancelled=task.isCanceled)
+                    return repo.load_shots_where(shot_days_where(repo.store, first.isoformat(), last), geometry=True,
+                                                 cancelled=task.isCanceled), ""
                 except EsriError as error:
                     # The requests' rows matter most: shown without the shots.
-                    problem = str(error)
-            requests = repo.load_requests(task.isCanceled)
-            groups = repo.read_groups(task.isCanceled)
-            return rows, shots, requests, problem, groups
+                    return [], str(error)
+
+            # Four tables that do not need each other: read at once (core/together.py).
+            rows, (shot_rows, problem), requests, groups = read_together(
+                lambda: repo.load_days(first.isoformat(), last, task.isCanceled), shots,
+                lambda: repo.load_requests(task.isCanceled), lambda: repo.read_groups(task.isCanceled))
+            return rows, shot_rows, requests, problem, groups
 
         def done(result):
             self.task = None

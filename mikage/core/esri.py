@@ -107,25 +107,41 @@ class LayerInfos:
     each read (2026-11-18: a client is made for each task, and so each read,
     each poll was two requests; on a slow server the first one alone could
     take seconds). Asked again with `refresh` where fields may have been
-    added (the stores that add theirs), and all dropped when the settings
-    change.
+    added (the stores' reads: an administrator may add one), and all
+    dropped when the settings change.
+
+    `refresh` takes one asked within `fresh` seconds (2026-11-27: each store
+    asked its layer again before each read, so at start the same layers were
+    asked two to four times within seconds: 53 of 93 requests, each a round
+    trip before its read). A layer whose request the server refused (a
+    field gone, say) is asked again (`forget`).
     """
 
-    def __init__(self, seconds: float = 600, clock: Callable[[], float] = time.monotonic):
+    def __init__(self, seconds: float = 600, clock: Callable[[], float] = time.monotonic, fresh: float = 60):
         self.seconds = seconds
         self.clock = clock
+        self.fresh = fresh
         self._kept: dict[str, tuple[float, dict[str, Any]]] = {}
         self._lock = threading.Lock()
 
-    def get(self, url: str, default: Any = None) -> Any:
+    def get(self, url: str, default: Any = None, within: Optional[float] = None) -> Any:
+        """The layer's information when kept (and asked within `within` seconds, when given), else `default`."""
         with self._lock:
             kept = self._kept.get(url)
             if kept is None:
                 return default
-            if self.clock() - kept[0] > self.seconds:
+            age = self.clock() - kept[0]
+            if age > self.seconds:
                 del self._kept[url]
                 return default
+            if within is not None and age > within:
+                return default
             return kept[1]
+
+    def forget(self, url: str) -> None:
+        """Drops a layer's information (asked again next time)."""
+        with self._lock:
+            self._kept.pop(url, None)
 
     def __contains__(self, url: str) -> bool:
         return self.get(url) is not None
@@ -240,6 +256,7 @@ class EsriClient:
                 raise InvalidTokenError(detail=said)
             if code in (498, 499, 403):
                 raise EsriError(code="E202" if token else "E203", detail=said)
+            self._forget_layer(url)
             raise EsriError(code="E104", detail=said)
         return value
 
@@ -250,13 +267,40 @@ class EsriClient:
         name = info.get("name") if isinstance(info, dict) else None
         request_stats.STATS.note(url, form, time.perf_counter() - started, size, ok, name if isinstance(name, str) and name else None)
 
-    def layer(self, url: str, token: Optional[str] = None, refresh: bool = False) -> "LayerInfo":
-        """The layer's information (asked once per URL; with LayerInfos, once in its time)."""
-        info = None if refresh else self._layers.get(url)
+    def layer(self, url: str, token: Optional[str] = None, refresh: bool = False, now: bool = False) -> "LayerInfo":
+        """
+        The layer's information (asked once per URL; with LayerInfos, once in
+        its time). `refresh`: asked again, unless a LayerInfos has it from
+        its last `fresh` seconds; `now`: asked again whatever is kept.
+        """
+        kept = self._layers
+        if now:
+            info = None
+        elif refresh:
+            info = kept.get(url, within=kept.fresh) if isinstance(kept, LayerInfos) else None
+        else:
+            info = kept.get(url)
         if info is None:
             info = self._ask_renewing(url, {}, token)
-            self._layers[url] = info
+            kept[url] = info
         return LayerInfo(info)
+
+    def layer_with(self, url: str, token: Optional[str], needed: Iterable[str]) -> "LayerInfo":
+        """The layer's information (as `refresh`), asked again now when it lacks a field of `needed` (one just added)."""
+        info = self.layer(url, token, refresh=True)
+        if any(n not in info.field_types for n in needed):
+            info = self.layer(url, token, now=True)
+        return info
+
+    def _forget_layer(self, url: str) -> None:
+        """A layer's request the server refused: its information asked again next time (a field gone or renamed)."""
+        layer = request_stats.layer_of(url)
+        if layer == url.split("?", 1)[0].rstrip("/"):
+            return
+        if isinstance(self._layers, LayerInfos):
+            self._layers.forget(layer)
+        else:
+            self._layers.pop(layer, None)
 
     def query_all(
         self,

@@ -317,7 +317,7 @@ def request_of(a: dict, geometry: Any, f: dict, oid: str) -> Optional[ImagingReq
 
 def _layer(client: EsriClient, url: str, token: Optional[str], label: str, needed: Sequence[str],
            history: Optional[dict] = None) -> tuple[set, str]:
-    info = client.layer(url, token, refresh=True)
+    info = client.layer_with(url, token, () if history is not None else needed)
     names = set(info.field_types)
     if history is not None:
         use_legacy_names(history, names, DEFAULT_HISTORY_FIELDS, LEGACY_HISTORY_FIELDS)

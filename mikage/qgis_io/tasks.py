@@ -23,7 +23,7 @@ from typing import Any, Callable, Optional
 from qgis.core import Qgis, QgsApplication, QgsFeedback, QgsMessageLog, QgsTask
 from qgis.PyQt.QtCore import QTimer
 
-from ..core import audit, errors
+from ..core import audit, errors, together
 from ..core.esri import EsriError
 
 LOG_TAG = "MIKAGE"
@@ -53,6 +53,8 @@ def error_text(error: BaseException) -> str:
 
 #: The task whose work runs in this thread (its requests stop when it is cancelled).
 _current = threading.local()
+# Reads sent at once from a task (core/together.py): each in its thread with the task, so they stop with it.
+together.carry(lambda: getattr(_current, "task", None), lambda task: setattr(_current, "task", task))
 
 
 def current_feedback() -> Optional[QgsFeedback]:
