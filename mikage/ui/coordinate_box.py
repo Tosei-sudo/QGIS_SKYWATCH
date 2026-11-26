@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from qgis.core import QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsPointXY, QgsProject, QgsRectangle, QgsSettings
+from qgis.core import QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsPointXY, QgsProject, QgsRectangle
 from qgis.gui import QgsVertexMarker
 from qgis.PyQt.QtCore import QEvent, QModelIndex, QObject, Qt, QTimer
 from qgis.PyQt.QtGui import QColor, QGuiApplication, QStandardItem, QStandardItemModel
@@ -29,6 +29,7 @@ except ImportError:  # Qt5
 
 from ..core.coords import NOTATIONS, LonLat, format_as, format_lat_lon, format_mgrs, format_utm, parse_coordinate, utm_epsg, utm_zone
 from ..core.geocode import Place, PlaceSearch
+from ..qgis_io import qsettings
 from ..qgis_io.context import PluginContext
 from ..qgis_io.place_search import place_search_of
 from ..qgis_io.tasks import run_task
@@ -43,17 +44,17 @@ FIT_SCALE = 2132.7
 PADDING = 40
 #: How long typing pauses before places are looked up (ms).
 PAUSE = 350
-NOTATION_KEY = "mikage/cursor_notation"
+NOTATION_KEY = "cursor_notation"
 MARK = QColor("#2563eb")
 
 
 def cursor_notation() -> str:
-    value = QgsSettings().value(NOTATION_KEY, "decimal")
+    value = qsettings.value(NOTATION_KEY, "decimal")
     return value if any(value == n for n, _, _ in NOTATIONS) else "decimal"
 
 
 def set_cursor_notation(notation: str) -> None:
-    QgsSettings().setValue(NOTATION_KEY, notation)
+    qsettings.set_value(NOTATION_KEY, notation)
 
 
 def wrap_lon(lon: float) -> float:

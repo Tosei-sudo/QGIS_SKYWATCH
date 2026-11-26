@@ -1,6 +1,6 @@
 """
 担当 (core/roles.py) in QGIS: the roles the person ticked, kept in the profile
-(QgsSettings `mikage/roles`, so the menus are right at once on the next
+(QgsSettings `<plugin id>/roles`, so the menus are right at once on the next
 start) and in the settings file's Esri table `userRoles` under the person's
 user name (so they follow the person to any PC).
 
@@ -20,48 +20,46 @@ from __future__ import annotations
 import json
 from typing import Callable, Optional, Sequence
 
-from qgis.core import QgsSettings
 from qgis.PyQt.QtCore import QObject, pyqtSignal
 
 from ..core import edit_stamp, roles
+from . import qsettings
 from .tasks import run_task
 
-KEY = "mikage/roles"
-PENDING_KEY = "mikage/rolesPending"
+KEY = "roles"
+PENDING_KEY = "rolesPending"
 #: Before 2026-11-15: one role (a layout's name) chosen.
-OLD_KEY = "mikage/role"
+OLD_KEY = "role"
 
 
 def stored_codes() -> list[str]:
     """The roles kept in this profile (the one role of before, too)."""
-    s = QgsSettings()
-    raw = s.value(KEY, None)
+    raw = qsettings.value(KEY, None)
     if isinstance(raw, str) and raw:
         try:
             value = json.loads(raw)
         except ValueError:
             value = []
         return roles.clean_codes(value if isinstance(value, list) else [])
-    old = s.value(OLD_KEY, "")
+    old = qsettings.value(OLD_KEY, "")
     return roles.codes_of([old]) if isinstance(old, str) and old else []
 
 
 def store_codes(codes: Sequence[str]) -> None:
-    QgsSettings().setValue(KEY, json.dumps(roles.clean_codes(codes)))
+    qsettings.set_value(KEY, json.dumps(roles.clean_codes(codes)))
 
 
 def chosen_before() -> bool:
     """Whether roles were ever chosen in this profile (none ticked counts)."""
-    s = QgsSettings()
-    return s.contains(KEY) or bool(s.value(OLD_KEY, ""))
+    return qsettings.contains(KEY) or bool(qsettings.value(OLD_KEY, ""))
 
 
 def pending() -> bool:
-    return QgsSettings().value(PENDING_KEY, "") == "1"
+    return qsettings.value(PENDING_KEY, "") == "1"
 
 
 def set_pending(on: bool) -> None:
-    QgsSettings().setValue(PENDING_KEY, "1" if on else "")
+    qsettings.set_value(PENDING_KEY, "1" if on else "")
 
 
 class RoleKeeper(QObject):
@@ -76,7 +74,7 @@ class RoleKeeper(QObject):
         super().__init__(parent)
         self.context = context
         self._codes = stored_codes()
-        if not QgsSettings().contains(KEY) and self._codes:
+        if not qsettings.contains(KEY) and self._codes:
             # The one role chosen before: kept as the roles, and sent to the table like a new choice.
             store_codes(self._codes)
             set_pending(True)

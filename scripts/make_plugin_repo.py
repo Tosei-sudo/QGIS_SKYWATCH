@@ -2,19 +2,30 @@
 Makes (or updates) an internal QGIS plugin repository: a folder holding the plugin's zips and the plugins.xml that
 QGIS's plugin manager reads, for closed networks where plugins.qgis.org cannot be reached.
 
-    python3 scripts/make_plugin_repo.py \\\\server\\share\\qgis-plugins            # builds both zips with a new version, lists them
+    python3 scripts/make_plugin_repo.py \\\\server\\share\\qgis-plugins            # builds the zips with a new version, lists them
     python3 scripts/make_plugin_repo.py /srv/www/qgis-plugins --url https://intra.example/qgis-plugins
     python3 scripts/make_plugin_repo.py OUT --config my.json --lock-config     # build_zip.py's options pass through
     python3 scripts/make_plugin_repo.py OUT --zip dist/a.zip dist/a-win64.zip  # zips already built (their own versions)
     python3 scripts/make_plugin_repo.py OUT --onnxruntime-wheel w/onnxruntime-....whl --sgp4-wheel ... --tzdata-wheel ...
                                                                               # closed networks: wheels brought in (or put them in dist/wheels)
+    python3 scripts/make_plugin_repo.py OUT --no-training                     # MIKAGE only (not MIKAGE 練習版)
+    python3 scripts/make_plugin_repo.py OUT --training-only                   # MIKAGE 練習版 only
 
-The folder then holds:
+Two plugins are made from the same code: MIKAGE (mikage) and MIKAGE 練習版
+(mikage_training, 練習モード only: build_zip.py --training-only). Both are
+listed in plugins.xml, and each PC chooses which to install in QGIS's plugin
+manager. MIKAGE 練習版 is also listed alone in plugins-training.xml, for the
+training PCs where only it is to be installed. The folder then holds:
 
-    plugins.xml            the repository for the regular zip (each PC adds this URL in QGIS)
-    plugins-win64.xml      the repository for the Windows zip (onnxruntime, onnxruntime-genai, sgp4 and tzdata inside)
+    plugins.xml                   the repository of the regular zips (each PC adds this URL in QGIS): MIKAGE and MIKAGE 練習版
+    plugins-win64.xml             the same for the Windows zips (onnxruntime, onnxruntime-genai, sgp4 and tzdata inside)
+    plugins-training.xml          MIKAGE 練習版 alone (regular zip)
+    plugins-training-win64.xml    MIKAGE 練習版 alone (Windows zip)
     mikage.<version>.zip / mikage.<version>.win64.zip
-    icon.svg
+    mikage_training.<version>.zip / mikage_training.<version>.win64.zip
+    icon.svg / icon-training.svg
+
+A list keeps the other plugin's entry when only one of them is published.
 
 QGIS offers an update when the listed version is greater than the installed one, so each build gets a new version:
 metadata.txt's version followed by the UTC time, e.g. 0.4.0.20261108123000 (or --version). A zip whose version is not
@@ -37,8 +48,15 @@ import zipfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 PLUGIN_ID = "mikage"
-#: Repository files, by kind of zip.
+#: MIKAGE 練習版's plugin id (mikage/core/edition.py TRAINING_ID).
+TRAINING_ID = "mikage_training"
+PLUGIN_IDS = (PLUGIN_ID, TRAINING_ID)
+#: Repository files, by kind of zip (both plugins listed).
 XML_NAMES = {"regular": "plugins.xml", "win64": "plugins-win64.xml"}
+#: MIKAGE 練習版 listed alone (for the training PCs).
+TRAINING_XML_NAMES = {"regular": "plugins-training.xml", "win64": "plugins-training-win64.xml"}
+#: Each plugin's icon in the repository folder (from mikage/resources).
+ICONS = {PLUGIN_ID: "icon.svg", TRAINING_ID: "icon-training.svg"}
 WIN64_DIR = f"{PLUGIN_ID}/ext/win64/"
 
 
@@ -108,21 +126,35 @@ def compare_versions(a: str, b: str) -> int:
 
 # --- zips ---
 def read_zip(path: str) -> dict:
-    """The plugin's metadata in a zip, and whether it is the Windows one."""
+    """The plugin's metadata in a zip, which plugin it is (`plugin`: MIKAGE or MIKAGE 練習版) and whether it is the Windows one."""
     with zipfile.ZipFile(path) as z:
         names = z.namelist()
-        if f"{PLUGIN_ID}/metadata.txt" not in names:
-            raise SystemExit(f"{os.path.basename(path)} はこのプラグインの zip ではない（{PLUGIN_ID}/metadata.txt なし）")
+        plugin = next((p for p in PLUGIN_IDS if f"{p}/metadata.txt" in names), None)
+        if plugin is None:
+            raise SystemExit(f"{os.path.basename(path)} はこのプラグインの zip ではない（{PLUGIN_ID}/metadata.txt も "
+                             f"{TRAINING_ID}/metadata.txt もなし）")
         meta = configparser.ConfigParser(interpolation=None)
-        meta.read_string(z.read(f"{PLUGIN_ID}/metadata.txt").decode("utf-8"))
+        meta.read_string(z.read(f"{plugin}/metadata.txt").decode("utf-8"))
     info = dict(meta["general"])
-    info["kind"] = "win64" if any(n.startswith(WIN64_DIR) for n in names) else "regular"
+    info["plugin"] = plugin
+    info["kind"] = "win64" if any(n.startswith(f"{plugin}/ext/win64/") for n in names) else "regular"
     return info
 
 
-def file_name(version: str, kind: str) -> str:
-    """The zip's name in the repository. QGIS takes the plugin's id from the part before the first dot, so it must start with `mikage.`."""
-    return f"{PLUGIN_ID}.{version}{'.win64' if kind == 'win64' else ''}.zip"
+def file_name(version: str, kind: str, plugin: str = PLUGIN_ID) -> str:
+    """
+    The zip's name in the repository. QGIS takes the plugin's id from the part before the first dot, so it must start
+    with `mikage.` (MIKAGE 練習版: `mikage_training.`).
+    """
+    return f"{plugin}.{version}{'.win64' if kind == 'win64' else ''}.zip"
+
+
+def lists_of(info: dict) -> list[str]:
+    """The repository files a zip is listed in: its kind's, and MIKAGE 練習版's own too."""
+    names = [XML_NAMES[info["kind"]]]
+    if info["plugin"] == TRAINING_ID:
+        names.append(TRAINING_XML_NAMES[info["kind"]])
+    return names
 
 
 def folder_url(folder: str) -> str:
@@ -133,17 +165,24 @@ def folder_url(folder: str) -> str:
     return pathlib.Path(os.path.abspath(folder)).as_uri()
 
 
-def listed_version(xml_path: str) -> str:
-    """The version of this plugin already listed in a repository file ("" when none)."""
+def _listed(xml_path: str) -> list:
+    """The entries (pyqgis_plugin) of a repository file ([] when there is none, or it cannot be read)."""
     if not os.path.isfile(xml_path):
-        return ""
+        return []
     try:
-        root = ET.parse(xml_path).getroot()
+        return list(ET.parse(xml_path).getroot().iter("pyqgis_plugin"))
     except ET.ParseError:
-        return ""
-    for node in root.iter("pyqgis_plugin"):
-        name = (node.findtext("file_name") or "").strip()
-        if name.partition(".")[0] == PLUGIN_ID:
+        return []
+
+
+def _plugin_of(node) -> str:
+    return (node.findtext("file_name") or "").strip().partition(".")[0]
+
+
+def listed_version(xml_path: str, plugin: str = PLUGIN_ID) -> str:
+    """The version of the plugin (MIKAGE, or MIKAGE 練習版) already listed in a repository file ("" when none)."""
+    for node in _listed(xml_path):
+        if _plugin_of(node) == plugin:
             return node.get("version", "")
     return ""
 
@@ -151,8 +190,22 @@ def listed_version(xml_path: str) -> str:
 def plugin_xml(info: dict, download_url: str, name: str, icon_url: str, changelog: str, experimental: bool,
                today: str) -> bytes:
     """A repository file listing one release, in the format of plugins.qgis.org's plugins.xml."""
+    return repository_xml([plugin_node(info, download_url, name, icon_url, changelog, experimental, today)])
+
+
+def repository_xml(nodes: list) -> bytes:
+    """A repository file listing these entries (each a plugin's release)."""
     root = ET.Element("plugins")
-    p = ET.SubElement(root, "pyqgis_plugin", name=info.get("name", PLUGIN_ID), version=info["version"])
+    for node in nodes:
+        root.append(node)
+    ET.indent(root)
+    return b'<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(root, encoding="utf-8") + b"\n"
+
+
+def plugin_node(info: dict, download_url: str, name: str, icon_url: str, changelog: str, experimental: bool,
+                today: str):
+    """One release's entry, in the format of plugins.qgis.org's plugins.xml."""
+    p = ET.Element("pyqgis_plugin", name=info.get("name", info.get("plugin", PLUGIN_ID)), version=info["version"])
 
     def put(tag, text):
         ET.SubElement(p, tag).text = text
@@ -178,8 +231,7 @@ def plugin_xml(info: dict, download_url: str, name: str, icon_url: str, changelo
     put("trusted", "True")
     if changelog:
         put("changelog", changelog)
-    ET.indent(root)
-    return b'<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(root, encoding="utf-8") + b"\n"
+    return p
 
 
 def write_atomically(path: str, data: bytes) -> None:
@@ -191,34 +243,46 @@ def write_atomically(path: str, data: bytes) -> None:
 
 def publish(out: str, zips: list[str], url: str = "", changelog: str = "", experimental: bool = False,
             allow_older: bool = False, today: str = "") -> list[str]:
-    """Copies the zips into `out` and writes the repository file of each kind. Returns the repository files' addresses."""
+    """
+    Copies the zips into `out` and writes the repository files they are listed in (`lists_of`; the other plugin's
+    entry there kept). Returns the repository files' addresses.
+    """
     os.makedirs(out, exist_ok=True)
     base = (url or folder_url(out)).rstrip("/")
     today = today or datetime.date.today().isoformat()
     infos = [(z, read_zip(z)) for z in zips]
-    kinds = [i["kind"] for _, i in infos]
-    if len(set(kinds)) != len(kinds):
-        raise SystemExit("同じ種類（通常版・Windows 版）の zip が 2 つある")
+    keys = [(i["plugin"], i["kind"]) for _, i in infos]
+    if len(set(keys)) != len(keys):
+        raise SystemExit("同じプラグイン・同じ種類（通常版・Windows 版）の zip が 2 つある")
     # Check every zip before changing anything.
     for z, info in infos:
-        listed = listed_version(os.path.join(out, XML_NAMES[info["kind"]]))
-        if listed and compare_versions(info["version"], listed) != 1 and not allow_older:
-            raise SystemExit(f"{os.path.basename(z)} の版 {info['version']} は掲載中の {listed} より新しくない。"
-                             "QGIS は更新と見なさない（戻すときは --allow-older）")
-    icon = os.path.join(ROOT, PLUGIN_ID, "resources", "icon.svg")
-    if os.path.isfile(icon):
-        shutil.copyfile(icon, os.path.join(out, "icon.svg"))
-    addresses = []
+        for xml_name in lists_of(info):
+            listed = listed_version(os.path.join(out, xml_name), info["plugin"])
+            if listed and compare_versions(info["version"], listed) != 1 and not allow_older:
+                raise SystemExit(f"{os.path.basename(z)} の版 {info['version']} は掲載中の {listed} より新しくない。"
+                                 "QGIS は更新と見なさない（戻すときは --allow-older）")
+    for plugin in sorted({i["plugin"] for _, i in infos}):
+        icon = os.path.join(ROOT, PLUGIN_ID, "resources", ICONS[plugin])
+        if os.path.isfile(icon):
+            shutil.copyfile(icon, os.path.join(out, ICONS[plugin]))
+    entries: dict = {}
     for z, info in infos:
-        name = file_name(info["version"], info["kind"])
+        name = file_name(info["version"], info["kind"], info["plugin"])
         target = os.path.join(out, name)
         # The zip first, then the list: a PC reading the list never finds a zip missing.
         shutil.copyfile(z, target + ".tmp")
         os.replace(target + ".tmp", target)
-        xml = os.path.join(out, XML_NAMES[info["kind"]])
-        write_atomically(xml, plugin_xml(info, f"{base}/{urllib.parse.quote(name)}", name, f"{base}/icon.svg",
-                                         changelog, experimental, today))
-        addresses.append(f"{base}/{XML_NAMES[info['kind']]}")
+        for xml_name in lists_of(info):
+            entries.setdefault(xml_name, {})[info["plugin"]] = (info, name)
+    addresses = []
+    for xml_name, new in entries.items():
+        xml = os.path.join(out, xml_name)
+        kept = {_plugin_of(n): n for n in _listed(xml) if _plugin_of(n) in PLUGIN_IDS and _plugin_of(n) not in new}
+        for plugin, (info, name) in new.items():
+            kept[plugin] = plugin_node(info, f"{base}/{urllib.parse.quote(name)}", name, f"{base}/{ICONS[plugin]}",
+                                       changelog, experimental, today)
+        write_atomically(xml, repository_xml([kept[p] for p in PLUGIN_IDS if p in kept]))
+        addresses.append(f"{base}/{xml_name}")
     return addresses
 
 
@@ -236,8 +300,10 @@ def main(argv=None) -> list[str]:
     parser.add_argument("--version", default="", help="作る zip の版（指定なしで metadata.txt の版 + UTC の日時）")
     parser.add_argument("--no-win64", action="store_true", help="Windows 版を作らない")
     parser.add_argument("--no-regular", action="store_true", help="通常版を作らない")
-    parser.add_argument("--config", default="", help="同梱する設定ファイル（build_zip.py --config）")
-    parser.add_argument("--lock-config", action="store_true", help="同梱の設定ファイルに固定（build_zip.py --lock-config）")
+    parser.add_argument("--no-training", action="store_true", help="MIKAGE 練習版を作らない（MIKAGE だけ）")
+    parser.add_argument("--training-only", action="store_true", help="MIKAGE 練習版だけを作る")
+    parser.add_argument("--config", default="", help="同梱する設定ファイル（build_zip.py --config、MIKAGE 練習版にも）")
+    parser.add_argument("--lock-config", action="store_true", help="同梱の設定ファイルに固定（build_zip.py --lock-config、MIKAGE だけ: 練習版はいつも同梱のものだけ）")
     parser.add_argument("--onnxruntime-wheel", default="", help="同梱する onnxruntime の wheel（build_zip.py と同じ、指定なしで dist/wheels か pip）")
     parser.add_argument("--sgp4-wheel", default="", help="同梱する sgp4 の wheel（同上）")
     parser.add_argument("--tzdata-wheel", default="", help="同梱する tzdata の wheel（同上）")
@@ -253,15 +319,21 @@ def main(argv=None) -> list[str]:
     if not zips:
         if args.no_win64 and args.no_regular:
             raise SystemExit("--no-win64 と --no-regular を両方付けると作るものがない")
+        if args.no_training and args.training_only:
+            raise SystemExit("--no-training と --training-only を両方付けると作るものがない")
         b = build_module()
         version = args.version or release_version()
         work = os.path.join(ROOT, "dist", "repo-build")
-        if not args.no_regular:
-            zips.append(b.main(args.config, work, lock_config=args.lock_config, version=version))
-        if not args.no_win64:
-            zips.append(b.main(args.config, work, win64=True, lock_config=args.lock_config, version=version,
-                               onnxruntime_wheel=args.onnxruntime_wheel, sgp4_wheel=args.sgp4_wheel,
-                               tzdata_wheel=args.tzdata_wheel, onnxruntime_genai_wheel=args.onnxruntime_genai_wheel))
+        editions = [e for e in (False, True) if (e or not args.training_only) and (not e or not args.no_training)]
+        for training in editions:
+            lock = args.lock_config and not training
+            if not args.no_regular:
+                zips.append(b.main(args.config, work, lock_config=lock, version=version, training_only=training))
+            if not args.no_win64:
+                zips.append(b.main(args.config, work, win64=True, lock_config=lock, version=version,
+                                   onnxruntime_wheel=args.onnxruntime_wheel, sgp4_wheel=args.sgp4_wheel,
+                                   tzdata_wheel=args.tzdata_wheel, onnxruntime_genai_wheel=args.onnxruntime_genai_wheel,
+                                   training_only=training))
     addresses = publish(args.out, zips, args.url, args.changelog, args.experimental, args.allow_older)
     for a in addresses:
         print(a)

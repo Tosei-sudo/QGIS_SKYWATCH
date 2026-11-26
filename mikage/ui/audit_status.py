@@ -31,6 +31,7 @@ from qgis.PyQt.QtGui import QDesktopServices
 from qgis.PyQt.QtWidgets import QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QVBoxLayout
 
 from ..core import audit
+from ..qgis_io import qsettings
 from ..qgis_io.tasks import run_task
 from .docks import plain_label
 from .fit import fit_text
@@ -45,7 +46,7 @@ def tr(text: str) -> str:
 
 def default_folder() -> str:
     """The day's files' folder when the settings file names none: the profile's mikage/audit."""
-    return os.path.join(QgsApplication.qgisSettingsDirPath(), "mikage", "audit")
+    return qsettings.profile_folder("audit")
 
 
 def plugin_version() -> str:

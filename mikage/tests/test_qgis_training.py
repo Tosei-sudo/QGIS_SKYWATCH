@@ -19,6 +19,7 @@ APP = start_app()
 from qgis.core import QgsProject, QgsRasterLayer, QgsSettings  # noqa: E402
 from qgis.PyQt.QtWidgets import QDialog  # noqa: E402
 
+from mikage.qgis_io import qsettings  # noqa: E402
 from mikage.core import audit  # noqa: E402
 from mikage.core.esri import EsriClient  # noqa: E402
 from mikage.qgis_io import roles_io, settings, training_io  # noqa: E402
@@ -107,7 +108,7 @@ def test_practice_starts_on_its_own_server_and_files_and_ends_as_before(plugin, 
     assert not training._actions["判読の練習の問題を作る…"].isVisible() and not training._actions["判読の練習の成績…"].isVisible()
     assert settings.local_gpkg_path() == str(tmp_path / "production.gpkg")
     p.role_keeper.choose(["OBSERVER"])
-    roles_before = QgsSettings().value(roles_io.KEY)
+    roles_before = QgsSettings().value(qsettings.key(roles_io.KEY))
     assert p.start_training()
     session = training_io.active()
     assert session is not None and session.server is not None and session.server.running
@@ -150,7 +151,7 @@ def test_practice_starts_on_its_own_server_and_files_and_ends_as_before(plugin, 
     assert training_io.active() is None and not session.server.running
     assert p.context.source == settings.production_config_source()[0] != session.files.config
     assert settings.local_gpkg_path() == str(tmp_path / "production.gpkg")
-    assert QgsSettings().value(roles_io.KEY) == roles_before and p.role_keeper.codes == ["OBSERVER"]
+    assert QgsSettings().value(qsettings.key(roles_io.KEY)) == roles_before and p.role_keeper.codes == ["OBSERVER"]
     assert iface.canvas.findChild(training_mode.TrainingBand) is None or not iface.canvas.findChild(training_mode.TrainingBand).isVisible()
     assert catalog.windowTitle() == "画像カタログ"
     # The practice's images listed no more (their server is gone).
@@ -158,7 +159,7 @@ def test_practice_starts_on_its_own_server_and_files_and_ends_as_before(plugin, 
     assert not iface.window.windowTitle().startswith(training_mode.WINDOW_MARK)
     assert not [a for a in p.actions if a.text().endswith("（練習モードでは使えない）")]
     assert not audit.current().paused
-    assert QgsSettings().value(training_io.ACTIVE_KEY, "") == ""
+    assert qsettings.value(training_io.ACTIVE_KEY, "") == ""
     assert training._actions["練習モードを始める"].isEnabled() and not training._actions["練習モードを終える"].isEnabled()
 
 
@@ -184,11 +185,11 @@ def test_unsaved_changes_are_asked_about_first(plugin, monkeypatch):
 def test_qgis_stopped_while_practising_puts_back_what_was_kept_aside(tmp_path, monkeypatch, made):
     monkeypatch.setattr(training_io, "folder", lambda: str(tmp_path / "training"))
     QgsSettings().remove("mikage")
-    s = QgsSettings()
-    s.setValue(roles_io.KEY, json.dumps(["PLANNER"]))
-    s.setValue(training_io.ACTIVE_KEY, "1")
-    s.setValue(training_io.SAVED_KEY, json.dumps({roles_io.KEY: json.dumps(["OBSERVER"]), roles_io.PENDING_KEY: None}))
-    s.setValue(roles_io.PENDING_KEY, "1")
+    qsettings.set_value(roles_io.KEY, json.dumps(["PLANNER"]))
+    qsettings.set_value(training_io.ACTIVE_KEY, "1")
+    # (the keys kept aside by their names under the plugin's root)
+    qsettings.set_value(training_io.SAVED_KEY, json.dumps({roles_io.KEY: json.dumps(["OBSERVER"]), roles_io.PENDING_KEY: None}))
+    qsettings.set_value(roles_io.PENDING_KEY, "1")
     settings.set_config_source(_production_config(tmp_path))
     from mikage import classFactory
 
@@ -197,8 +198,8 @@ def test_qgis_stopped_while_practising_puts_back_what_was_kept_aside(tmp_path, m
     p.initGui()
     try:
         assert p.role_keeper.codes == ["OBSERVER"]
-        assert QgsSettings().value(roles_io.PENDING_KEY, None) is None
-        assert QgsSettings().value(training_io.ACTIVE_KEY, "") == ""
+        assert qsettings.value(roles_io.PENDING_KEY, None) is None
+        assert qsettings.value(training_io.ACTIVE_KEY, "") == ""
         assert training_io.active() is None
     finally:
         p.unload()

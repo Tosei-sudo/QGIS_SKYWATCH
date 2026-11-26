@@ -45,9 +45,9 @@ def image_key(layer) -> tuple[str, str]:
 
 
 def local_path() -> str:
-    from qgis.core import QgsApplication
+    from .qsettings import profile_folder
 
-    folder = os.path.join(QgsApplication.qgisSettingsDirPath(), "mikage")
+    folder = profile_folder()
     os.makedirs(folder, exist_ok=True)
     return os.path.join(folder, "image_corrections.json")
 

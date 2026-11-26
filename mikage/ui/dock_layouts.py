@@ -16,17 +16,17 @@ from __future__ import annotations
 import json
 from typing import Callable, Optional
 
-from qgis.core import QgsSettings
 from qgis.PyQt.QtCore import QCoreApplication, QRect, Qt
 from qgis.PyQt.QtGui import QGuiApplication
 from qgis.PyQt.QtWidgets import QDockWidget, QFileDialog, QInputDialog, QMainWindow, QMenu, QMessageBox, QWidget
 
 from ..core import errors
+from ..qgis_io import qsettings
 from ..qgis_io.tasks import error_text
 from .docks import ask_no
 
-KEY = "mikage/dockLayouts"
-LAST_KEY = "mikage/dockLayoutLast"
+KEY = "dockLayouts"
+LAST_KEY = "dockLayoutLast"
 FILE_KIND = "mikage.dockLayouts"
 #: A dock's size in a window of its own (「別ウィンドウで表示」), and how far each next one is moved (cascaded).
 FLOAT_SIZE = (440, 620)
@@ -286,13 +286,13 @@ class DockLayoutStore:
 
     def saved(self) -> dict[str, dict]:
         try:
-            value = json.loads(QgsSettings().value(KEY, "") or "{}")
+            value = json.loads(qsettings.value(KEY, "") or "{}")
         except (TypeError, ValueError):
             return {}
         return {k: v for k, v in value.items() if isinstance(k, str) and valid(v)} if isinstance(value, dict) else {}
 
     def _write(self, layouts: dict) -> None:
-        QgsSettings().setValue(KEY, json.dumps(layouts, ensure_ascii=False))
+        qsettings.set_value(KEY, json.dumps(layouts, ensure_ascii=False))
 
     def all(self) -> dict[str, dict]:
         """The examples not replaced, then the saved ones."""
@@ -313,12 +313,12 @@ class DockLayoutStore:
 
     @property
     def last(self) -> str:
-        value = QgsSettings().value(LAST_KEY, "")
+        value = qsettings.value(LAST_KEY, "")
         return value if isinstance(value, str) else ""
 
     @last.setter
     def last(self, name: str) -> None:
-        QgsSettings().setValue(LAST_KEY, name)
+        qsettings.set_value(LAST_KEY, name)
 
     def export(self, path: str, names: Optional[list] = None) -> int:
         """Writes the saved layouts (or those named) to a file; how many."""

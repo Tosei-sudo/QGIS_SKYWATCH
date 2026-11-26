@@ -18,6 +18,16 @@ operations, scored against an interpreter's answers and reviewed
 instructors (担当「判読練習の指導者」) make the organisation's in the production
 MIKAGE — 「判読の練習の問題を作る…」 writes their tables (ui/exercise_authoring.py)
 — and read everyone's results in 「判読の練習の成績…」 (ui/exercise_grades.py).
+
+MIKAGE 練習版 (core/edition.py, `scripts/build_zip.py --training-only`):
+練習モード starts by itself once QGIS has started (no question, the sample
+made first the first time) and never ends: 「練習モードを始める」「練習モード
+を終える」 and the instructors' entries are not there. The screens never get
+the production's settings file (qgis_io/settings.effective_config_source):
+of the settings file shipped in the zip (none: the built-in sample only) this
+feature reads what 練習モード takes of a production (`training`, the masters,
+the practice catalogs, the organisation's exercises). The project open is
+kept (there is no production layer to let go of).
 """
 from __future__ import annotations
 
@@ -30,9 +40,9 @@ from qgis.core import Qgis, QgsCoordinateReferenceSystem, QgsCoordinateTransform
 from qgis.PyQt.QtCore import Qt, QTimer
 from qgis.PyQt.QtWidgets import QMessageBox, QProgressDialog, QToolBar
 
-from ..core import edit_stamp, roles
+from ..core import edit_stamp, edition, roles
 from ..core.catalog.api import records_by_ids
-from ..core.config import load_jsonc, parse_config
+from ..core.config import load_jsonc, parse_config, read_config_file
 from ..core.training.api import (
     AREA, Column, DEFAULT_TRAINING, delete_draft, drafts_of, exam_taken, kept, mark_sent, masters, merged_results, read_all_results, read_drafts,
     read_exercises, read_progress, read_results, read_results_of, resolve_config, sample_exercises, save_draft, send_results, set_active,
@@ -56,6 +66,8 @@ START, TUTORIAL, EXERCISES, RESET, END = ("練習モードを始める", "チュ
 #: The instructors' (担当「判読練習の指導者」), shown when the settings file has the organisation's tables.
 AUTHOR, GRADES = "判読の練習の問題を作る…", "判読の練習の成績…"
 ENTRIES = (START, TUTORIAL, EXERCISES, RESET, END, AUTHOR, GRADES)
+#: Not in MIKAGE 練習版: it is always practising, and the instructors work in the production MIKAGE.
+NOT_IN_TRAINING_EDITION = (START, END, AUTHOR, GRADES)
 #: The band's buttons for the courses and the exercises.
 TUTORIAL_BUTTON, EXERCISES_BUTTON = "チュートリアル", "判読の練習"
 #: The role the exercises are solved in (its observation dock).
@@ -70,6 +82,7 @@ TAXONOMY_IMPORT = "分類体系の取り込み…"
 #: The practice's background map (a layer of the practice's project).
 BASEMAP_NAME = "練習用の背景地図"
 BAND_TEXT = "練習用のデータで動作中。本番には書き込まない"
+EDITION_BAND_TEXT = "MIKAGE 練習版。練習用のデータだけで動作"
 
 
 class TutorialPlace:
@@ -200,6 +213,10 @@ class Training(Feature):
     # ---- the hooks ---------------------------------------------------------------------------------------
 
     def start(self) -> None:
+        if edition.training_only():
+            # MIKAGE 練習版: the shipped settings file's `training` (the screens' settings file is the practice's only).
+            self.settings = self._shipped_training()
+            return
         # QGIS stopped while practising: what was kept aside of the profile comes back (担当 among it).
         if training_io.recover():
             if self.host.role_keeper is not None:
@@ -217,7 +234,22 @@ class Training(Feature):
             AUTHOR: self.entry("training_author", AUTHOR, "open_exercise_authoring", name="SatObsTrainingAuthor"),
             GRADES: self.entry("training_grades", GRADES, "open_exercise_grades", name="SatObsTrainingGrades"),
         }
+        if edition.training_only():
+            self._hide(self.settings, apply=False)  # (the roles applied after the entries are all there)
         self._entries_state()
+
+    def qgis_started(self) -> None:
+        # MIKAGE 練習版: 練習モード at once, once QGIS has started.
+        if edition.training_only() and not self.practising:
+            self.start_training()
+
+    def _shipped_training(self):
+        """MIKAGE 練習版: the `training` of the settings file shipped in the zip (the defaults: the built-in sample)."""
+        source = settings.production_config_source()[0]
+        if not source:
+            return DEFAULT_TRAINING
+        config, _problems = read_config_file(source)
+        return config.training
 
     def unload(self) -> None:
         # QGIS closing (or the plugin turned off) while practising: back to the production quietly (the map left as it is).
@@ -237,19 +269,26 @@ class Training(Feature):
     # ---- the settings file's `training` -----------------------------------------------------------------
 
     def _config_read(self) -> None:
-        if self.context.loading or self.practising:
+        if self.context.loading or self.practising or edition.training_only():
             return
         self.settings = self.context.config.training
-        hidden = set() if self.settings.enabled else {tr(t) for t in ENTRIES}
-        tables = self.settings.exercises
+        self._hide(self.settings)
+
+    def _hide(self, training, apply: bool = True) -> None:
+        """The entries the settings file's `training` does not offer hidden (and MIKAGE 練習版's never there)."""
+        hidden = set() if training.enabled else {tr(t) for t in ENTRIES}
+        tables = training.exercises
         if tables is None:
             hidden |= {tr(AUTHOR), tr(GRADES)}
         elif not tables.results:
             hidden.add(tr(GRADES))
+        if edition.training_only():
+            hidden |= {tr(t) for t in NOT_IN_TRAINING_EDITION}
         others = self.host.hidden_entries - {tr(t) for t in ENTRIES}
         if others | hidden != self.host.hidden_entries:
             self.host.hidden_entries = others | hidden
-            self.host.apply_roles()
+            if apply:
+                self.host.apply_roles()
 
     def _entries_state(self) -> None:
         on = self.practising
@@ -269,6 +308,8 @@ class Training(Feature):
         if not self.settings.enabled:
             self.iface.messageBar().pushInfo(tr("練習モード"), tr("練習モードは使えない（管理者の設定: training）"))
             return False
+        if edition.training_only():
+            return self._start_by_itself(tutorial)
         builtin = self.settings.builtin
         files = training_io.files()
         ask = StartDialog(self.window(), builtin, files.created() if files.ready() else None,
@@ -286,6 +327,17 @@ class Training(Feature):
         self.project_before = QgsProject.instance().fileName()
         if builtin and (not files.ready() or ask.renew.isChecked()):
             self._prepare(files, reset=files.ready(), then=lambda: self._switch_on(files, builtin))
+        else:
+            self._switch_on(files, builtin)
+        return True
+
+    def _start_by_itself(self, tutorial: bool = False) -> bool:
+        """MIKAGE 練習版: 練習モード without the question (the sample made first when it is not there yet)."""
+        self._tutorial_after_start = tutorial
+        builtin = self.settings.builtin
+        files = training_io.files()
+        if builtin and not files.ready():
+            self._prepare(files, reset=False, then=lambda: self._switch_on(files, builtin))
         else:
             self._switch_on(files, builtin)
         return True
@@ -379,16 +431,22 @@ class Training(Feature):
         self.context.reload()
         self._forget_lists()
         # A new project: no production layer left on the map (the one of before saved or let go already).
-        QgsProject.instance().setDirty(False)
-        self.iface.newProject(False)
+        # MIKAGE 練習版 keeps the one open: it never had any.
+        if not edition.training_only():
+            QgsProject.instance().setDirty(False)
+            self.iface.newProject(False)
         if builtin:
             self._add_basemap(files)
         self._screens(True)
         self._entries_state()
         read_names = masters.read_text(taken, production.value if production is not None else None)
         read = tr("{m}は本番から読み込み（読むだけ）。").format(m=read_names) if read_names else ""
-        self.iface.messageBar().pushMessage(tr("練習モード"), tr("練習モードを開始。") + read + tr("終えるときは地図の上の「練習モードを終える」"),
-                                            Qgis.MessageLevel.Success, 8)
+        if edition.training_only():
+            self.iface.messageBar().pushMessage(tr(edition.name()), tr("練習モードで開始。") + read + tr("操作の案内は地図の上の「チュートリアル」"),
+                                                Qgis.MessageLevel.Success, 8)
+        else:
+            self.iface.messageBar().pushMessage(tr("練習モード"), tr("練習モードを開始。") + read + tr("終えるときは地図の上の「練習モードを終える」"),
+                                                Qgis.MessageLevel.Success, 8)
         tutorial, exercises, trial = self._tutorial_after_start, self._exercises_after_start, self._trial
         self._tutorial_after_start = self._exercises_after_start = False
         self._trial = None
@@ -401,10 +459,12 @@ class Training(Feature):
             QTimer.singleShot(300, self.open_tutorial)
 
     def _add_basemap(self, files) -> None:
-        if os.path.exists(files.basemap):
+        project = QgsProject.instance()
+        there = any(os.path.normcase(os.path.abspath(layer.source())) == os.path.normcase(os.path.abspath(files.basemap))
+                    for layer in project.mapLayers().values())
+        if os.path.exists(files.basemap) and not there:  # (MIKAGE 練習版's project may have it already)
             layer = QgsRasterLayer(files.basemap, tr(BASEMAP_NAME))
             if layer.isValid():
-                project = QgsProject.instance()
                 project.addMapLayer(layer, False)
                 project.layerTreeRoot().addLayer(layer)  # (at the bottom)
         self.show_area()
@@ -425,8 +485,8 @@ class Training(Feature):
     # ---- ending ------------------------------------------------------------------------------------------
 
     def end_training(self) -> bool:
-        """「練習モードを終える」: back to the production and its project; False when not practising."""
-        if not self.practising or self._busy:
+        """「練習モードを終える」: back to the production and its project; False when not practising (or MIKAGE 練習版)."""
+        if not self.practising or self._busy or edition.training_only():
             return False
         self._stop_tutorial()
         self._stop_exercise()
@@ -514,8 +574,11 @@ class Training(Feature):
         if on:
             canvas = self.iface.mapCanvas()
             if self.band is None:
-                self.band = TrainingBand(canvas, [(tr(TUTORIAL_BUTTON), self.open_tutorial), (tr(EXERCISES_BUTTON), self.open_exercises),
-                                                  (tr(RESET), self.reset_training), (tr(END), self.end_training)], tr(BAND_TEXT),
+                buttons = [(tr(TUTORIAL_BUTTON), self.open_tutorial), (tr(EXERCISES_BUTTON), self.open_exercises),
+                           (tr(RESET), self.reset_training)]
+                if not edition.training_only():
+                    buttons.append((tr(END), self.end_training))
+                self.band = TrainingBand(canvas, buttons, tr(EDITION_BAND_TEXT if edition.training_only() else BAND_TEXT),
                                          cover=self.iface.messageBar())
             if self.mark is None:
                 self.mark = status_mark()
