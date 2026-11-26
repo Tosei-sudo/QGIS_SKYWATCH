@@ -56,7 +56,6 @@ class AlertsPart:
             return
         client, now = self.context.esri(), time.monotonic()
         cached = self._alert_conditions if self._alert_conditions and self._alert_conditions[0] is s and now - self._alert_conditions[1] < 600 else None
-        token = self.context.token_for
         levels = book.confidences()
         history = list(book.records)
 
@@ -64,15 +63,15 @@ class AlertsPart:
             if cached:
                 rules, fences = cached[2], cached[3]
             else:
-                rules = load_rules(client, s.rules, token(s.rules.url, s.rules.token)) if s.rules else None
-                fences = load_geofences(client, s.geofences, token(s.geofences.url, s.geofences.token)) if s.geofences else []
-            done = reported_ids(client, s, token(s.table.url, s.table.token), ids=[o.id for o in records]) if s.table else set()
+                rules = load_rules(client, s.rules, None) if s.rules else None
+                fences = load_geofences(client, s.geofences, None) if s.geofences else []
+            done = reported_ids(client, s, None, ids=[o.id for o in records]) if s.table else set()
             items = select(records, s, rules, fences, levels, done, history=history)
             if items and (s.named_areas or s.countries):
                 # Only for those notable: their squares from the cache (place_cache), the server asked for the others.
                 points = points_of(items)
-                named = areas_at(client, s.named_areas, points, token(s.named_areas.url, s.named_areas.token)) if s.named_areas else []
-                countries = areas_at(client, s.countries, points, token(s.countries.url, s.countries.token)) if s.countries else []
+                named = areas_at(client, s.named_areas, points, None) if s.named_areas else []
+                countries = areas_at(client, s.countries, points, None) if s.countries else []
                 name_places(items, named, countries, levels)
             return rules, fences, items
 
@@ -127,7 +126,7 @@ class AlertsPart:
                 self.reported = set()
                 self.render()
             return
-        repo = AlertLogRepository(self.context.esri(), s, self.context.token_for(s.table.url, s.table.token))
+        repo = AlertLogRepository(self.context.esri(), s, None)
 
         def finished(ids) -> None:
             if asked != self._reported_asked:

@@ -584,7 +584,7 @@ class AppendDialog(QDialog):
         self._describe(append_io.target_for_url(url))
 
     def _token(self, url: str):
-        return self.context.token_for(url, self.context.token_of(url)) if self.context is not None else None
+        return None
 
     def _describe(self, target: append_io.Target) -> None:
         """An Esri target's fields asked (in a task), then shown."""

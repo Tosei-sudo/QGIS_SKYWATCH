@@ -399,9 +399,6 @@ class OutageDialog(QDialog):
     def source(self):
         return self.context.config.satellite_outages
 
-    def token(self) -> Optional[str]:
-        return self.context.token_for(self.source.url, self.source.token)
-
     # --- Reading ----------------------------------------------------------------------------------
 
     def run(self) -> None:
@@ -411,7 +408,7 @@ class OutageDialog(QDialog):
         if self.source is None:
             self.status.setText(self.tr("衛星の障害情報の表が未設定（管理者に連絡: satelliteOutages）［E703］"))
             return
-        source, client, token = self.source, self.context.esri(), self.token()
+        source, client, token = self.source, self.context.esri(), None
         self.status.setText(self.tr("衛星の障害情報を取得中…"))
 
         def work(task):
@@ -522,7 +519,7 @@ class OutageDialog(QDialog):
                 "選んだ {n} 件の障害（{names}）を削除（復元できない）。復旧した障害は、削除せず「復旧」にすると履歴に残る").format(
                 n=len(chosen), names=names), yes=self.tr("削除")):
             return
-        source, client, token = self.source, self.context.esri(), self.token()
+        source, client, token = self.source, self.context.esri(), None
 
         def work(task):
             return delete_outages(client, source, chosen, token)
@@ -544,7 +541,7 @@ class OutageDialog(QDialog):
     def _save(self, outages: list[Outage], what: str) -> None:
         if self.task is not None or self.source is None:
             return
-        source, client, token = self.source, self.context.esri(), self.token()
+        source, client, token = self.source, self.context.esri(), None
 
         def work(task):
             saved, problems = [], []

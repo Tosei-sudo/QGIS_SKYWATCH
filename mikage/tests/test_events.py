@@ -134,13 +134,13 @@ def test_saving_again_after_a_lost_answer_updates_rather_than_adds():
     assert len(events.rows) == 1 and events.rows[0]["attributes"]["NOTE"] == "再送"
 
 
-def test_deleting_takes_the_event_first_and_asks_the_links_with_their_own_token():
+def test_deleting_takes_the_event_first_and_then_its_links():
     fake = FakeEsri()
     events = fake.add_layer(EVENTS, FakeLayer({"EVENT_ID": S, "EVENT_NAME": S}, ""))
-    links = fake.add_layer(LINKS, FakeLayer({"EVENT_ID": S, "ITEM_TYPE": S, "ITEM_ID": S}, "", token="L"))
-    config, _p = parse_config({"events": {"layer": EVENTS, "links": {"url": LINKS, "token": "L"}}})
+    links = fake.add_layer(LINKS, FakeLayer({"EVENT_ID": S, "ITEM_TYPE": S, "ITEM_ID": S}, ""))
+    config, _p = parse_config({"events": {"layer": EVENTS, "links": {"url": LINKS}}})
     client, s = EsriClient(fake), config.events
     e = save_event(client, s, new_event("地震"))
     add_links(client, s, [e.id], [LinkItem("image", "IMG1")])
-    assert delete_event(client, s, e, token="E", links_token="L") == 1
+    assert delete_event(client, s, e) == 1
     assert events.rows == [] and links.rows == []

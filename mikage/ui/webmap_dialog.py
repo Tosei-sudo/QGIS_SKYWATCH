@@ -23,6 +23,7 @@ from qgis.PyQt.QtWidgets import (
     QMessageBox, QPushButton, QVBoxLayout,
 )
 
+from ..core import sign_in
 from ..core.webmap import (
     DEFAULT_PORTAL, MAX_WEBMAP_READ, SaveResult, WebMapItemRef, item_extent, item_page, parse_item_input, plan_web_map, portal_root,
 )
@@ -70,6 +71,10 @@ class PortalRow(QObject):
 
     def _portal_changed(self, text: str) -> None:
         root = portal_root(text)
+        rule = sign_in.rule_for(root) if root else None
+        # A portal of the settings file's `signIn` signs in as it says (the choice here is not used).
+        self.auth.setEnabled(rule is None)
+        self.auth.setToolTip(_tr("設定ファイルの signIn: {how}").format(how=rule.shown) if rule is not None else "")
         self.auth.setConfigId(settings.auth_for(root) or "" if root else "")
 
     def portal(self) -> Optional[str]:
@@ -78,6 +83,8 @@ class PortalRow(QObject):
     def keep(self, portal: str) -> Optional[str]:
         """Remembers the portal and its sign-in (for the services of its web maps too); the authcfg."""
         QgsSettings().setValue(PORTAL_KEY, portal)
+        if sign_in.rule_for(portal) is not None:
+            return settings.auth_for(portal)
         chosen = self.auth.configId() or None
         mapping = settings.auth_map()
         if chosen and mapping.get(portal) != chosen:
@@ -289,7 +296,9 @@ class WebMapSaveDialog(QDialog):
             self.status.setText(_tr("ポータルの URL を入力"))
             return
         authcfg = self.portal.keep(portal)
-        if not authcfg:
+        rule = sign_in.rule_for(portal)
+        if rule is not None and rule.method == "none" or rule is None and not authcfg:
+            # (A portal of the settings file's `signIn` signs in as it says: iwa with the Windows logon, saml with its own authcfg.)
             self.status.setText(_tr("ポータルに保存するには認証設定を選択"))
             return
         opened = self.owner.opened

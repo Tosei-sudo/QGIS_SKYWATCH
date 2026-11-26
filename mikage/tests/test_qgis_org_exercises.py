@@ -32,9 +32,8 @@ from mikage.ui import exercise_screens  # noqa: E402
 
 ORG = "https://org.invalid/arcgis/rest/services/Training/FeatureServer"
 CATALOG = f"{PRODUCTION}/Catalog/FeatureServer/0"
-TOKEN = "ORG-TOKEN"
 ORG_CONFIG = {
-    "training": {"exercises": {"exercises": f"{ORG}/0", "answers": f"{ORG}/1", "results": f"{ORG}/2", "token": TOKEN}},
+    "training": {"exercises": {"exercises": f"{ORG}/0", "answers": f"{ORG}/1", "results": f"{ORG}/2"}},
     "imageCatalogs": [{"label": "本番カタログ", "url": CATALOG, "fields": {"id": "IMG_ID", "source": "PATH"}}],
 }
 NUMBERS = {"COURSE_ORDER", "TIME_LIMIT_MIN", "PASS_SCORE", "ANSWER_NO", "LENGTH_M", "WIDTH_M", "HEADING", "ANSWER_POINTS", "TOLERANCE_M",
@@ -56,9 +55,9 @@ def org(plugin, monkeypatch):
     monkeypatch.setattr(PluginContext, "esri", lambda self: EsriClient(
         lambda url, form: fake(url, form) if url.startswith((ORG, PRODUCTION)) else real(url, form)))
     layers = {
-        "exercises": fake.add_layer(f"{ORG}/0", FakeLayer(_types(tables.EXERCISE_FIELDS), geometry="esriGeometryPolygon", token=TOKEN)),
-        "answers": fake.add_layer(f"{ORG}/1", FakeLayer(_types(tables.ANSWER_FIELDS), token=TOKEN)),
-        "results": fake.add_layer(f"{ORG}/2", FakeLayer(_types(tables.RESULT_FIELDS), geometry="", token=TOKEN)),
+        "exercises": fake.add_layer(f"{ORG}/0", FakeLayer(_types(tables.EXERCISE_FIELDS), geometry="esriGeometryPolygon")),
+        "answers": fake.add_layer(f"{ORG}/1", FakeLayer(_types(tables.ANSWER_FIELDS))),
+        "results": fake.add_layer(f"{ORG}/2", FakeLayer(_types(tables.RESULT_FIELDS), geometry="")),
         "catalog": fake.add_layer(CATALOG, FakeLayer({"IMG_ID": "esriFieldTypeString", "PATH": "esriFieldTypeString"},
                                                      geometry="esriGeometryPolygon")),
     }
@@ -122,7 +121,7 @@ def test_an_organisations_exercise_is_offered_solved_and_its_try_sent(org, monke
     assert wait_for(lambda: training.exercise_run is not None and training.exercise_run.bar is not None, 20000)
     run = training.exercise_run
     assert wait_for(lambda: obs.active, 10000)
-    # Offered: the organisation's 2 (the draft not), their course first, then the sample's; their tables asked with their token.
+    # Offered: the organisation's 2 (the draft not), their course first, then the sample's; their tables asked (no token: signIn's).
     d = dialogs[0]
     titles = [d.table.item(r, 1).text() for r in range(d.table.rowCount())]
     assert titles == ["組織の船を見つける", "組織の確認試験（船の判読・入門）"], titles
@@ -130,7 +129,7 @@ def test_an_organisations_exercise_is_offered_solved_and_its_try_sent(org, monke
     assert d.source.text() == "組織の問題 2 問・見本の問題（横須賀）6 問"
     assert d.table.item(1, 7).text() == "済（1 回だけ）"
     asked = [form for url, form in fake.asked if url.startswith(ORG)]
-    assert asked and all(form.get("token") == TOKEN for form in asked)
+    assert asked and not any("token" in form for form in asked)
     # (only this person's tries read from the results table)
     assert [r["exerciseId"] for r in training.org_results] == ["ORG-EXAM"]
     e = run.exercise

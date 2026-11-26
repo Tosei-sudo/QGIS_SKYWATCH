@@ -42,8 +42,6 @@ class GeocoderConfig:
     #: Shown beside each place it finds.
     label: str
     url: str
-    #: Esri services that need one.
-    token: Optional[str] = None
     #: `features`: the attribute holding the name. `csv`: the column of names (else the first that reads as one).
     field: Optional[str] = None
     #: `features`: every attribute searched, the name's first (`field` given as a list); just `field` when one.
@@ -74,7 +72,7 @@ def geocoder_of(value: Any, problems: list[str], index: int) -> Optional[Geocode
     if not is_record(value):
         problems.append(f"geocoders[{index}] はオブジェクトで指定")
         return None
-    type_, url, label, token, name = (value.get(k) for k in ("type", "url", "label", "token", "field"))
+    type_, url, label, name = (value.get(k) for k in ("type", "url", "label", "field"))
     if type_ not in GEOCODER_TYPES:
         problems.append(f"geocoders[{index}] の type は {'・'.join(GEOCODER_TYPES)} のいずれかで指定")
         return None
@@ -98,7 +96,6 @@ def geocoder_of(value: Any, problems: list[str], index: int) -> Optional[Geocode
         return None
     return GeocoderConfig(
         type=type_, url=url, label=label if isinstance(label, str) and label else str(type_),
-        token=token if isinstance(token, str) and token else None,
         field=names[0] if names else None, fields=names,
     )
 
@@ -431,7 +428,7 @@ class PlaceSearch:
         """The layer's aliases of its attributes (読み, 別名), to say which one matched; the names when not readable."""
         if base not in self._aliases:
             try:
-                info = self._esri(base, {}, g.token)
+                info = self._esri(base, {}, None)
                 fields = info.get("fields") if isinstance(info, dict) else None
                 self._aliases[base] = {
                     f["name"]: f["alias"] for f in fields or []
@@ -450,7 +447,7 @@ class PlaceSearch:
             return parse_nominatim(self._json(nominatim_url(base, q)), g.label)
         if g.type == "arcgis":
             params = {"SingleLine": q, "outSR": "4326", "maxLocations": str(LIMIT), "outFields": "Type"}
-            return parse_arcgis(self._esri(f"{base}/findAddressCandidates", params, g.token), g.label)
+            return parse_arcgis(self._esri(f"{base}/findAddressCandidates", params, None), g.label)
         if g.type == "features":
             names = list(g.fields or (g.field or "",))
             # Several attributes (a name and its reading): kana typed either way finds the reading.
@@ -462,7 +459,7 @@ class PlaceSearch:
                 # Several attributes: more asked, the best kept (ranked here).
                 "resultRecordCount": str(LIMIT if len(names) == 1 else LIMIT * 3),
             }
-            data = self._esri(f"{base}/query", params, g.token)
+            data = self._esri(f"{base}/query", params, None)
             return parse_features(data, names, g.label, q, self._aliases_of(base, g) if len(names) > 1 else None)
         # csv: read once; a failure is tried again next time.
         url = self._resolve(g.url)

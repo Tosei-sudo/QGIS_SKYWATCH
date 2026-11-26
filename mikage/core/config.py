@@ -18,6 +18,7 @@ from .ai.model_config import AiModelConfig, ai_model_of
 from .ai.transfer import DetectionOutput, detection_output_of
 from .ai_results import AiResultSource, ai_result_source_of
 from .auth import ArcgisPortalConfig, arcgis_portal_of
+from .sign_in import SignInRule, sign_in_rules_of
 from .audit import DEFAULT_AUDIT, AuditSettings, audit_log_of
 from .training.api import DEFAULT_TRAINING, TrainingSettings, training_settings_of
 from .edit_stamp import DEFAULT_EDIT_TRACKING, EditTracking, edit_tracking_of
@@ -104,6 +105,8 @@ class PluginConfig:
     #: `textAssist`: the small generative model of 文章の手伝い (備考を整える・申し送りの下書き, core/text_assist.py); None hides it.
     text_assist: Optional[TextAssistSettings] = None
     arcgis_portals: list[ArcgisPortalConfig] = field(default_factory=list)
+    #: `signIn`: how the servers are signed in to, by domain (統合 Windows 認証・SAML・なし, core/sign_in.py).
+    sign_in: list[SignInRule] = field(default_factory=list)
     #: `layers`: added to an empty project when QGIS starts (the first entry at the bottom).
     startup_layers: list[StartupLayer] = field(default_factory=list)
     #: The background maps to switch between (the viewer's list when the file has none).
@@ -363,6 +366,7 @@ SECTIONS = (
     Section("imageCorrections", "image_corrections", fix_source_of),
     Section("textAssist", "text_assist", text_assist_settings_of),
     Section("arcgisPortals", "arcgis_portals", _arcgis_portals),
+    Section("signIn", "sign_in", sign_in_rules_of),
     Section("baseMaps", "base_maps", base_maps_of),
     Section("defaultBaseMap", "default_base_map", lambda v, problems, config: default_base_map_of(v, config.base_maps, problems),
             after=True),
@@ -421,7 +425,39 @@ def parse_config(value: Any) -> tuple[PluginConfig, list[str]]:
         # confidence.<key>: a key some 確度 level has (the vocabulary's or a store's own).
         levels = [*config.observation_vocabulary.confidences, *(c for st in config.observation_stores for c in st.confidences or [])]
         problems.extend(level_key_problems(config.alert_reports, levels))
+    leftover = token_problem(value)
+    if leftover:
+        problems.append(leftover)
     return config, problems
+
+
+def token_problem(value: Any) -> str:
+    """
+    One line for every `token` left in the file ("" when none): the plugin
+    sends none of them; the servers are signed in to by `signIn`
+    (core/sign_in.py) or the authentication chosen in 「設定…」.
+    """
+    found: list[str] = []
+
+    def walk(v: Any, at: str, depth: int = 0) -> None:
+        if depth > 8:
+            return
+        if isinstance(v, dict):
+            for k, sub in v.items():
+                here = f"{at}.{k}" if at else str(k)
+                if k == "token":
+                    found.append(here)
+                else:
+                    walk(sub, here, depth + 1)
+        elif isinstance(v, list):
+            for i, sub in enumerate(v):
+                walk(sub, f"{at}[{i}]", depth + 1)
+
+    walk(value, "")
+    if not found:
+        return ""
+    more = f" ほか {len(found) - 1} 件" if len(found) > 1 else ""
+    return f"token は使わない（{found[0]}{more}）。サインインは signIn で指定（サーバーのドメインごとに iwa・saml・none）"
 
 
 def parse_config_text(text: str) -> tuple[PluginConfig, list[str]]:

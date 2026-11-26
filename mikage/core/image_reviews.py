@@ -182,7 +182,7 @@ def attributes_of(r: ImageReview, fields: dict[str, str], types: dict[str, str],
 
 
 def _types(client: EsriClient, source: EsriSource, token: Optional[str], refresh: bool = False):
-    info = client.layer(source.url, token or source.token, refresh=refresh)
+    info = client.layer(source.url, token, refresh=refresh)
     missing = [source.fields[r] for r in NEEDED if source.fields[r] not in info.field_types]
     if missing:
         raise EsriError(f"画像の評価の表に必要な項目がない（管理者に連絡: {'・'.join(missing)}）", code="E704")
@@ -196,7 +196,6 @@ def _where(source: EsriSource, extra: str) -> str:
 def load_reviews(client: EsriClient, source: EsriSource, image_ids: Iterable[str], token: Optional[str] = None,
                  geometry: bool = False) -> dict[str, list[ImageReview]]:
     """The rows of these images by image id (images without one left out), the whole image first, then by name."""
-    token = token or source.token
     info = _types(client, source, token)
     f = source.fields
     ids = list(dict.fromkeys(i for i in image_ids if i))
@@ -233,7 +232,6 @@ def save_reviews(client: EsriClient, source: EsriSource, image_id: str, wanted: 
     one key (two people at the same moment) are one again afterwards: the
     first kept, written with the last rating.
     """
-    token = token or source.token
     info = _types(client, source, token, refresh=True)
     f = source.fields
     types, oid = info.field_types, info.object_id_field

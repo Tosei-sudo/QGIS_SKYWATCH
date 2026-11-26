@@ -55,29 +55,27 @@ def store_vocabulary(config: Optional[ObservationStoreConfig], base: Observation
 
 
 def store_sets(configs: list[ObservationStoreConfig], vocabulary: ObservationVocabulary, gpkg: Callable[[], GeoPackage],
-               client: Callable[[], EsriClient], token_for: Callable[[str, Optional[str]], Optional[str]],
-               local: bool = True) -> list[StoreSet]:
+               client: Callable[[], EsriClient], local: bool = True) -> list[StoreSet]:
     """
     Every store, the Esri ones first, then the local one unless `local` is
-    false. `token_for(url, token)` gives the token to send (None where QGIS authenticates).
+    false (the sign-in is the requests' own: core/sign_in.py, QGIS's authentication configurations).
     """
     out: list[StoreSet] = []
     for c in configs:
         esri = client()
         work = offline_of(esri)
-        records: ObservationStore = EsriObservationStore(c, esri, token_for(c.url, c.token))
+        records: ObservationStore = EsriObservationStore(c, esri, None)
         if work is not None:
             # Through a server outage: the last reads, and changes kept to send (core/obs/offline_stores.py).
             records = OfflineObservationStore(records, work)
         if c.areas:
-            areas: AreaStore = EsriAreaStore(f"{c.label}の確認範囲", c.areas, esri, token_for(c.areas.url, c.areas.token))
+            areas: AreaStore = EsriAreaStore(f"{c.label}の確認範囲", c.areas, esri, None)
             if work is not None:
                 areas = OfflineAreaStore(areas, work)
         else:
             areas = LocalAreaStore(gpkg(), c.label)
         if c.taxonomy_table:
-            taxonomy: TaxonomyStore = EsriTaxonomyStore(c.taxonomy_table, esri, f"{c.label}の分類テーブル",
-                                                        token_for(c.taxonomy_table.url, c.taxonomy_table.token))
+            taxonomy: TaxonomyStore = EsriTaxonomyStore(c.taxonomy_table, esri, f"{c.label}の分類テーブル", None)
         else:
             taxonomy = LocalTaxonomyStore(gpkg(), c.label)
         out.append(StoreSet(c.label, records, areas, taxonomy, store_vocabulary(c, vocabulary), c))

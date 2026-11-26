@@ -71,7 +71,6 @@ class AiResultSource:
     activity: str = ""
     confidence: str = ""
     max_results: int = 2000
-    token: Optional[str] = None
     #: Nearer than this (m) to a thing of the image before or after (and sure) is recorded as it (継続); 0 never without asking.
     continue_radius: float = CONTINUE_METRES
     #: Nearer than this (m) is offered as what it may continue; 0 offers nothing.
@@ -126,7 +125,7 @@ def ai_result_source_of(value: Any, problems: list[str], index: int) -> Optional
             problems.append(f"{at} の {key} は 0〜100000（m）で指定")
         radii[key] = float(v) if is_number(v) and 0 <= v <= 100_000 else default
     most = value.get("maxResults")
-    label, where, token = value.get("label"), value.get("where"), value.get("token")
+    label, where = value.get("label"), value.get("where")
     activity, confidence = value.get("activity"), value.get("confidence")
     return AiResultSource(
         label=label if isinstance(label, str) and label else f"AI結果 {index + 1}",
@@ -138,7 +137,6 @@ def ai_result_source_of(value: Any, problems: list[str], index: int) -> Optional
         activity=activity.strip() if isinstance(activity, str) else "",
         confidence=confidence.strip() if isinstance(confidence, str) else "",
         max_results=min(most, 20000) if isinstance(most, int) and not isinstance(most, bool) and most > 0 else 2000,
-        token=token if isinstance(token, str) and token else None,
         continue_radius=radii["continueRadius"],
         candidate_radius=radii["candidateRadius"],
     )
@@ -158,7 +156,7 @@ def output_source(output: Any) -> Optional[AiResultSource]:
     if not getattr(output, "ai_results", True) or "imageId" not in output.fields:
         return None
     fields = {mine: output.fields[role] for role, mine in OUTPUT_ROLES.items() if role in output.fields}
-    return AiResultSource(label=output.label, url=output.url, fields=fields, token=output.token, detections=True)
+    return AiResultSource(label=output.label, url=output.url, fields=fields, detections=True)
 
 
 def result_sources(config: Any) -> list[AiResultSource]:

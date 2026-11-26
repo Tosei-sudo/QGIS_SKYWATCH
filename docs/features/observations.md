@@ -472,7 +472,7 @@ Python からは `api.observation_dock.open_import()`（`choose_csv(path)`・`se
 - 一覧は 1 分ごと（別の画像を表示したとき）と変更の後に読み直す
 - 「画像カタログ」ドックの一覧にも画像ごとの分担（未着手・作業中・保留・完了。協業では担当中の全員の名前、だれか 1 人でも作業中なら作業中）が出て、「未着手のみ」で誰も手を付けていない画像に絞れる（[画像カタログ](images.md#画像カタログ)）
 
-テーブル（`assignments`。URL か `{ "url", "fields", "where", "token", "claimOnRecord", "mode" }`。`claimOnRecord`（既定 `true`）は「クリック記録」の開始で担当を取るか。`mode` は `"shared"`（協業、既定）か `"exclusive"`（排他）。編集できる …/FeatureServer/n）の属性: `IMAGE_ID`（必須）・`IMAGE_NAME`・`IMAGE_TIME`（日付）・`ASSIGNEE`（必須）・`STATUS`（作業中・保留・完了）・`NOTE`・`TAKEN_AT`（日付）・`DONE_AT`（日付）。名前は `fields` で変更可（役割 `imageId`・`imageName`・`imageTime`・`assignee`・`status`・`note`・`takenAt`・`doneAt`）。
+テーブル（`assignments`。URL か `{ "url", "fields", "where", "claimOnRecord", "mode" }`。`claimOnRecord`（既定 `true`）は「クリック記録」の開始で担当を取るか。`mode` は `"shared"`（協業、既定）か `"exclusive"`（排他）。編集できる …/FeatureServer/n）の属性: `IMAGE_ID`（必須）・`IMAGE_NAME`・`IMAGE_TIME`（日付）・`ASSIGNEE`（必須）・`STATUS`（作業中・保留・完了）・`NOTE`・`TAKEN_AT`（日付）・`DONE_AT`（日付）。名前は `fields` で変更可（役割 `imageId`・`imageName`・`imageTime`・`assignee`・`status`・`note`・`takenAt`・`doneAt`）。
 
 **引き継ぎメモ**: メニュー「観測記録 ▸ 引き継ぎメモ…」。交代のとき、次の担当者に渡す文章を作る。
 
@@ -511,7 +511,7 @@ Python からは `api.observation_dock.open_import()`（`choose_csv(path)`・`se
 - 撮像依頼の照合（「計画と実績の照合」の「照合」と、定期の照合 `follow_job`）: 依頼の範囲にかかる地名の評価がすべて「使えない」の画像（かかる地名がなければ画像全体が「使えない」の画像）は撮像済みに数えない。ほかの画像がなければ、いつもどおり日数の後に未撮像になる。「一部」は撮像済みに数える
 - もう撮像済みの行: 画像がその後「使えない」と付けられたら、「撮像予定」ドックと「計画と実績の照合」で「撮像済み（要確認）」（橙）と「画像の評価: 使えない（雲）」を出す。行は変えない（出し直すか、未撮像にするかは担当が決める）
 
-テーブル（`imageReviews`。URL か `{ "url", "fields", "where", "token" }`。編集できるポリゴンの …/FeatureServer/n）の属性: `REVIEW_ID`（必須）・`IMAGE_ID`（必須）・`IMAGE_NAME`・`IMAGE_TIME`（日付）・`SATELLITE`・`NAMED_AREA_ID`・`NAMED_AREA_NAME`・`RATING`（必須。使える・一部・使えない）・`CLOUD_PCT`・`REASONS`・`NOTE`・`REVIEWED_BY`・`REVIEWED_AT`（日付）。名前は `fields` で変更可（役割 `id`・`imageId`・`imageName`・`imageTime`・`satellite`・`areaId`・`areaName`・`rating`・`cloud`・`reasons`・`note`・`reviewedBy`・`reviewedAt`）。詳しくは [`TBL_IMAGE_REVIEW`](../admin/esri-tables.md#tbl_image_review画像の評価)。
+テーブル（`imageReviews`。URL か `{ "url", "fields", "where" }`。編集できるポリゴンの …/FeatureServer/n）の属性: `REVIEW_ID`（必須）・`IMAGE_ID`（必須）・`IMAGE_NAME`・`IMAGE_TIME`（日付）・`SATELLITE`・`NAMED_AREA_ID`・`NAMED_AREA_NAME`・`RATING`（必須。使える・一部・使えない）・`CLOUD_PCT`・`REASONS`・`NOTE`・`REVIEWED_BY`・`REVIEWED_AT`（日付）。名前は `fields` で変更可（役割 `id`・`imageId`・`imageName`・`imageTime`・`satellite`・`areaId`・`areaName`・`rating`・`cloud`・`reasons`・`note`・`reviewedBy`・`reviewedAt`）。詳しくは [`TBL_IMAGE_REVIEW`](../admin/esri-tables.md#tbl_image_review画像の評価)。
 
 ```jsonc
 "imageReviews": "https://…/Work/FeatureServer/2"
@@ -539,7 +539,7 @@ Python からは `api.observation_dock.open_import()`（`choose_csv(path)`・`se
 - イベントのレイヤー（`layer`、編集可）: ポリゴンレイヤー（範囲を持つ）かテーブル（範囲なし）。`EVENT_ID`（必須）・`EVENT_NAME`（必須）・`EVENT_KIND`・`STATUS`（`対応中`／`終了`）・`START_AT`・`END_AT`（日付）・`NOTE`
 - 紐付けテーブル（`links`、編集可）: 1 項目 1 行。`EVENT_ID`・`ITEM_TYPE`（`image`・`observation`・`request`）・`ITEM_ID`（画像はカタログの画像ID、記録は記録ID、依頼は依頼ID。以上 3 つは必須）・`ITEM_LABEL`・`ITEM_TIME`（撮像日時など。一覧に出す）・`SOURCE`（カタログ・保存先・台帳の URL。ローカルの記録は `local`）・`NOTE`。追加者・追加日時は [`editTracking`](../admin/operations.md#作成者更新者の記録edittracking) の `CREATED_USER`・`CREATED_DATE`（あれば）
 - 種別の候補（設定ファイルの `kinds`、文字列の配列）: フォームの「種別」に出す候補をこの順で。書くと既定の候補（地震・津波・風水害・火山・火災・事故・その他）とレイヤーで使われている種別は出さない。書かなければ使われている種別、続けて既定の候補。どちらでも候補にない種別を手で入力できる
-- 属性名はそれぞれの `fields` で変更可（役割: `id`・`name`・`kind`・`status`・`start`・`end`・`note`／`event`・`type`・`item`・`label`・`time`・`source`・`note`）。`where`・`token` も可
+- 属性名はそれぞれの `fields` で変更可（役割: `id`・`name`・`kind`・`status`・`start`・`end`・`note`／`event`・`type`・`item`・`label`・`time`・`source`・`note`）。`where` も可
 
 ```jsonc
 "events": {
@@ -574,7 +574,7 @@ Python からは `api.observation_dock.open_import()`（`choose_csv(path)`・`se
 - 参考情報のレイヤー（`layer`、編集できるポイント）: `INFO_ID`（必須）・`TITLE`（必須）・`INFO_TIME`（必須、日付）・`PUBLISHED_AT`（日付）・`SOURCE`・`SOURCE_REF`・`RELIABILITY`・`SUMMARY`・`KIND`・`NAMED_AREA_ID`・`NOTE`。詳しくは [`TBL_REFERENCE_INFO`](../admin/esri-tables.md#tbl_reference_info参考情報)
 - 紐付けテーブル（`links`、編集可。なければ紐付けは使わない）: 1 組 1 行。`INFO_ID`・`ITEM_TYPE`（`event`・`thing`・`observation`）・`ITEM_ID`（以上 3 つは必須）・`LABEL`。[`TBL_REFERENCE_LINK`](../admin/esri-tables.md#tbl_reference_link参考情報の紐付け)
 - `days`: 画像の前後の日数（1〜366、既定 7）
-- 属性名はそれぞれの `fields` で変更可（役割: `id`・`title`・`time`・`published`・`source`・`sourceRef`・`reliability`・`summary`・`kind`・`areaId`・`note`／`info`・`type`・`item`・`label`）。`where`・`token` も可
+- 属性名はそれぞれの `fields` で変更可（役割: `id`・`title`・`time`・`published`・`source`・`sourceRef`・`reliability`・`summary`・`kind`・`areaId`・`note`／`info`・`type`・`item`・`label`）。`where` も可
 
 ```jsonc
 "referenceInfo": {

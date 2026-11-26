@@ -482,7 +482,6 @@ class PlaceCache:
         if not cells:
             return []
         layer = self._layer(source)
-        token = token or source.token
         with layer.busy:
             now = self.clock()
             have: dict[int, _Shape] = {}

@@ -541,7 +541,7 @@ class OrgAreasPanel(QWidget):
         self._groups_asked = True
         from ..core.request.api import load_groups
 
-        client, token = self.context.esri(), self.context.token_for(store.url, getattr(store, "token", None))
+        client, token = self.context.esri(), None
 
         def work(_task):
             return [g.name for g in load_groups(client, store.groups, store.group_fields, token) if g.active]
@@ -914,7 +914,7 @@ class OrgAreasPanel(QWidget):
             return
         p = g.pointOnSurface().asPoint()
         client, source = self.context.esri(), s.countries
-        token = self.context.token_for(source.url, source.token)
+        token = None
         from ..core.obs.api import areas_at
 
         def work(_task):

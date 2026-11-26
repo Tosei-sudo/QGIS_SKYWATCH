@@ -32,7 +32,7 @@ SCHEMAS = [ap.NO_TEST, ap.TEST, ap.TEST_AND_SKIP]
 #: Skipped features told one by one in the log, at most.
 TOLD = 30
 
-#: The plugin's context (its settings file, Esri client and tokens), set by the plugin.
+#: The plugin's context (its settings file and Esri client), set by the plugin.
 _context: Callable[[], Any] = lambda: None
 
 
@@ -178,7 +178,7 @@ class AppendAlgorithm(QgsProcessingAlgorithm):
 
                 raise QgsProcessingException(tagged(text("E206", f"（「{role}」はミカゲの画面で書く表。追加先にできるのは管理者の担当だけ）"), "E206"))
             self._client = plugin.esri()
-            self._token = plugin.token_for(target.url, plugin.token_of(target.url))
+            self._token = None
         selected = self.parameterAsBoolean(parameters, self.SELECTED, context)
         condition = self.parameterAsString(parameters, self.CONDITION, context) or ""
         inputs = []

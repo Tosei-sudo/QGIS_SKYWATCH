@@ -238,9 +238,10 @@ def test_the_mail_is_shown_not_sent_while_practising(plugin, monkeypatch):
 
 
 MASTERS = {
-    "satelliteCatalogs": [{"label": "本番衛星", "url": f"{PRODUCTION}/Satellites/FeatureServer/0", "token": "PRODTOKEN",
+    "signIn": [{"method": "none", "domains": ["production.invalid"]}],
+    "satelliteCatalogs": [{"label": "本番衛星", "url": f"{PRODUCTION}/Satellites/FeatureServer/0",
                            "fields": {"name": "SAT_NAME", "tle1": "TLE_LINE1", "tle2": "TLE_LINE2"}}],
-    "observationStores": [{"label": "本番観測記録", "url": f"{PRODUCTION}/Obs/FeatureServer/0", "token": "OBSTOKEN",
+    "observationStores": [{"label": "本番観測記録", "url": f"{PRODUCTION}/Obs/FeatureServer/0",
                            "taxonomyTable": f"{PRODUCTION}/Obs/FeatureServer/1"}],
     "glossary": f"{PRODUCTION}/Glossary/FeatureServer/0",
 }
@@ -254,17 +255,17 @@ def test_the_masters_only_read_are_the_productions(plugin):
         session = training_io.active()
         assert session.from_production == ("satellites", "taxonomy", "glossary")
         config = p.context.config
-        # The production's satellites, classes and glossary, with their tokens (kept in memory) ...
-        assert [c.label for c in config.satellite_catalogs] == ["本番衛星"] and config.satellite_catalogs[0].token == "PRODTOKEN"
+        # The production's satellites, classes and glossary, signed in to as in production (its signIn) ...
+        assert [c.label for c in config.satellite_catalogs] == ["本番衛星"] and [r.domains for r in config.sign_in] == [("production.invalid",)]
         store = config.observation_stores[0]
-        assert store.taxonomy_table.url == f"{PRODUCTION}/Obs/FeatureServer/1" and store.taxonomy_table.token == "OBSTOKEN"
+        assert store.taxonomy_table.url == f"{PRODUCTION}/Obs/FeatureServer/1"
         assert config.glossary.url == f"{PRODUCTION}/Glossary/FeatureServer/0"
         # ... what is written on the practice server ...
         assert store.url.startswith(session.base) and config.request_stores[0].url.startswith(session.base)
         assert [c.label for c in config.image_catalogs] == ["練習用画像カタログ"]
-        # ... and the file written without the tokens.
+        # ... as the file written says.
         text = open(session.files.config, encoding="utf-8").read()
-        assert f"{PRODUCTION}/Satellites" in text and "PRODTOKEN" not in text and "OBSTOKEN" not in text
+        assert f"{PRODUCTION}/Satellites" in text and '"signIn"' in text
         # The production's classes are not edited while practising.
         blocked = [a for a in p.actions if a.text().endswith("（練習モードでは本番の分類体系を読むだけ）")]
         assert [a.text().split("（")[0] for a in blocked] == ["分類体系の編集", "分類体系の取り込み…"] and not any(a.isEnabled() for a in blocked)
@@ -278,7 +279,7 @@ def test_from_production_false_practises_on_the_sample_alone(plugin):
     p, iface = plugin
     assert p.start_training()
     try:
-        assert training_io.active().from_production == () and training_io.active().config_text is None
+        assert training_io.active().from_production == () and p.context.config.sign_in == []
         config = p.context.config
         assert [c.label for c in config.satellite_catalogs] == ["練習用衛星"]
         assert config.observation_stores[0].taxonomy_table.url.startswith(training_io.active().base)
@@ -291,10 +292,11 @@ CATALOGS = {
     "imageCatalogs": [
         {"label": "本番カタログ", "url": f"{PRODUCTION}/Catalog/FeatureServer/0", "fields": CATALOG_FIELDS},
         {"label": "練習用の画像", "url": f"{PRODUCTION}/TrainingImages/FeatureServer/0", "fields": CATALOG_FIELDS,
-         "mode": "training", "token": "CATTOKEN"},
+         "mode": "training"},
         {"label": "共通の画像", "url": f"{PRODUCTION}/Both/FeatureServer/0", "fields": CATALOG_FIELDS, "mode": "both"},
     ],
     "training": {"fromProduction": False},
+    "signIn": [{"method": "none", "domains": ["production.invalid"]}],
 }
 
 
@@ -311,11 +313,11 @@ def test_the_production_catalogs_chosen_for_practising_come_after_the_samples(pl
         session = training_io.active()
         config = p.context.config
         assert [c.label for c in config.image_catalogs] == ["練習用画像カタログ", "練習用の画像", "共通の画像"]
-        assert config.image_catalogs[0].url.startswith(session.base) and config.image_catalogs[1].token == "CATTOKEN"
+        assert config.image_catalogs[0].url.startswith(session.base) and [r.domains for r in config.sign_in] == [("production.invalid",)]
         assert config.practice_catalogs == []
-        # Never written to the practice's settings file (nor their token).
+        # Never written to the practice's settings file (nor the production's signIn).
         text = open(session.files.config, encoding="utf-8").read()
-        assert "TrainingImages" not in text and "CATTOKEN" not in text and "production.invalid" not in text
+        assert "TrainingImages" not in text and "production.invalid" not in text
         dock = p.docks["SatObsImageCatalog"]
         assert [dock.catalog_box.itemText(i) for i in range(dock.catalog_box.count())] == ["練習用画像カタログ", "練習用の画像", "共通の画像"]
         assert dock.catalog_box.currentIndex() == 0

@@ -734,7 +734,7 @@ class NoticeFeed(QWidget):
         catalog = self.catalog_of(notice)
         if catalog is None or catalog.thumbnail is None or notice.kind == PLAN:
             return None
-        return thumbnail_address(catalog.thumbnail, notice.feature, catalog.fields, self.context.token_for(catalog.url, catalog.token))
+        return thumbnail_address(catalog.thumbnail, notice.feature, catalog.fields, None)
 
     def files_key(self, notice: WatchNotice) -> str:
         return "files|" + notice.id
@@ -1077,11 +1077,10 @@ class NoticeFeed(QWidget):
     def _contents_job(self, notice: WatchNotice, catalog: CatalogConfig, layers):
         client = self.context.esri()
         geometry = notice.feature.get("geometry")
-        tokens = {layer.key(): self.context.token_for(layer.url, layer.token or catalog.token) for layer in layers}
         notice_id = notice.id
 
         def work(task):
-            return {layer.key(): contents_of(client, layer, geometry, tokens[layer.key()], task.isCanceled).to_json() for layer in layers}
+            return {layer.key(): contents_of(client, layer, geometry, None, task.isCanceled).to_json() for layer in layers}
 
         def done(found: dict) -> None:
             card = self.cards.get(notice_id)

@@ -77,7 +77,7 @@ class SearchPart:
         """Reads the newest images of `listed` (a new search; in a task), or with `more` the next ones."""
         catalog = listed.catalog
         client = self.context.esri()
-        token = self.context.token_for(catalog.url, catalog.token)
+        token = None
         offset = (listed.next_offset or 0) if more else 0
         similar = listed.rank is not None
         if not more:
@@ -225,7 +225,7 @@ class SearchPart:
         self._work_asked += 1
         asked = self._work_asked
         ids = [r.id for r in self.model.records if r.id]
-        repo = AssignmentRepository(self.context.esri(), source, self.context.token_for(source.url, source.token))
+        repo = AssignmentRepository(self.context.esri(), source, None)
 
         def work(_task):
             rows = repo.assignments_of_images(ids)
@@ -255,7 +255,7 @@ class SearchPart:
         from ...core.obs.api import work_state
 
         asked = self._work_asked
-        repo = AssignmentRepository(self.context.esri(), source, self.context.token_for(source.url, source.token))
+        repo = AssignmentRepository(self.context.esri(), source, None)
 
         def work(_task):
             return work_state(repo.assignments_of_images([image_id]).get(image_id, []))
@@ -284,7 +284,7 @@ class SearchPart:
             return
         self._ratings_asked += 1
         asked = self._ratings_asked
-        client, token = self.context.esri(), self.context.token_for(source.url, source.token)
+        client, token = self.context.esri(), None
 
         def work(_task):
             found = load_reviews(client, source, ids, token)
@@ -309,7 +309,7 @@ class SearchPart:
         from ...core.image_reviews import load_reviews
 
         asked = self._ratings_asked
-        client, token = self.context.esri(), self.context.token_for(source.url, source.token)
+        client, token = self.context.esri(), None
 
         def done(rows) -> None:
             if asked != self._ratings_asked or self.model.reviews is None:

@@ -267,7 +267,6 @@ def _types(client: EsriClient, table: EsriSource, token: Optional[str]) -> dict[
 
 def last_memo(client: EsriClient, table: EsriSource, token: Optional[str] = None, since: Optional[float] = None) -> Optional[KeptMemo]:
     """The newest memo kept (looked for in the last 30 days when the table has a time attribute)."""
-    token = token or table.token
     types = _types(client, table, token)
     f = table.fields
     clauses = [table.where] if table.where else []
@@ -289,7 +288,6 @@ def keep_memo(client: EsriClient, table: EsriSource, text: str, d: HandoverData,
     Adds the memo to the table; the attributes cut to the length the table
     takes (said back, so the person knows the file and the clipboard have it whole).
     """
-    token = token or table.token
     types = _types(client, table, token)
     lengths = client.layer(table.url, token).field_lengths
     f = table.fields

@@ -25,8 +25,7 @@ from .offline import KINDS, OfflineWork, UploadReport, now_ms
 from .request.api import upload_requests
 
 
-def upload_all(config: Any, client: Callable[[], EsriClient], token_for: Callable[[str, Optional[str]], Optional[str]],
-               prefs: Any, gpkg: Callable[[], GeoPackage], now: Callable[[], int] = now_ms,
+def upload_all(config: Any, client: Callable[[], EsriClient], prefs: Any, gpkg: Callable[[], GeoPackage], now: Callable[[], int] = now_ms,
                only: Optional[set] = None, outbox: Optional[OfflineWork] = None) -> UploadReport:
     report = UploadReport()
     esri = client()
@@ -38,7 +37,7 @@ def upload_all(config: Any, client: Callable[[], EsriClient], token_for: Callabl
     work = outbox if outbox.enabled else None
     shelf = OutboxDrafts(outbox, prefs)
     known: dict[str, set] = {k: set() for k in KINDS}
-    for s in store_sets(config.observation_stores, config.observation_vocabulary, gpkg, client, token_for, local=False):
+    for s in store_sets(config.observation_stores, config.observation_vocabulary, gpkg, client, local=False):
         known["observation"].add(s.label)
         known[DRAFT].add(s.label)
         if work is not None and isinstance(s.records, OfflineObservationStore):
@@ -53,7 +52,7 @@ def upload_all(config: Any, client: Callable[[], EsriClient], token_for: Callabl
     for r in config.request_stores:
         known["request"].add(r.label)
         if work is not None:
-            upload_requests(esri, r, token_for(r.url, r.token), report, now(), only)
+            upload_requests(esri, r, None, report, now(), only)
     for kind, label, n in [(k, s, n) for k in KINDS for s, n in _stores_of(outbox, k, only).items()]:
         if work is None and kind != DRAFT:
             report.kept.append(f"オフライン作業（offlineWork）が切ってあるため送らない「{label}」の{KINDS.get(kind, kind)} {n} 件")

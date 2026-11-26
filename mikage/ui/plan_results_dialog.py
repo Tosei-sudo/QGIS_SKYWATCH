@@ -160,9 +160,9 @@ class PlanResultsDialog(QDialog):
             return
         catalog = dock.catalog() if follow else None
         repo = dock.repository()
-        catalog_token = self.context.token_for(catalog.url, catalog.token) if catalog else None
+        catalog_token = None
         reviews = self.context.config.image_reviews
-        unusable = UnusableImages(self.context.esri(), reviews, self.context.token_for(reviews.url, reviews.token)) if reviews else None
+        unusable = UnusableImages(self.context.esri(), reviews, None) if reviews else None
         now = _now_ms()
         first, last = self.span()
         # The span's rows and those still open (followed up as 「計算」 does), not the whole table.

@@ -5,9 +5,9 @@ landing page, its `/processes` or one process) read, its tasks listed, and
 the one chosen opened as a Processing algorithm of the 「サーバ処理」 group,
 where its inputs are filled in and it runs.
 
-The service's sign-in is a QGIS authentication configuration, kept for the
-service like the others' in the plugin settings (a token in the settings
-file is still used, for its own service only).
+The service's sign-in is the settings file's `signIn` for its server
+(core/sign_in.py), or else a QGIS authentication configuration, kept for
+the service like the others' in the plugin settings.
 """
 from __future__ import annotations
 
@@ -45,9 +45,8 @@ class RemoteProcessingDialog(QDialog):
         self.context = context
         self.open_algorithm = open_algorithm
         self.task = None
-        #: The service read last: its tasks, and the token of the settings file for it.
+        #: The service read last: its tasks.
         self.service: Optional[GpService] = None
-        self.token = ""
         self.setWindowTitle(_tr("サーバ処理"))
         self.resize(520, 420)
         layout = QVBoxLayout(self)
@@ -123,21 +122,17 @@ class RemoteProcessingDialog(QDialog):
         recent = [u for u in (QgsSettings().value(RECENT_KEY, []) or []) if isinstance(u, str) and u != url]
         QgsSettings().setValue(RECENT_KEY, [url, *recent][:MAX_RECENT])
 
-    def _token_for(self, url: str) -> str:
-        root = service_root(url)
-        return next((s.token for s in self.context.config.gp_services if s.token and service_root(s.url) == root), "")
-
     def busy(self, on: bool, text: str = "") -> None:
         self.load_button.setEnabled(not on)
         self.open_button.setEnabled(not on and self.tasks.currentRow() >= 0)
         self.status.setText(text)
 
-    def _run(self, description: str, read: Callable[[GpClient], object], done: Callable[[object], None], token: str) -> None:
+    def _run(self, description: str, read: Callable[[GpClient], object], done: Callable[[object], None]) -> None:
         if self.task is not None:
             self.task.cancel()
 
         def work(task):
-            client = GpClient(gp_io.http, token or None, cancelled=task.isCanceled)
+            client = GpClient(gp_io.http, None, cancelled=task.isCanceled)
             try:
                 return True, read(client)
             except GpError as e:
@@ -164,17 +159,16 @@ class RemoteProcessingDialog(QDialog):
             self.status.setText(_tr("http(s) の URL を入力"))
             return
         self._keep(url)
-        token = self._token_for(url)
         self.tasks.clear()
         self.service = None
-        self._run(_tr("サーバ処理の取得"), lambda client: client.read(url), lambda value: self._loaded(value, token), token)
+        self._run(_tr("サーバ処理の取得"), lambda client: client.read(url), self._loaded)
 
-    def _loaded(self, value, token: str) -> None:
+    def _loaded(self, value) -> None:
         if isinstance(value, GpTask):
             self.busy(False, _tr("「{title}」を表示").format(title=value.title))
-            self._open(value, token)
+            self._open(value)
             return
-        self.service, self.token = value, token
+        self.service = value
         for task_id, title, url in value.tasks:
             item = QListWidgetItem(title if title == task_id else f"{title}（{task_id}）")
             item.setData(Qt.ItemDataRole.UserRole, url)
@@ -190,15 +184,15 @@ class RemoteProcessingDialog(QDialog):
         item = self.tasks.currentItem()
         if item is None or self.service is None:
             return
-        url, kind, token = item.data(Qt.ItemDataRole.UserRole), self.service.kind, self.token
-        self._run(_tr("サーバ処理の取得"), lambda client: client.read_task(kind, url), lambda task: self._opened(task, token), token)
+        url, kind = item.data(Qt.ItemDataRole.UserRole), self.service.kind
+        self._run(_tr("サーバ処理の取得"), lambda client: client.read_task(kind, url), self._opened)
 
-    def _opened(self, task: GpTask, token: str) -> None:
+    def _opened(self, task: GpTask) -> None:
         self.busy(False, _tr("「{title}」を表示").format(title=task.title))
-        self._open(task, token)
+        self._open(task)
 
-    def _open(self, task: GpTask, token: str) -> None:
-        self.open_algorithm(gp_algorithm.register(task, token))
+    def _open(self, task: GpTask) -> None:
+        self.open_algorithm(gp_algorithm.register(task))
 
     def closeEvent(self, event) -> None:  # noqa: N802 (Qt's name)
         if self.task is not None:

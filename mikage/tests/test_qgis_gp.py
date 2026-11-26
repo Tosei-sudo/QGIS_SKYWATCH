@@ -203,7 +203,7 @@ def test_results_as_layers():
 
 def test_an_esri_task_as_an_algorithm_whose_results_open_as_layers(server, provider):
     task = GpClient(gp_io.http).read(f"{server.root}{TOOLS}/Buffer")
-    algorithm_id = gp_algorithm.register(task, "secret")
+    algorithm_id = gp_algorithm.register(task)
     algorithm = QgsApplication.processingRegistry().algorithmById(algorithm_id)
     assert algorithm is not None and algorithm.displayName() == "バッファ" and algorithm.group() == "サーバ処理"
     names = [d.name() for d in algorithm.parameterDefinitions()]
@@ -219,7 +219,7 @@ def test_an_esri_task_as_an_algorithm_whose_results_open_as_layers(server, provi
     results, ok = algorithm.run({"Input_Points": layer.id(), "Distance": 500, "Distance_UNITS": 0, "Shape": 1, "Count": None}, context, feedback)
     assert ok
     sent = next(body for method, path, body, _ in server.asked if path.endswith("/execute"))
-    assert sent["token"] == "secret" and sent["Shape"] == "四角" and "Count" not in sent
+    assert "token" not in sent and sent["Shape"] == "四角" and "Count" not in sent
     assert json.loads(sent["Distance"]) == {"distance": 500.0, "units": "esriMeters"}
     points = json.loads(sent["Input Points"])
     assert points["geometryType"] == "esriGeometryPoint" and len(points["features"]) == 2 and points["features"][1]["attributes"]["name"] == "横浜"
@@ -261,7 +261,7 @@ def test_the_dialog_reads_a_service_and_opens_a_task(server, provider):
     from mikage.ui.gp_dialog import RemoteProcessingDialog
 
     class Context:
-        config, _ = parse_config_text(json.dumps({"gpServices": [{"label": "道具", "url": f"{server.root}{TOOLS}", "token": "t1"}]}))
+        config, _ = parse_config_text(json.dumps({"gpServices": [{"label": "道具", "url": f"{server.root}{TOOLS}"}]}))
 
     opened = []
     dialog = RemoteProcessingDialog(Context(), None, opened.append)
@@ -272,9 +272,9 @@ def test_the_dialog_reads_a_service_and_opens_a_task(server, provider):
     assert dialog.tasks.item(0).text() == "Buffer" and "1 件" in dialog.status.text()
     dialog.open_selected()
     assert wait_for(lambda: opened, 10000)
-    assert opened == [f"mikage:{gp_algorithm.algorithm_name(gp_algorithm._tasks[opened[0].split(':')[1]][0])}"]
-    task, token = gp_algorithm._tasks[opened[0].split(":")[1]]
-    assert task.title == "バッファ" and token == "t1"
+    assert opened == [f"mikage:{gp_algorithm.algorithm_name(gp_algorithm._tasks[opened[0].split(':')[1]])}"]
+    task = gp_algorithm._tasks[opened[0].split(":")[1]]
+    assert task.title == "バッファ"
     assert QgsApplication.processingRegistry().algorithmById(opened[0]) is not None
     # A process URL typed: opened at once; a bad one: said.
     dialog.url.setEditText(f"{server.root}/ogc/processes/count")

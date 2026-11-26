@@ -132,10 +132,10 @@ def test_footprint_layer_problems(entry, problem):
 
 def test_footprint_layer_defaults():
     problems = []
-    layers = footprint_layers_of([{"url": PLACES + "/", "fields": "NAME", "where": "KIND = 'port'", "max": 50, "token": "t"}], problems, "f")
+    layers = footprint_layers_of([{"url": PLACES + "/", "fields": "NAME", "where": "KIND = 'port'", "max": 50}], problems, "f")
     assert problems == []
     layer = layers[0]
-    assert (layer.label, layer.fields, layer.where, layer.max, layer.token) == ("レイヤー 1", ("NAME",), "KIND = 'port'", 50, "t")
+    assert (layer.label, layer.fields, layer.where, layer.max) == ("レイヤー 1", ("NAME",), "KIND = 'port'", 50)
     assert footprint_layers_of({"url": PLACES}, problems, "f") == [] and problems == ['f は配列で指定（[{ "label", "url", "fields" }]）']
 
 

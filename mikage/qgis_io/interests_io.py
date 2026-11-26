@@ -74,7 +74,7 @@ class InterestBook(QObject):
         return edit_stamp.user_name()
 
     def _tokens(self, s: InterestSettings) -> dict:
-        return {k: self.context.token_for(s.source(k).url, s.source(k).token) for k in s.kinds}
+        return {k: None for k in s.kinds}
 
     def _config_changed(self) -> None:
         self.items, self.failure, self.failed_at = None, "", 0.0

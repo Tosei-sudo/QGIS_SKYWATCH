@@ -52,6 +52,8 @@ KERNEL = (
     "core.listed_image", "core.json_schema", "core.file_values",
     # The query results kept a few minutes (データ分析 reads them; core.esri forgets a layer's on an edit).
     "core.analysis_cache",
+    # 設定ファイルの signIn (ドメインごとのサインイン): set by qgis_io.sign_in_io, used by every request of qgis_io.network.
+    "core.sign_in", "core.windows_auth",
     "qgis_io.tasks", "qgis_io.network", "qgis_io.geometry",
     # 「一番上に固定」: where whatever adds at the top of the layer tree puts it (below the pinned nodes).
     "qgis_io.pinned_layers",

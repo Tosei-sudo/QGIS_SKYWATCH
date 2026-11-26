@@ -499,7 +499,6 @@ class TaxonomyTableConfig:
     """A store's `taxonomyTable`: an editable Esri table, one row per class."""
     url: str
     fields: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_TAXONOMY_FIELDS))
-    token: Optional[str] = None
 
 
 _FEATURE_LAYER = re.compile(r"/FeatureServer/\d+/?$", re.IGNORECASE)
@@ -521,5 +520,4 @@ def taxonomy_table_of(value: Any, problems: list[str], at: str) -> Optional[Taxo
                 fields[k] = name
             else:
                 problems.append(f"{at}.fields.{k} は属性名で指定")
-    token = v.get("token")
-    return TaxonomyTableConfig(url=v["url"].split("?", 1)[0].rstrip("/"), fields=fields, token=token if isinstance(token, str) and token else None)
+    return TaxonomyTableConfig(url=v["url"].split("?", 1)[0].rstrip("/"), fields=fields)

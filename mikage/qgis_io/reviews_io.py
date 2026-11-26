@@ -73,7 +73,6 @@ def areas_over(client: EsriClient, settings: NamedAreaSettings, footprint: Seque
     the footprint (the layer's spatial index), not read whole.
     """
     source = settings.areas
-    token = token or source.token
     geometry = {"rings": esri_rings(footprint), "spatialReference": {"wkid": 4326}}
     rows = client.query_all(source.url, source.where or "1=1", token, geometry=True, limit=most + 1, cut=True, extra={
         "geometry": json.dumps(geometry), "geometryType": "esriGeometryPolygon", "inSR": "4326",

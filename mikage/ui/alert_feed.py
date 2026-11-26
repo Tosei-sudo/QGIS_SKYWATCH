@@ -199,7 +199,7 @@ class AlertFeed(QWidget):
         self.timer.stop()
         if self._client is None or self._settings is not s:
             self._client, self._settings = self.context.esri(), s
-        repo = AlertLogRepository(self._client, s, self.context.token_for(s.table.url, s.table.token))
+        repo = AlertLogRepository(self._client, s, None)
         known = set(self.rows)
         since = _now() - s.live.days * DAY_MS if s.live.days > 0 else None
         self._polling = True

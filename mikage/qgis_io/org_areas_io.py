@@ -77,7 +77,7 @@ class OrgAreaBook(QObject):
         return list(self.list.categories or []) if self.list is not None else []
 
     def _token(self, source) -> Optional[str]:
-        return self.context.token_for(source.url, source.token) if source is not None else None
+        return None
 
     def _tokens(self, s: NamedAreaSettings) -> dict:
         return {"areas": self._token(s.areas), "categories": self._token(s.categories), "countries": self._token(s.countries)}

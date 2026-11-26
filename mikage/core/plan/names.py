@@ -15,8 +15,6 @@ from typing import Any, Callable, Iterable, Optional, Sequence
 from ..esri import EsriClient
 from ..util import is_name, is_record, is_url, layer_url
 
-TokenFor = Callable[[str, Optional[str]], Optional[str]]
-
 ALIAS_ROLES = ("satellite", "alias")
 ALIAS_ROLE_LABELS = {"satellite": "衛星名", "alias": "別名"}
 _TABLE = re.compile(r"/(FeatureServer|MapServer)/\d+/?$", re.IGNORECASE)
@@ -143,7 +141,6 @@ class AliasTableConfig:
     url: str
     #: `satellite`: the satellite's name (or id) in the satellite catalog; `alias`: its other name(s).
     fields: dict[str, str]
-    token: Optional[str] = None
     where: Optional[str] = None
 
 
@@ -175,16 +172,15 @@ def alias_tables_of(value: Any, problems: list[str]) -> list[AliasTableConfig]:
                 problems.append(f"{at} の fields.{role} は属性名（英数字と _）で指定")
         if len(mapped) < len(ALIAS_ROLES):
             continue
-        label, token, where = item.get("label"), item.get("token"), item.get("where")
+        label, where = item.get("label"), item.get("where")
         out.append(AliasTableConfig(
             label=label if isinstance(label, str) and label else f"衛星名の対応表 {i + 1}",
             url=layer_url(url), fields=mapped,
-            token=token if isinstance(token, str) and token else None,
             where=where.strip() if isinstance(where, str) and where.strip() else None))
     return out
 
 
-def load_satellite_names(client: EsriClient, tables: Sequence[AliasTableConfig], token_for: TokenFor,
+def load_satellite_names(client: EsriClient, tables: Sequence[AliasTableConfig],
                          cancelled: Optional[Callable[[], bool]] = None) -> tuple[SatelliteNames, list[str]]:
     """The names of the alias tables (rows of one satellite grouped together), and what failed."""
     by_satellite: dict[str, list[str]] = {}
@@ -192,7 +188,7 @@ def load_satellite_names(client: EsriClient, tables: Sequence[AliasTableConfig],
     for table in tables:
         f = table.fields
         try:
-            rows = client.query_all(table.url, table.where or "1=1", token_for(table.url, table.token),
+            rows = client.query_all(table.url, table.where or "1=1",
                                     out_fields=f"{f['satellite']},{f['alias']}", geometry=False, cancelled=cancelled)
         except Exception as error:  # noqa: BLE001 (reported, the others still read)
             problems.append(f"{table.label} の取得に失敗（{error}）")

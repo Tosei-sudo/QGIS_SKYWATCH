@@ -146,7 +146,7 @@ def test_records_made_offline_wait_and_are_sent_without_overwriting_others(tmp_p
     switch.down = False
     assert work.probe(switch)
     cfg, _ = parse_config({"observationStores": [{"label": "共有", "url": URL}], "localObservations": False})
-    report = upload_all(cfg, lambda: client_of(work, switch), lambda url, token: token, prefs, lambda: db, now=lambda: day(26))
+    report = upload_all(cfg, lambda: client_of(work, switch), prefs, lambda: db, now=lambda: day(26))
     server = {o.id: o for o in theirs.load()}
     assert (server["a"].confidence, server["c"].object_name) == ("確定", "船舶-3")
     assert (server["b"].confidence, server["b"].note) == ("", "ほかの人")
@@ -157,11 +157,11 @@ def test_records_made_offline_wait_and_are_sent_without_overwriting_others(tmp_p
     assert [d.id for d in drafts] == ["b"] and drafts[0].editing and "ほかの人が先に更新" in drafts[0].reason
     assert drafts[0].needs_check and work.sendable() == 0 and work.pending("draft")[0].op == "check"
     assert "送信待ちに保管" in report.text()
-    again = upload_all(cfg, lambda: client_of(work, switch), lambda url, token: token, prefs, lambda: db, now=lambda: day(27))
+    again = upload_all(cfg, lambda: client_of(work, switch), prefs, lambda: db, now=lambda: day(27))
     assert again.sent == {} and work.counts() == {"draft": 1}
     # Chosen in the list: tried, and still not saved over the other's change.
     chosen = {("draft", "共有", "b")}
-    again = upload_all(cfg, lambda: client_of(work, switch), lambda url, token: token, prefs, lambda: db, now=lambda: day(28),
+    again = upload_all(cfg, lambda: client_of(work, switch), prefs, lambda: db, now=lambda: day(28),
                        only=chosen)
     assert again.sent == {} and again.drafts == 1 and work.counts() == {"draft": 1}
     assert next(o for o in theirs.load() if o.id == "b").note == "ほかの人"
@@ -188,7 +188,7 @@ def test_deletes_made_offline_are_sent_and_new_ones_just_forgotten(tmp_path):
     work.probe(switch)
     cfg, _ = parse_config({"observationStores": [{"label": "共有", "url": URL, "softDelete": False}]})
     db = open_local(str(tmp_path / "local.gpkg"))
-    report = upload_all(cfg, lambda: client_of(work, switch), lambda url, token: token, Prefs(), lambda: db)
+    report = upload_all(cfg, lambda: client_of(work, switch), Prefs(), lambda: db)
     assert fake.layers[URL].rows == [] and report.sent == {"observation": 1} and work.total() == 0
     db.close()
 
@@ -198,12 +198,11 @@ def test_offline_work_is_not_the_local_store_and_is_allowed_without_it(tmp_path)
     db = open_local(str(tmp_path / "local.gpkg"))
     cfg, _ = parse_config({"observationStores": [{"label": "共有", "url": URL}], "localObservations": False})
     sets = store_sets(cfg.observation_stores, cfg.observation_vocabulary, lambda: db,
-                      lambda: client_of(work, Switch(obs_layer())), lambda url, token: token, local=cfg.local_observations)
+                      lambda: client_of(work, Switch(obs_layer())), local=cfg.local_observations)
     assert [s.label for s in sets] == ["共有"]
     assert isinstance(sets[0].records, OfflineObservationStore)
     # Without the offline work (tests, scripts), the plain store as before.
-    plain = store_sets(cfg.observation_stores, cfg.observation_vocabulary, lambda: db, lambda: EsriClient(obs_layer()),
-                       lambda url, token: token, local=False)
+    plain = store_sets(cfg.observation_stores, cfg.observation_vocabulary, lambda: db, lambda: EsriClient(obs_layer()), local=False)
     assert isinstance(plain[0].records, EsriObservationStore)
     db.close()
 
@@ -229,7 +228,7 @@ def test_requests_saved_and_deleted_offline_are_sent(tmp_path):
     switch.down = False
     work.probe(switch)
     cfg, _ = parse_config({"requestStores": [{"label": "依頼", "url": LEDGER}]})
-    report = upload_all(cfg, lambda: client_of(work, switch), lambda url, token: token, Prefs(), lambda: None)
+    report = upload_all(cfg, lambda: client_of(work, switch), Prefs(), lambda: None)
     assert report.sent == {"request": 3} and work.total() == 0
     online = {r.id: r for r in load_requests(EsriClient(fake), store, None)}
     assert set(online) == {"R1", "R3"} and online["R1"].priority == 100
@@ -251,7 +250,7 @@ def test_a_request_changed_by_someone_else_meanwhile_stays_waiting(tmp_path):
     switch.down = False
     work.probe(switch)
     cfg, _ = parse_config({"requestStores": [{"label": "依頼", "url": LEDGER}]})
-    report = upload_all(cfg, lambda: client_of(work, switch), lambda url, token: token, Prefs(), lambda: None)
+    report = upload_all(cfg, lambda: client_of(work, switch), Prefs(), lambda: None)
     assert report.sent == {} and len(report.kept) == 1 and "ほかの人" in report.kept[0]
     assert load_requests(EsriClient(fake), store, None)[0].priority == 900
     assert work.pending("request")[0].note
@@ -310,7 +309,7 @@ def _upload(work, transport, **stores):
     db = open_local(str(work.path) + ".gpkg")
     prefs = Prefs()
     try:
-        return upload_all(cfg, lambda: client_of(work, transport), lambda url, token: token, prefs, lambda: db, now=lambda: day(30)), prefs
+        return upload_all(cfg, lambda: client_of(work, transport), prefs, lambda: db, now=lambda: day(30)), prefs
     finally:
         db.close()
 

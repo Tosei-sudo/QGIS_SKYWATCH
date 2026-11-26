@@ -309,7 +309,7 @@ class PlaceReader(QObject):
             return
         wanted, self.pending = self.pending, {}
         client = self.context.esri()
-        token = self.context.token_for(source.url, source.token)
+        token = None
         points = list(wanted.values())
 
         def work(_t):

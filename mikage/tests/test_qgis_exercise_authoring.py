@@ -30,7 +30,7 @@ from mikage.qgis_io.network import qgis_transport  # noqa: E402
 from mikage.tests.fake_esri import FakeEsri, FakeLayer  # noqa: E402
 from mikage.tests.qgis_fakes import wait_for  # noqa: E402
 from mikage.tests.test_qgis_exercises import answer  # noqa: E402
-from mikage.tests.test_qgis_org_exercises import _types, CATALOG, ORG, ORG_CONFIG, TOKEN  # noqa: E402
+from mikage.tests.test_qgis_org_exercises import _types, CATALOG, ORG, ORG_CONFIG  # noqa: E402
 from mikage.tests.test_qgis_training import _feature, made, plugin, PRODUCTION  # noqa: E402,F401 (the fixtures)
 from mikage.ui import exercise_authoring  # noqa: E402
 from mikage.ui.exercise_grades import FAIL_BG, PASS_BG  # noqa: E402
@@ -48,9 +48,9 @@ def instructor(plugin, monkeypatch):
     monkeypatch.setattr(PluginContext, "esri", lambda self: EsriClient(
         lambda url, form: fake(url, form) if url.startswith((ORG, PRODUCTION)) else real(url, form)))
     layers = {
-        "exercises": fake.add_layer(f"{ORG}/0", FakeLayer(_types(tables.EXERCISE_FIELDS), geometry="esriGeometryPolygon", token=TOKEN)),
-        "answers": fake.add_layer(f"{ORG}/1", FakeLayer(_types(tables.ANSWER_FIELDS), token=TOKEN)),
-        "results": fake.add_layer(f"{ORG}/2", FakeLayer(_types(tables.RESULT_FIELDS), geometry="", token=TOKEN)),
+        "exercises": fake.add_layer(f"{ORG}/0", FakeLayer(_types(tables.EXERCISE_FIELDS), geometry="esriGeometryPolygon")),
+        "answers": fake.add_layer(f"{ORG}/1", FakeLayer(_types(tables.ANSWER_FIELDS))),
+        "results": fake.add_layer(f"{ORG}/2", FakeLayer(_types(tables.RESULT_FIELDS), geometry="")),
         "catalog": fake.add_layer(CATALOG, FakeLayer({"IMG_ID": "esriFieldTypeString", "PATH": "esriFieldTypeString"},
                                                      geometry="esriGeometryPolygon")),
     }
@@ -138,7 +138,7 @@ def test_an_instructor_makes_an_exercise_of_the_records_writes_it_and_tries_it(i
     editor.rule_edits["tolerance"].setText("40")
     editor.pass_score.setValue(80)
     assert editor.answers[0].points == 20 and editor.dirty
-    # 保存: the exercise's row and its answers' rows, with the token.
+    # 保存: the exercise's row and its answers' rows.
     assert authoring.save()
     assert wait_for(lambda: not editor.dirty, 10000), editor.status.text()
     assert "問題を保存" in editor.status.text() and "作りかけ" in editor.status.text()
@@ -150,7 +150,7 @@ def test_an_instructor_makes_an_exercise_of_the_records_writes_it_and_tries_it(i
     assert row["geometry"]["rings"] and len(layers["answers"].rows) == len(e.answers)
     first = next(r["attributes"] for r in layers["answers"].rows if r["attributes"]["ANSWER_NO"] == 1)
     assert (first["ANSWER_POINTS"], first["EXPLANATION"]) == (20, "甲板にコンテナが並ぶ")
-    assert all(form.get("token") == TOKEN for url, form in fake.asked if url.startswith(ORG))
+    assert not any("token" in form for url, form in fake.asked if url.startswith(ORG))
     assert [manager.table.item(r, 2).text() for r in range(manager.table.rowCount())] == ["前からの問題", "港の船をすべて見つける"]
     assert manager.table.item(1, 6).text() == "作りかけ" and manager.status.text() == "2 問（出す 1・作りかけ 1）"
     # Changed and written again: the last answer taken off (its row deleted), the others' rows kept; offered now.

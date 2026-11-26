@@ -99,7 +99,7 @@ class TestWhereItComesFrom:
         client = Client()
         choices, whole = load_satellite_choices(client, [Catalog("https://x/Catalog/FeatureServer/0", {"sensor": "SENSOR"}),
                                                          Catalog("https://x/Other/FeatureServer/0", {})],
-                                                [Catalog("https://x/Sats/FeatureServer/0", {"name": "SAT_NAME"})], CHOICES.names, lambda u, t: t)
+                                                [Catalog("https://x/Sats/FeatureServer/0", {"name": "SAT_NAME"})], CHOICES.names)
         assert whole and choices.catalog == ("GE01", "WV03") and choices.satellites == ("WorldView-3",)
         assert [u for u, _f in client.asked] == ["https://x/Catalog/FeatureServer/0/query", "https://x/Sats/FeatureServer/0/query"]
 

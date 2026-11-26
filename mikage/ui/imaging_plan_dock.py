@@ -487,18 +487,17 @@ class ImagingPlanDock(
             return
         catalog = config.satellite_catalogs[self.catalog_index]
         sensors = config.sensor_catalogs
-        token_for = self.context.token_for
         client = self.context.esri()
         read = self._settings_read
         self.status.setText(self.tr("衛星カタログを取得中…"))
 
         def work(task):
-            sats, problems = load_satellites(client, catalog, token_for, task.isCanceled)
+            sats, problems = load_satellites(client, catalog, task.isCanceled)
             names = self.context.satellite_names(client, task.isCanceled)
             if names:
                 sats = [replace(s, aliases=tuple(sorted(names.expand(s.name, s.id)))) for s in sats]
             task.progress(70)
-            modes, more = load_sensor_modes(client, sensors, token_for, task.isCanceled)
+            modes, more = load_sensor_modes(client, sensors, task.isCanceled)
             outages, problem = self.context.read_outages(client, task.isCanceled)
             return sats, modes, problems + more + ([problem] if problem else []), outages
 

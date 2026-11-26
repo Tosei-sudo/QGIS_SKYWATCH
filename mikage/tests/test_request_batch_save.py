@@ -163,7 +163,7 @@ def test_offline_the_requests_are_kept_and_sent_together_later(tmp_path):
     work.probe(switch)
     fake.asked.clear()
     cfg, _ = parse_config({"requestStores": [{"label": "依頼", "url": LEDGER}]})
-    report = upload_all(cfg, lambda: client_of(work, switch), lambda url, token: token, Prefs(), lambda: None)
+    report = upload_all(cfg, lambda: client_of(work, switch), Prefs(), lambda: None)
     assert report.sent == {"request": 2} and len(report.kept) == 1 and "ほかの人" in report.kept[0]
     assert len(_asked(fake, "applyEdits")) == 1
     assert [p.item_id for p in work.pending("request")] == ["R1"] and work.pending("request")[0].note

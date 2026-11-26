@@ -140,7 +140,7 @@ class ExerciseTablesIO:
         self.roles = {r.code: r.name for r in roles.ROLES}
 
     def _run(self, title: str, work, then, failed) -> None:
-        client, token = self.feature.context.esri(), self.feature.table_token(self.tables.exercises)
+        client, token = self.feature.context.esri(), None
         run_task(tr(title), lambda _task: work(client, token), then, failed)
 
     def read_drafts(self, then, failed) -> None:
@@ -349,7 +349,7 @@ class Training(Feature):
         value = None
         try:
             if self.context.source == source and self.context.config_text is not None:
-                value = load_jsonc(self.context.config_text)  # (read from a URL, with its tokens)
+                value = load_jsonc(self.context.config_text)  # (read from a URL)
             elif re.match(r"^https?://", source, re.IGNORECASE):
                 cached = settings.cached_config(source)
                 value = cached[0] if cached is not None else None
@@ -365,7 +365,7 @@ class Training(Feature):
     def _switch_on(self, files, builtin: bool) -> None:
         production = self._production()
         try:
-            server, text, taken = training_io.start_server(files, production) if builtin else (None, None, ())
+            server, taken = training_io.start_server(files, production) if builtin else (None, ())
         except OSError as error:
             self.iface.messageBar().pushWarning(tr("練習モード"), error_text(error))
             return
@@ -373,7 +373,7 @@ class Training(Feature):
         # In the production's audit log, then nothing more until it ends.
         if self.host.audit is not None:
             self.host.audit.practise(True, {"builtin": builtin, "config": "" if builtin else source})
-        training_io.begin(training_io.TrainingSession(files, source, builtin, server, config_text=text, production=production,
+        training_io.begin(training_io.TrainingSession(files, source, builtin, server, production=production,
                                                       from_production=taken))
         self.context.switch_files()
         self.context.reload()
@@ -487,7 +487,7 @@ class Training(Feature):
 
         def again() -> None:
             try:
-                session.server, session.config_text, session.from_production = training_io.start_server(files, session.production)
+                session.server, session.from_production = training_io.start_server(files, session.production)
             except OSError as error:
                 self.iface.messageBar().pushWarning(tr("練習モード"), error_text(error))
                 return
@@ -661,10 +661,6 @@ class Training(Feature):
         except (AttributeError, KeyError, RuntimeError):
             return ""
 
-    def table_token(self, url: str) -> Optional[str]:
-        tables = self.settings.exercises
-        return self.context.token_for(url, (tables.token if tables is not None else "") or None)
-
     def read_org_exercises(self, then=None) -> bool:
         """
         The organisation's exercises and answers read from its tables (training.exercises), with the person's tries
@@ -679,7 +675,7 @@ class Training(Feature):
         path = session.files.exercise_results
         pending = unsent(read_results(path)) if tables.results else []
         user, base = self._user(), self.settings.scoring
-        tokens = {u: self.table_token(u) for u in (tables.exercises, tables.answers, tables.results) if u}
+        tokens = {u: None for u in (tables.exercises, tables.answers, tables.results) if u}
 
         def work(task):
             sent = []
@@ -848,7 +844,7 @@ class Training(Feature):
             missing()
             return
         client = self.context.esri()
-        asks = [(c, self.context.token_for(c.url, c.token)) for c in catalogs]
+        asks = [(c, None) for c in catalogs]
 
         def work(_task):
             for c, token in asks:
@@ -875,7 +871,7 @@ class Training(Feature):
         tables, session = self.settings.exercises, training_io.active()
         if tables is None or not tables.results or session is None:
             return
-        client, token, path = self.context.esri(), self.table_token(tables.results), session.files.exercise_results
+        client, token, path = self.context.esri(), None, session.files.exercise_results
 
         def work(_task):
             return send_results(client, tables, [record], token)
@@ -971,7 +967,7 @@ class Training(Feature):
             return False
         self._reading = True
         client = self.context.esri()
-        tokens = {u: self.table_token(u) for u in (tables.exercises, tables.answers, tables.results)}
+        tokens = {u: None for u in (tables.exercises, tables.answers, tables.results)}
         self.iface.messageBar().pushInfo(tr("判読の練習"), tr("結果の表を取得中…"))
 
         def work(task):

@@ -73,7 +73,7 @@ class GlossaryKeeper(QObject):
         context = self.context
 
         def work(task):
-            return load_glossary(context.esri(), source, context.token_for(source.url, source.token), task.isCanceled)
+            return load_glossary(context.esri(), source, None, task.isCanceled)
 
         def done(glossary: Glossary) -> None:
             if generation != self._generation:

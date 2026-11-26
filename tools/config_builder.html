@@ -175,6 +175,7 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "imageCorrections",
   "textAssist",
   "arcgisPortals",
+  "signIn",
   "baseMaps",
   "defaultBaseMap",
   "geocoders",
@@ -1246,6 +1247,20 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "integer",
   "double",
   "date"
+ ],
+ "signInMethods": [
+  [
+   "iwa",
+   "統合 Windows 認証（IWA）"
+  ],
+  [
+   "saml",
+   "SAML（OAuth2）"
+  ],
+  [
+   "none",
+   "サインインなし"
+  ]
  ]
 }
 </script>
@@ -1584,7 +1599,6 @@ const TM = (k, l, tasks, o = {}) => ({ k, t: "taskModels", l, tasks, ...o });
 const LABEL = T("label", "名前", { help: "一覧・メニューに出す名前（省略すると「… 1」のような名前）" });
 const URL_ = (help, ph = "https://gis.example/arcgis/rest/services/…/FeatureServer/0") => T("url", "URL", { req: true, ph, help });
 const WHERE = T("where", "絞り込み（where）", { ph: "STATUS = 'ACTIVE'", help: "対象を絞る SQL の条件（任意）" });
-const TOKEN = T("token", "トークン", { help: "ArcGIS のトークン（任意）。各自の QGIS 認証設定を選んだサービスには送らない。配る設定ファイルには書かない方がよい" });
 const TZ = T("timeZone", "日時のタイムゾーン", { ph: "Asia/Tokyo・UTC・+09:00", help: "サービスの日時の本当のタイムゾーン（サービスの申告と違うとき）" });
 const STZ = T("serviceTimeZone", "サービスの申告", { ph: "UTC", help: "サービスが申告しているタイムゾーン（任意）" });
 const SWATH_UNIT = S("swathUnit", "観測幅の単位", [["km", "km"], ["m", "m"]]);
@@ -1613,6 +1627,21 @@ const RESULT_FILE = O("resultFile", "採否の結果ファイル", [
 ], { check: (rf, at, p) => checkResultFile(rf, at, p) });
 
 const SPEC = [
+  { group: "サインイン", keys: [
+    { key: "signIn", label: "サインイン（ポータル・サーバーごと）", doc: "サインインsignin", help: "ArcGIS のサーバーへのサインインを、通信先のドメインごとに決める。iwa: Windows のログオン（AD）でポータルのトークンを取り、ドメインのサービスに付ける。saml: QGIS の OAuth2 の認証設定を自動で作り、初回にブラウザでサインイン。none: 何も付けない。書いていないサーバーは各自が「設定…」で選んだ QGIS の認証設定。",
+      field: I("signIn", "ポータル", [
+        S("method", "サインインの方式", K.signInMethods, { req: true, rerender: true }),
+        T("portal", "ポータルの URL", { ph: "https://gis.example.co.jp/portal", help: "iwa・saml で必須（…/portal まで。/home・/sharing/rest は不要）。ポータルのホストはドメインに自動で入る" }),
+        T("clientId", "アプリ ID（clientId）", { showIf: (it) => it.method === "saml", help: "saml で必須。ポータルに登録したアプリの ID（リダイレクト URI に http://127.0.0.1:7070/ を登録）" }),
+        L("domains", "ドメイン", { ph: "gis.example.co.jp, *.example.co.jp", help: "この方式で通信するホスト（*. で下のホストすべて。*.example.co.jp は example.co.jp そのものを含まない）。いちばん詳しく合うものを使う。none では必須" }),
+        LABEL,
+      ], { title: (it) => `${it.method || "?"} ${it.portal || (it.domains || []).join("・")}`,
+           check: (it, at, p) => {
+             if ((it.method === "iwa" || it.method === "saml") && !it.portal) p.push(`${at}: ${it.method} は portal が必要`);
+             if (it.method === "saml" && !it.clientId) p.push(`${at}: saml は clientId が必要`);
+             if (it.method === "none" && !(it.domains && it.domains.length)) p.push(`${at}: none は domains が必要`);
+           } }) },
+  ] },
   { group: "画像カタログ・通知・画像", keys: [
     { key: "imageCatalogs", label: "画像カタログ", doc: "画像カタログ", help: "撮像済み画像の一覧（ArcGIS のレイヤーかテーブル）。url と fields.source が必須（imageFiles: false のカタログは source 不要）。",
       field: I("imageCatalogs", "画像カタログ", [
@@ -1632,11 +1661,11 @@ const SPEC = [
           LABEL, URL_("フットプリントと重なる地物の名前をカードに出すレイヤー"),
           L("fields", "出す属性", { req: true, ph: "NAME, NAME_EN" }),
           T("format", "1 件の書き方", { ph: "{NAME}（{NAME_EN}）", help: "{属性名}（fields にある属性だけ）。値が空なら囲む括弧ごと消える。省略すると fields の値を空白でつなぐ" }),
-          WHERE, N("max", "上限の件数", { min: 1, max: 10000, help: "書かなければすべて出す" }), TOKEN,
+          WHERE, N("max", "上限の件数", { min: 1, max: 10000, help: "書かなければすべて出す" }),
           TJ("background", "行の背景色（background）", { ph: 'KIND か { "field": "KIND", "colors": { "port": "#e0f2fe" }, "default": "#f1f5f9" }',
             help: "1 件ごとの行の背景色を属性から。colors は属性の値 → 色（#rrggbb・色の名前）。属性名だけなら値そのものを色に。当たらない行は default（なければ背景なし）" }),
         ]),
-        TOKEN, TZ, STZ,
+        TZ, STZ,
       ]) },
     { key: "watchInterval", label: "新着画像の確認間隔", doc: "通知", help: "新着画像を確かめる間隔（分）。",
       field: N("watchInterval", "間隔（分）", { min: 1, max: 1440, ph: "10" }) },
@@ -1679,33 +1708,32 @@ const SPEC = [
       ], { title: (it) => it.label || it.match }) },
     { key: "dem", label: "クイック幾何補正の標高（DEM）", doc: "クイック幾何補正", help: "クイック幾何補正で SAR 画像の地形の倒れ込み（高い所ほど衛星の側に写る）を直す標高。ArcGIS のイメージサーバー（…/ImageServer）なら画像の範囲だけを exportImage で読み、この PC（QGIS のプロファイル）に残す（同じ範囲は読み直さない）。標高ファイル（GeoTIFF など）でもよい。標高が海面からの高さならジオイド高を書く（画像の高さは楕円体から）。",
       field: O("dem", "標高", [
-        T("url", "イメージサーバー", { ph: "https://gis.example/arcgis/rest/services/DEM/ImageServer", help: "…/ImageServer。トークンは QGIS の認証設定か token" }),
+        T("url", "イメージサーバー", { ph: "https://gis.example/arcgis/rest/services/DEM/ImageServer", help: "…/ImageServer。サインインは signIn（なければ「設定…」の認証設定）" }),
         T("file", "標高ファイル", { ph: "\\\\server\\dem\\japan_dem.tif", help: "イメージサーバーの代わりに（url があれば url）" }),
         N("geoidHeight", "ジオイド高（m）", { min: -150, max: 150, ph: "0", help: "標高（海面から）に足して楕円体高にする値。日本ならおよそ 30〜40 m。0 なら足さない" }),
         J("renderingRule", "ラスター関数（renderingRule）", { ph: '{ "rasterFunction": "None" }', help: "既定は None（サービスの値のまま。表示用の陰影などではなく標高の値）" }),
         J("mosaicRule", "モザイクの決まり（mosaicRule）", { ph: '{ "mosaicMethod": "esriMosaicNone" }' }),
         N("maxSize", "最大の画素数（一辺）", { min: 256, max: 16384, ph: "4096", help: "画像の範囲を読む DEM の一辺の画素数の上限（細かすぎるサービスは粗くして読む）" }),
-        T("token", "トークン", { help: "QGIS の認証設定があればそちら" }),
       ]) },
     { key: "imageCorrections", label: "クイック幾何補正の共有", doc: "クイック幾何補正", help: "クイック幾何補正で直した画像ごとの補正（目印の点・地形の補正・撮像方向）を残す Esri のテーブル（編集可、画像のファイル 1 つで 1 行）。書けば補正をみんなで共有し、だれが開いても補正した位置で表示する。書かなければ補正はその PC だけに残す。",
-      field: TJ("imageCorrections", "補正のテーブル", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "TBL_IMAGE_CORRECTION。役割: " + Object.entries(K.roles.imageCorrections).map(([k, v]) => `${k}（${v}）`).join("・") + "。必須は imageId（画像 ID）と points（目印の点）" }) },
+      field: TJ("imageCorrections", "補正のテーブル", { ph: "URL か { \"url\", \"fields\", \"where\" }", help: "TBL_IMAGE_CORRECTION。役割: " + Object.entries(K.roles.imageCorrections).map(([k, v]) => `${k}（${v}）`).join("・") + "。必須は imageId（画像 ID）と points（目印の点）" }) },
   ] },
   { group: "撮像計画・撮像依頼", keys: [
     { key: "satelliteCatalogs", label: "衛星カタログ（TLE）", doc: "撮像計画", help: "衛星の TLE と諸元。fields に tle か tle1＋tle2 が必須。",
       field: I("satelliteCatalogs", "衛星カタログ", [
         LABEL, URL_(), R("fields", "属性名", K.roles.satelliteCatalogs, { requiredAny: [["tle"], ["tle1", "tle2"]] }),
-        J("defaults", "属性がないときの値（defaults）", { ph: '{ "maxOffNadir": 30, "swath": 10 }' }), SWATH_UNIT, SAR, WHERE, TOKEN, TZ, STZ,
+        J("defaults", "属性がないときの値（defaults）", { ph: '{ "maxOffNadir": 30, "swath": 10 }' }), SWATH_UNIT, SAR, WHERE, TZ, STZ,
       ]) },
     { key: "sensorCatalogs", label: "センサーモード", doc: "撮像計画", help: "センサーごとのモード。設定ファイルに sensors で書くか、テーブルの url と fields（sensor 必須）。",
       field: I("sensorCatalogs", "センサーモード", [
         LABEL, T("url", "テーブルの URL", { ph: "https://…/FeatureServer/1" }), R("fields", "属性名", K.roles.sensorCatalogs),
         J("sensors", "ファイルに書くモード（sensors）", { ph: '[{ "sensor": "SAR-1", "modes": [{ "mode": "Stripmap", "swath": 30 }] }]' }),
-        SWATH_UNIT, SAR, WHERE, TOKEN, TZ, STZ,
+        SWATH_UNIT, SAR, WHERE, TZ, STZ,
       ], { check: (it, at, p) => { if (!it.url && !it.sensors) p.push(`${at}: url か sensors が必要`); if (it.url && !(it.fields && it.fields.sensor)) p.push(`${at}: fields.sensor が必要`); } }) },
     { key: "satelliteAliases", label: "衛星名の対応表", doc: "衛星名の対応表satellitealiases", help: "衛星カタログの名前と画像カタログでの名前（WV03 など）の対応。対応表のデータは Esri のテーブルに置き、ここにはテーブルと属性名だけを書く。",
-      field: I("satelliteAliases", "対応表", [LABEL, URL_("対応表のテーブル", "https://…/FeatureServer/2"), R("fields", "属性名", K.roles.satelliteAliases, { required: ["satellite", "alias"] }), WHERE, TOKEN]) },
+      field: I("satelliteAliases", "対応表", [LABEL, URL_("対応表のテーブル", "https://…/FeatureServer/2"), R("fields", "属性名", K.roles.satelliteAliases, { required: ["satellite", "alias"] }), WHERE]) },
     { key: "satelliteOutages", label: "衛星・システムの障害情報", doc: "衛星の障害情報satelliteoutages", help: "衛星の障害（理由・発生日時・復旧見込み・影響）と、システム（発注先）の受付停止・臨時の 1 日の上限を 1 件 1 行で置く Esri の編集できるテーブル。メニュー「撮像依頼」→「衛星・システムの障害情報…」で撮像計画の担当が登録し、撮像計画・撮像計画ファイル出力・上限シミュレーションの計算が影響を守る。障害そのものはテーブルに置き、ここにはテーブルと属性名だけを書く。",
-      field: TJ("satelliteOutages", "障害情報のテーブル（編集可）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "TBL_SATELLITE_OUTAGE。役割: " + Object.entries(K.roles.satelliteOutages).map(([k, v]) => `${k}（${v}）`).join("・") }) },
+      field: TJ("satelliteOutages", "障害情報のテーブル（編集可）", { ph: "URL か { \"url\", \"fields\", \"where\" }", help: "TBL_SATELLITE_OUTAGE。役割: " + Object.entries(K.roles.satelliteOutages).map(([k, v]) => `${k}（${v}）`).join("・") }) },
     { key: "groundStations", label: "地上局", doc: "撮像計画", help: "受信可能を判定する地上局。",
       field: I("groundStations", "地上局", [T("name", "名前", { req: true }), N("lon", "経度", { req: true }), N("lat", "緯度", { req: true }), N("minElevation", "最低仰角（°）", { ph: "5" })], { title: (it) => it.name }) },
     { key: "cloudForecast", label: "雲量予報", doc: "", ext: "docs/cloud-forecast-file.md", help: "既定は Open-Meteo。閉じたネットワークでは予報ファイル（file）か、いちばん新しいファイルを読むフォルダ（folder）。url・file・folder のどれか 1 つ。",
@@ -1725,7 +1753,7 @@ const SPEC = [
         N("missAfterDays", "未撮像とする日数"),
         N("lookAheadDays", "残りの撮像機会を見る日数", { ph: "7", help: "期間内1回の依頼の締め切りまでの撮像機会を、計算の日のあと何日分のパスと雲量予報で数えるか（0〜16、0 で見ない）。残り 1 回なら先に、あとのほうが晴れるなら後に置く" }),
         B("sameGeometry", "定点は前回と同じ撮り方を優先", { help: "既定 true: 定点の依頼は前回の撮像と同じ衛星・軌道方向・観測方向・入射角のパスを先に試す（順番だけ。撮像の範囲のレイヤーが要る）" }),
-        TOKEN]) },
+      ]) },
     { key: "requestExports", label: "日次出力（オーダー用ファイル）", doc: "", ext: "docs/imaging-requests.md", help: "衛星システムごとに、その日の依頼をどう書き出すか。CSV は列（キー）を、JSON は JSON Schema（x-source で中身を指定）を組む。下の見本で出力を確かめられる。",
       field: I("requestExports", "システム", [
         T("system", "システム名", { req: true, ph: "SYS-A" }), LABEL,
@@ -1766,9 +1794,9 @@ const SPEC = [
         N("refreshMinutes", "読み直しの間隔（分）", { min: 0.5, max: 1440, ph: "なし", help: "ほかの人の記録をこの間隔でも読み直す。書かなければ、画像の切り替え・記録を直すときだけ" }),
         L("kinds", "種別"), L("activities", "活動"),
         J("confidences", "確度", { ph: '["確実", { "label": "推定", "color": "#f59e0b", "en": "Probable" }]', help: "文字列か { label, color, note, en, ほかのキー }。en は英語の名前（通報の confidence.en）、ほかのキー（code など）は通報の confidence.code など" }), J("taxonomy", "分類の木（taxonomy）"),
-        TJ("areas", "確認範囲のレイヤー", { ph: "URL か { \"url\", \"fields\", \"softDelete\", \"token\" }" }),
-        TJ("taxonomyTable", "共有の分類テーブル", { ph: "URL か { \"url\", \"fields\", \"token\" }", help: "役割: " + Object.keys(K.roles.taxonomyTable).join("・") }),
-        TOKEN, TZ, STZ]) },
+        TJ("areas", "確認範囲のレイヤー", { ph: "URL か { \"url\", \"fields\", \"softDelete\" }" }),
+        TJ("taxonomyTable", "共有の分類テーブル", { ph: "URL か { \"url\", \"fields\" }", help: "役割: " + Object.keys(K.roles.taxonomyTable).join("・") }),
+        TZ, STZ]) },
     { key: "localObservations", label: "ローカルの観測記録", doc: "観測記録", help: "false でローカルの GeoPackage を保存先にしない（observationStores だけ）。",
       field: B("localObservations", "ローカルを使う", { help: "既定 true" }) },
     { key: "offlineWork", label: "サーバー障害時のオフライン作業", doc: "サーバー障害時のオフライン作業", help: "サーバーにつながらない間も、最後に読めた内容（控え）で作業を続け、変更は送信待ちとして PC に残す。復旧時に件数を出して送信か破棄を確認。localObservations が false でも使える。書かなければ有効。",
@@ -1789,7 +1817,7 @@ const SPEC = [
         L("unseenReasons", "不可の理由", { help: "雲などで判読できないとき（不可）の理由の候補（観測記録の「不可」・不可範囲）。既定は 雲・霞・影・画像の欠け・その他" }),
       ]) },
     { key: "glossary", label: "備考の単語集", doc: "備考の単語集glossary", help: "観測記録・確認範囲の備考に使う語を 1 語 1 行で置く Esri のテーブル（読むだけ）。備考を打っている間、打っている語の候補（よみ・表記ゆれからも）を出し、表記ゆれは欄の下に知らせて直せる。語はテーブルに置き、ここにはテーブルと属性名だけを書く。",
-      field: TJ("glossary", "単語集のテーブル", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "TBL_GLOSSARY。役割: " + Object.entries(K.roles.glossary).map(([k, v]) => `${k}（${v}）`).join("・") + "。必須は term（語）。variants（表記ゆれ）・reading（よみ）・kinds（大分類）はカンマ区切り" }) },
+      field: TJ("glossary", "単語集のテーブル", { ph: "URL か { \"url\", \"fields\", \"where\" }", help: "TBL_GLOSSARY。役割: " + Object.entries(K.roles.glossary).map(([k, v]) => `${k}（${v}）`).join("・") + "。必須は term（語）。variants（表記ゆれ）・reading（よみ）・kinds（大分類）はカンマ区切り" }) },
     { key: "textAssist", label: "文章の手伝い（この PC の生成 AI）", doc: "文章の手伝い小さな生成-aitextassist", help: "この PC で動く小さな生成 AI（ONNX Runtime GenAI のモデル。sarashina2.2 の 1B・3B の int4 など）で、文章の案を出す。モデルの一覧（models）に名前と置き場所を書き、タスクごとにどのモデルを使うかを選ぶ（tasks）。モデルを割り当てないタスクはボタンを出さない（使う人がモデルを選ぶ場面はない）。どのタスクも案を出すだけで、押すまで欄は変わらない。モデルは zip に入れず、置き場所を書く。読んでおくモデルは一度に 1 つ（別のモデルのタスクでは読み込み直しで数秒）。以前の書き方（\"textAssist\": \"パス\"、model・maxTokens など）も読め、そのモデルを「備考を整える」と「申し送りの下書き」に割り当てたものになる。",
       field: O("textAssist", "文章の手伝い", [
         M("models", "モデルの一覧", { value: "auto", keyHelp: "名前（small・large など）", valueHelp: "置き場所か { \"path\", \"threads\" }、サーバーなら { \"url\", \"model\" }", help: "置き場所は genai_config.json のあるフォルダ、その .zip、または .zip の URL。相対パスは設定ファイルのフォルダから。共有フォルダ・zip・URL は初回に QGIS のプロファイルへコピー（展開）。threads はスレッド数（0 でコア数 − 1、最大 8）。社内サーバーの生成 AI は { \"url\": \"https://…/v1\", \"model\": \"サーバーでのモデル名\", \"timeoutSeconds\": 300 }（OpenAI 互換の chat/completions。vLLM・llama.cpp の server など。QGIS の認証設定とプロキシを使う）" }),
@@ -1805,11 +1833,11 @@ const SPEC = [
       ]) },
     { key: "alertReports", label: "通報（注目の記録）", doc: "通報注目の記録alertreports", help: "注目の記録を区切り文字の 1 件 1 行の通報文に。条件（分類・活動・確度・ジオフェンス）と通報した記録は Esri に置き、ここには URL・属性名と、名前付きのフォーマット（複数）を書く。抽出した記録は重要度スコアの高い順。",
       field: O("alertReports", "通報", [
-        TJ("rules", "条件テーブル", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "1 行 1 条件。役割: " + Object.entries(K.roles.alertRules).map(([k, v]) => `${k}（${v}）`).join("・") + "。なければ固定の条件に合う記録すべて" }),
-        TJ("geofences", "ジオフェンス", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "ポリゴンのレイヤー。役割: " + Object.entries(K.roles.alertGeofences).map(([k, v]) => `${k}（${v}）`).join("・") }),
-        TJ("namedAreas", "地名（NamedArea）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "地名・施設名のポリゴンのレイヤー（なくてもよい）。役割: " + Object.entries(K.roles.alertPlaces).map(([k, v]) => `${k}（${v}）`).join("・") + "。記録を含むいちばん小さいものが項目 place（種類 placeKind、全部 places、管理番号 place.id）。10 分ごと・「抽出」で読み直す" }),
-        TJ("countries", "国", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "国のポリゴンのレイヤー（なくてもよい。領海・EEZ を含めれば海上の記録にも付く）。役割: " + Object.entries(K.roles.alertCountries).map(([k, v]) => `${k}（${v}）`).join("・") + "。記録を含むもの（重なればいちばん小さいもの）が項目 country（国コード）・countryName（国名）・countryName.en。10 分ごと・「抽出」で読み直す" }),
-        TJ("table", "通報テーブル（編集可）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "通報した記録（1 記録 1 行）。役割: " + Object.entries(K.roles.alertLog).map(([k, v]) => `${k}（${v}）`).join("・") + "。ここにある記録は次から抽出しない" }),
+        TJ("rules", "条件テーブル", { ph: "URL か { \"url\", \"fields\", \"where\" }", help: "1 行 1 条件。役割: " + Object.entries(K.roles.alertRules).map(([k, v]) => `${k}（${v}）`).join("・") + "。なければ固定の条件に合う記録すべて" }),
+        TJ("geofences", "ジオフェンス", { ph: "URL か { \"url\", \"fields\", \"where\" }", help: "ポリゴンのレイヤー。役割: " + Object.entries(K.roles.alertGeofences).map(([k, v]) => `${k}（${v}）`).join("・") }),
+        TJ("namedAreas", "地名（NamedArea）", { ph: "URL か { \"url\", \"fields\", \"where\" }", help: "地名・施設名のポリゴンのレイヤー（なくてもよい）。役割: " + Object.entries(K.roles.alertPlaces).map(([k, v]) => `${k}（${v}）`).join("・") + "。記録を含むいちばん小さいものが項目 place（種類 placeKind、全部 places、管理番号 place.id）。10 分ごと・「抽出」で読み直す" }),
+        TJ("countries", "国", { ph: "URL か { \"url\", \"fields\", \"where\" }", help: "国のポリゴンのレイヤー（なくてもよい。領海・EEZ を含めれば海上の記録にも付く）。役割: " + Object.entries(K.roles.alertCountries).map(([k, v]) => `${k}（${v}）`).join("・") + "。記録を含むもの（重なればいちばん小さいもの）が項目 country（国コード）・countryName（国名）・countryName.en。10 分ごと・「抽出」で読み直す" }),
+        TJ("table", "通報テーブル（編集可）", { ph: "URL か { \"url\", \"fields\", \"where\" }", help: "通報した記録（1 記録 1 行）。役割: " + Object.entries(K.roles.alertLog).map(([k, v]) => `${k}（${v}）`).join("・") + "。ここにある記録は次から抽出しない" }),
         T("minConfidence", "確度の下限", { help: "この確度以上（確度の並びで上のもの）だけ。空ならすべて" }),
         B("presentOnly", "消失を除く", { help: "既定 true" }),
         B("notifyOnSave", "保存時に知らせる", { help: "既定 true。保存した記録が条件に合えばメッセージバーに「注目の記録」" }),
@@ -1875,8 +1903,8 @@ const SPEC = [
       } }) },
     { key: "observationExports", label: "観測記録のエクスポート", doc: "観測記録のエクスポートobservationexports", help: "観測記録を期間・場所・大分類で絞って CSV・JSON に保存するときのフォーマット（名前付き、複数）。組み込みの「標準（CSV）」「標準（JSON）」はいつも選べる。撮像依頼の日次出力と同じく、CSV は列、JSON は列か JSON Schema（x-source）で組む。",
       field: O("observationExports", "エクスポート", [
-        TJ("namedAreas", "地名（NamedArea）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "項目 place・placeKind・places に使う地名のポリゴンのレイヤー。役割: " + Object.entries(K.roles.alertPlaces).map(([k, v]) => `${k}（${v}）`).join("・") + "。なければ alertReports の namedAreas" }),
-        TJ("geofences", "ジオフェンス", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "項目 geofences に使うポリゴンのレイヤー。役割: " + Object.entries(K.roles.alertGeofences).map(([k, v]) => `${k}（${v}）`).join("・") + "。なければ alertReports の geofences" }),
+        TJ("namedAreas", "地名（NamedArea）", { ph: "URL か { \"url\", \"fields\", \"where\" }", help: "項目 place・placeKind・places に使う地名のポリゴンのレイヤー。役割: " + Object.entries(K.roles.alertPlaces).map(([k, v]) => `${k}（${v}）`).join("・") + "。なければ alertReports の namedAreas" }),
+        TJ("geofences", "ジオフェンス", { ph: "URL か { \"url\", \"fields\", \"where\" }", help: "項目 geofences に使うポリゴンのレイヤー。役割: " + Object.entries(K.roles.alertGeofences).map(([k, v]) => `${k}（${v}）`).join("・") + "。なければ alertReports の geofences" }),
         S("default", "既定のフォーマット", () => [K.obsBuiltinFormats[0], K.obsBuiltinFormats[1], ...((state.observationExports && state.observationExports.formats) || []).map((f) => f && f.name).filter(Boolean)]),
         I("formats", "フォーマット", [
           T("name", "名前", { req: true, help: "画面に出す名前（" + K.obsBuiltinFormats.join("・") + " は使えない）" }),
@@ -1894,12 +1922,12 @@ const SPEC = [
         ], { title: (it) => it.name, unique: "name", check: checkObsExport }),
       ]) },
     { key: "assignments", label: "分担（画像ごとの担当）", doc: "分担と引き継ぎメモassignmentshandover", help: "誰がどの画像を担当中かを置く Esri の編集できるテーブル（1 行 1 人 × 1 画像）。各自が「この画像を担当」で取る。協業（既定）は同じ画像を何人でも、排他（mode: exclusive）はほかの人が担当中の画像は取れない。",
-      field: TJ("assignments", "分担のテーブル（編集可）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\", \"claimOnRecord\", \"mode\" }", help: "役割: " + Object.entries(K.roles.assignments).map(([k, v]) => `${k}（${v}）`).join("・") + "。担当者は editTracking のユーザー名（既定は環境変数 USERNAME）。「クリック記録」の開始で画像を自動で担当にする（\"claimOnRecord\": false で止める）。\"mode\": \"shared\"（協業、既定）は同じ画像を何人でも担当でき、\"exclusive\"（排他）はほかの人が担当中なら記録できない" }) },
+      field: TJ("assignments", "分担のテーブル（編集可）", { ph: "URL か { \"url\", \"fields\", \"where\", \"claimOnRecord\", \"mode\" }", help: "役割: " + Object.entries(K.roles.assignments).map(([k, v]) => `${k}（${v}）`).join("・") + "。担当者は editTracking のユーザー名（既定は環境変数 USERNAME）。「クリック記録」の開始で画像を自動で担当にする（\"claimOnRecord\": false で止める）。\"mode\": \"shared\"（協業、既定）は同じ画像を何人でも担当でき、\"exclusive\"（排他）はほかの人が担当中なら記録できない" }) },
     { key: "imageReviews", label: "画像の評価", doc: "画像の評価imagereviews", help: "画像が判読に使えるか（使える・一部・使えない）を地名ごとに置く Esri の編集できるポリゴンのレイヤー（1 行 1 画像 × 1 地名。形状は地名のうち画像に写っている部分）。観測記録の分担の行の下の「評価…」で付け、分担の「完了」でまだ評価のない画像なら窓が開く。画像カタログの「評価」の列に出て、撮像依頼の照合ではすべて「使えない」の画像を撮像済みに数えない。地名は namedAreas から読む。",
-      field: TJ("imageReviews", "画像の評価のレイヤー（編集可）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "TBL_IMAGE_REVIEW。役割: " + Object.entries(K.roles.imageReviews).map(([k, v]) => `${k}（${v}）`).join("・") }) },
+      field: TJ("imageReviews", "画像の評価のレイヤー（編集可）", { ph: "URL か { \"url\", \"fields\", \"where\" }", help: "TBL_IMAGE_REVIEW。役割: " + Object.entries(K.roles.imageReviews).map(([k, v]) => `${k}（${v}）`).join("・") }) },
     { key: "handover", label: "引き継ぎメモ", doc: "分担と引き継ぎメモassignmentshandover", help: "交代時の引き継ぎメモ（期間の観測記録・通報・未処理の撮像依頼・分担・申し送り）。すべて任意。",
       field: O("handover", "引き継ぎメモ", [
-        TJ("table", "保存先のテーブル（編集可）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "次の担当者が前回のメモを読み、期間がその終わりから始まる。役割: " + Object.entries(K.roles.handoverMemos).map(([k, v]) => `${k}（${v}）`).join("・") }),
+        TJ("table", "保存先のテーブル（編集可）", { ph: "URL か { \"url\", \"fields\", \"where\" }", help: "次の担当者が前回のメモを読み、期間がその終わりから始まる。役割: " + Object.entries(K.roles.handoverMemos).map(([k, v]) => `${k}（${v}）`).join("・") }),
         N("hours", "1 交代の長さ（時間）", { help: "前回のメモがないときの期間（既定 12）" }),
         N("dueHours", "期限間近（時間）", { help: "この時間内に期限の依頼に印（既定 24）" }),
         N("limit", "一覧の最大行数", { help: "既定 20（残りは件数のみ）" }),
@@ -1910,8 +1938,8 @@ const SPEC = [
       ]) },
     { key: "events", label: "イベント（地震対応など）", doc: "イベント地震対応などevents", help: "地震・風水害・事故などの対応で使った画像・観測記録・撮像依頼を束ねる。イベントと紐付け（多対多）は Esri に置き、ここには URL と属性名だけ。",
       field: O("events", "イベント", [
-        TJ("layer", "イベントのレイヤー（編集可）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "ポリゴン（範囲あり）かテーブル。役割: " + Object.entries(K.roles.eventLayer).map(([k, v]) => `${k}（${v}）`).join("・") }),
-        TJ("links", "紐付けテーブル（編集可）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "1 項目 1 行。役割: " + Object.entries(K.roles.eventLinks).map(([k, v]) => `${k}（${v}）`).join("・") }),
+        TJ("layer", "イベントのレイヤー（編集可）", { ph: "URL か { \"url\", \"fields\", \"where\" }", help: "ポリゴン（範囲あり）かテーブル。役割: " + Object.entries(K.roles.eventLayer).map(([k, v]) => `${k}（${v}）`).join("・") }),
+        TJ("links", "紐付けテーブル（編集可）", { ph: "URL か { \"url\", \"fields\", \"where\" }", help: "1 項目 1 行。役割: " + Object.entries(K.roles.eventLinks).map(([k, v]) => `${k}（${v}）`).join("・") }),
         L("kinds", "種別の候補", { help: "フォームの種別に出す候補（この順）。書くと既定の候補（地震・津波など）と使用済みの種別は出さない。候補にない種別も手で入力できる" }),
       ], { check: (it, at, p) => {
         if (!it.layer) p.push(`${at}.layer: イベントのレイヤーが必要`);
@@ -1919,16 +1947,16 @@ const SPEC = [
       } }) },
     { key: "referenceInfo", label: "参考情報（出典つき）", doc: "出典つきの参考情報referenceinfo", help: "画像の外から知った情報（発表・航行警報・報道・ほかの部署からの通報など）を、出典と確からしさをつけて場所と日時で置く。ドック「参考情報」で登録し、観測記録で画像を選ぶと撮像日時の前後 days 日の、画像の範囲か写っている地名の参考情報の件数が出る。イベント・モノ・観測記録に紐付けられる。Esri に置き、ここには URL と属性名だけ。",
       field: O("referenceInfo", "参考情報", [
-        TJ("layer", "参考情報のレイヤー（ポイント、編集可）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "TBL_REFERENCE_INFO。役割: " + Object.entries(K.roles.referenceInfo).map(([k, v]) => `${k}（${v}）`).join("・") }),
-        TJ("links", "紐付けテーブル（編集可）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "TBL_REFERENCE_LINK。なければ紐付けは使わない。役割: " + Object.entries(K.roles.referenceLinks).map(([k, v]) => `${k}（${v}）`).join("・") }),
+        TJ("layer", "参考情報のレイヤー（ポイント、編集可）", { ph: "URL か { \"url\", \"fields\", \"where\" }", help: "TBL_REFERENCE_INFO。役割: " + Object.entries(K.roles.referenceInfo).map(([k, v]) => `${k}（${v}）`).join("・") }),
+        TJ("links", "紐付けテーブル（編集可）", { ph: "URL か { \"url\", \"fields\", \"where\" }", help: "TBL_REFERENCE_LINK。なければ紐付けは使わない。役割: " + Object.entries(K.roles.referenceLinks).map(([k, v]) => `${k}（${v}）`).join("・") }),
         N("days", "画像の前後の日数", { min: 1, max: 366, ph: "7", help: "観測記録で画像を選んだとき、撮像日時の前後この日数の参考情報を数える" }),
       ], { check: (it, at, p) => {
         if (!it.layer) p.push(`${at}.layer: 参考情報のレイヤーが必要`);
       } }) },
     { key: "interests", label: "個人の関心地域・地点", doc: "個人の関心地域地点interests", help: "一人ひとりが自分の関心地点・関心地域を決め、新着画像のカードの「写っている地物」のいちばん上に出す（ドック「関心地域・地点」で編集）。footprintLayers とは別にここに 1 回だけ書き、すべてのカタログのカードに出る。属性はプラグインが知っているので fields・format は不要（名前を変えたときだけ）。",
       field: O("interests", "関心地域・地点", [
-        TJ("points", "関心地点のレイヤー（ポイント、編集可）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "TBL_INTEREST_POINT。役割: " + Object.entries(K.roles.interests).map(([k, v]) => `${k}（${v}）`).join("・") + "。持ち主（owner）は editTracking のユーザー名（既定は環境変数 USERNAME）で、自分の行だけ読み書きする" }),
-        TJ("areas", "関心地域のレイヤー（ポリゴン、編集可）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "TBL_INTEREST_AREA。役割は points と同じ" }),
+        TJ("points", "関心地点のレイヤー（ポイント、編集可）", { ph: "URL か { \"url\", \"fields\", \"where\" }", help: "TBL_INTEREST_POINT。役割: " + Object.entries(K.roles.interests).map(([k, v]) => `${k}（${v}）`).join("・") + "。持ち主（owner）は editTracking のユーザー名（既定は環境変数 USERNAME）で、自分の行だけ読み書きする" }),
+        TJ("areas", "関心地域のレイヤー（ポリゴン、編集可）", { ph: "URL か { \"url\", \"fields\", \"where\" }", help: "TBL_INTEREST_AREA。役割は points と同じ" }),
         T("label", "カードの見出し", { ph: "関心地域・地点" }),
         T("color", "新しく作るときの色", { ph: "#f97316", help: "#rrggbb か色の名前" }),
       ], { check: (it, at, p) => {
@@ -1944,12 +1972,12 @@ const SPEC = [
         T("label", "カードの見出し", { ph: "組織の関心地域" }),
       ]) },
     { key: "userRoles", label: "担当と使える機能", doc: "担当と使える機能userroles", help: "一人ひとりが「最初の設定」「担当と個人設定…」でチェックした担当（いくつでも）を、利用者名ごとに置く Esri の編集できるテーブル（1 行 1 人 × 1 担当）。担当で使わない機能はメニュー・ツールバー・ドックのボタンに出さない（サーバー側の権限の代わりではない）。書かなければ担当はこの PC にだけ保存。",
-      field: TJ("userRoles", "担当のテーブル（編集可）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "TBL_USER_ROLE。役割: " + Object.entries(K.roles.userRoles).map(([k, v]) => `${k}（${v}）`).join("・") + "。利用者名は editTracking のユーザー名（既定は環境変数 USERNAME）。担当の値: " + K.roleCodes.map(([c, n]) => `${c}（${n}）`).join("・") }) },
+      field: TJ("userRoles", "担当のテーブル（編集可）", { ph: "URL か { \"url\", \"fields\", \"where\" }", help: "TBL_USER_ROLE。役割: " + Object.entries(K.roles.userRoles).map(([k, v]) => `${k}（${v}）`).join("・") + "。利用者名は editTracking のユーザー名（既定は環境変数 USERNAME）。担当の値: " + K.roleCodes.map(([c, n]) => `${c}（${n}）`).join("・") }) },
   ] },
   { group: "地図・レイヤー・場所", keys: [
     { key: "baseMaps", label: "背景地図", doc: "背景地図", help: "書くと一覧をこれで置き換える（既定は地理院・OSM）。",
       field: I("baseMaps", "背景地図", [T("id", "ID", { req: true }), LABEL, T("url", "URL", { req: true, ph: "https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png" }),
-        S("type", "種類", K.baseMapTypes, { help: "省略時は URL から判断" }), T("style", "スタイル"), N("maxZoom", "最大ズーム"), T("attributions", "出典"), TOKEN],
+        S("type", "種類", K.baseMapTypes, { help: "省略時は URL から判断" }), T("style", "スタイル"), N("maxZoom", "最大ズーム"), T("attributions", "出典")],
         { title: (it) => it.label || it.id, unique: "id" }) },
     { key: "defaultBaseMap", label: "起動時の背景地図", doc: "背景地図", help: "起動時に出す背景地図の id。",
       field: S("defaultBaseMap", "背景地図", () => (state.baseMaps ? state.baseMaps.map((b) => b && b.id).filter(Boolean) : K.defaultBaseMaps)) },
@@ -1968,7 +1996,7 @@ const SPEC = [
       ], { allowFalse: "待ち受けない（false）" }) },
     { key: "geocoders", label: "地名検索", doc: "座標地名へ移動", help: "「座標・地名へ移動」の地名検索。書かなければ地名は検索しない。",
       field: I("geocoders", "地名検索", [S("type", "種類", K.geocoderTypes, { req: true }), T("url", "URL"), LABEL, L("field", "名前の属性", { single: true, ph: "NAME, NAME_KANA, ALIAS",
-          help: "features: 検索する属性（カンマ区切りで複数可。先頭が地名、ほかは読み・別名など。どれかに含まれれば見つかり、合ったものを横に出す）。csv: 名前の列（1 つ）" }), TOKEN],
+          help: "features: 検索する属性（カンマ区切りで複数可。先頭が地名、ほかは読み・別名など。どれかに含まれれば見つかり、合ったものを横に出す）。csv: 名前の列（1 つ）" })],
         { check: (it, at, p) => {
           if (it.type === "features" && !(it.field && it.field.length)) p.push(`${at}: features は field が必要`);
           if (Array.isArray(it.field) && it.field.length > 1 && it.type !== "features") p.push(`${at}: 複数の field は features のみ`);
@@ -1984,7 +2012,7 @@ const SPEC = [
       field: I("movingFeeds", "フィード", [S("type", "種類", K.feedTypes), T("url", "URL", { req: true }), LABEL, N("interval", "間隔（秒）"),
         R("fields", "項目名", K.roles.movingFeeds), S("kind", "種類", [["ship", "船舶"], ["aircraft", "航空機"]]), TZ, STZ]) },
     { key: "gpServices", label: "サーバ処理", doc: "サーバ処理", help: "GP サービスか OGC API – Processes。",
-      field: I("gpServices", "サービス", [LABEL, URL_("", "https://gis.example/arcgis/rest/services/Tools/GPServer"), TOKEN, TZ, STZ]) },
+      field: I("gpServices", "サービス", [LABEL, URL_("", "https://gis.example/arcgis/rest/services/Tools/GPServer"), TZ, STZ]) },
   ] },
   { group: "AI", keys: [
     { key: "aiModels", label: "AI のモデル", doc: "ai物体検出クリック抽出", help: "物体検出は url、クリック抽出（SAM）は encoder と decoder。",
@@ -1998,11 +2026,11 @@ const SPEC = [
     { key: "detectionOutputs", label: "検出結果の転記先", doc: "ai物体検出クリック抽出", help: "物体検出の結果を書き込むレイヤー。",
       field: I("detectionOutputs", "転記先", [LABEL, URL_(), R("fields", "属性名", K.roles.detectionOutputs, { requiredSome: true }),
         M("statusValues", "状態の書き方", { keys: K.detectionStatuses, value: "auto" }), M("constants", "固定の属性", { value: "auto", keyHelp: "属性名", valueHelp: "値" }),
-        B("aiResults", "「AI結果」で読む", { help: "既定 true。転記した検出結果をほかの人も「AI結果」ドックで確かめられる（fields.imageId が要る）。false で読まない" }), TOKEN, TZ, STZ]) },
+        B("aiResults", "「AI結果」で読む", { help: "既定 true。転記した検出結果をほかの人も「AI結果」ドックで確かめられる（fields.imageId が要る）。false で読まない" }), TZ, STZ]) },
     { key: "aiResultSources", label: "外部 AI の結果", doc: "ai結果外部aiプラグイン内の物体検出", help: "カタログから開いた画像の外部 AI の結果を出す。fields.imageId が必須。",
       field: I("aiResultSources", "結果", [LABEL, URL_(), R("fields", "属性名", K.roles.aiResultSources, { required: ["imageId"] }), M("kinds", "クラス → 種別"),
         N("minScore", "最低の確信度（0〜1）", { min: 0, max: 1 }), N("continueRadius", "続きとみなす半径（m）"), N("candidateRadius", "候補の半径（m）"), N("maxResults", "最大件数"),
-        T("activity", "取り込み時の活動"), T("confidence", "取り込み時の確度"), WHERE, TOKEN, TZ, STZ]) },
+        T("activity", "取り込み時の活動"), T("confidence", "取り込み時の確度"), WHERE, TZ, STZ]) },
   ] },
   { group: "編集の記録", keys: [
     { key: "editTracking", label: "作成者・更新者の記録", doc: "作成者更新者の記録edittracking", help: "プラグインが書き込む Esri のレイヤー・テーブル（QGIS で直接編集した Esri レイヤーも）の作成日時・作成者・更新日時・更新者。属性があるレイヤーだけ書く。ユーザー名は ArcGIS の認証ではなく環境変数（既定 USERNAME）。",
@@ -2040,9 +2068,8 @@ const SPEC = [
           T("exercises", "問題の表（TBL_TRAINING_EXERCISE）", { ph: "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/29", help: "範囲のポリゴン 1 つで 1 問。判読の練習の指導者が ArcGIS Pro・Portal で入れる" }),
           T("answers", "正解の表（TBL_TRAINING_ANSWER）", { ph: "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/30", help: "正解のモノ 1 つで 1 点（EXERCISE_ID で問題と結ぶ）" }),
           T("results", "結果の表（TBL_TRAINING_RESULT）", { ph: "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/31", help: "提出 1 回で 1 行足す（練習モードで本番に書き込むのはこれだけ）。なしで結果はその PC だけ" }),
-          TOKEN,
         ], { help: "練習モードで「判読の練習…」を開くたびに読む。問題と正解の表は両方要る",
-             check: (o, at, p) => { if ((o.exercises || o.results || o.token) && !(o.exercises && o.answers)) p.push(`${at}: 問題の表（exercises）と正解の表（answers）の URL が要ります`); } }),
+             check: (o, at, p) => { if ((o.exercises || o.results) && !(o.exercises && o.answers)) p.push(`${at}: 問題の表（exercises）と正解の表（answers）の URL が要ります`); } }),
       ]) },
   ] },
   { group: "一覧", keys: [
@@ -2056,6 +2083,7 @@ const SPEC = [
 ];
 // Where each key's explanation is (README.md was split into docs/features/ and docs/admin/, 2026-11-20).
 const DOC_FILES = {
+  "サインインsignin": "docs/admin/config-file.md",
   "ai物体検出クリック抽出": "docs/features/ai.md",
   "ai結果外部aiプラグイン内の物体検出": "docs/features/ai.md",
   "arcgis-web-マップ": "docs/features/map.md",

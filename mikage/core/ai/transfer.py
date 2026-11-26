@@ -62,7 +62,6 @@ class DetectionOutput:
     status_values: dict[str, Any] = field(default_factory=lambda: dict(STATUS_LABELS))
     #: Attributes written as they are on every feature (`{"SOURCE": "viewer"}`).
     constants: dict[str, Any] = field(default_factory=dict)
-    token: Optional[str] = None
     #: Read back by the dock 「AI結果」 (core/ai_results.output_source), so others review what one person detected.
     ai_results: bool = True
 
@@ -111,7 +110,6 @@ def detection_output_of(value: Any, problems: list[str], index: int) -> Optional
             else:
                 problems.append(f"{at} の constants.{name} は属性名と値（文字・数・真偽）で指定")
     label = value.get("label")
-    token = value.get("token")
     read_back = value.get("aiResults", True)
     if not isinstance(read_back, bool):
         problems.append(f"{at} の aiResults は true / false で指定")
@@ -122,7 +120,6 @@ def detection_output_of(value: Any, problems: list[str], index: int) -> Optional
         fields=mapped,
         status_values=status,
         constants=fixed,
-        token=token if isinstance(token, str) and token else None,
         ai_results=read_back,
     )
 

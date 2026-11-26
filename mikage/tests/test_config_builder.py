@@ -18,7 +18,7 @@ def plugin_constants() -> dict:
     """What the tool needs from the plugin, from the plugin's own definitions."""
     from mikage.core import (
         ai_results, audit, basemaps, config, coords, edit_stamp, events, geo_fix, geocode, image_reviews, interests, layer_templates, moving,
-        named_areas, overviews, reference_info, roles, startup_layers,
+        named_areas, overviews, reference_info, roles, sign_in, startup_layers,
     )
     from mikage.core.ai import model_config, transfer
     from mikage.core.catalog import config as catalog_config
@@ -121,6 +121,7 @@ def plugin_constants() -> dict:
         "presets": list(pipeline.PRESETS),
         "geometryTypes": list(layer_templates.GEOMETRY_NAMES),
         "fieldTypes": list(layer_templates.DESIGN_TYPES),
+        "signInMethods": [[k, v] for k, v in sign_in.METHODS.items()],
     }
 
 

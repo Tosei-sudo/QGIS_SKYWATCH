@@ -12,7 +12,7 @@ from typing import Optional
 
 from qgis.PyQt.QtCore import QObject, pyqtSignal
 
-from ..core import errors
+from ..core import errors, sign_in
 from ..core.config import PluginConfig, load_jsonc, parse_config, parse_config_text, read_config_file
 from ..core.esri import EsriClient, LayerInfos
 from ..core.gp import service_root as gp_service_root
@@ -40,8 +40,6 @@ class Service:
     role: str
     label: str
     url: str
-    #: Whether the settings file writes a token for it (the token itself is not kept here).
-    has_token: bool
 
 
 class PluginContext(QObject):
@@ -72,6 +70,10 @@ class PluginContext(QObject):
         self._names_lock = threading.Lock()
         #: 衛星名 known (core/obs/satellites.py: the image catalogs' sensors, the satellite catalogs' names), once read.
         self._satellite_choices: Optional[SatelliteChoices] = None
+        #: サインイン (`signIn`): set for the requests before any other part hears of new settings (qgis_io/sign_in_io.py).
+        from .sign_in_io import SignInKeeper
+
+        self.sign_in = SignInKeeper(self)
         self.configChanged.connect(self._forget_names)
         #: 衛星の障害情報 (`satelliteOutages`) as last read (read again for each calculation; outagesChanged when they change).
         self._outages: tuple = ()
@@ -114,14 +116,6 @@ class PluginContext(QObject):
             return
         self._generation += 1
         generation = self._generation
-        session = training_io.active()
-        if session is not None and session.config_text is not None and source == session.config_source:
-            # 練習モード with the production's masters: as written, with their tokens (kept in memory only).
-            self.config_text = session.config_text
-            config, self.problems = parse_config_text(session.config_text)
-            self.config = training_io.shown(config, source)
-            self.configChanged.emit()
-            return
         if re.match(r"^https?://", source, re.IGNORECASE):
             self.loading = True
 
@@ -172,7 +166,8 @@ class PluginContext(QObject):
         answered from there while their server is down (core/offline.py). The
         layers' information it asks is kept for the next clients (LayerInfos).
         """
-        client = EsriClient(self.offline.transport(qgis_transport(settings.auth_for)), layers=self.layer_infos)
+        # (A token of the settings file's `signIn` refused by a server is asked again: core/sign_in.py.)
+        client = EsriClient(self.offline.transport(qgis_transport(settings.auth_for)), renew=sign_in.renew_for, layers=self.layer_infos)
         client.offline = self.offline
         return client
 
@@ -180,42 +175,6 @@ class PluginContext(QObject):
         o = self.config.offline_work
         self.offline.enabled = o.enabled
         self.offline.cache_bytes = int(o.cache_mb * 1024 * 1024)
-
-    def token_of(self, url: str) -> Optional[str]:
-        """
-        The settings file's token for a service URL: that of the entry whose
-        URL is it or above it (`…/FeatureServer` for `…/FeatureServer/0`), the
-        longest such; None when no entry gives one (#86).
-        """
-        want = url.split("?", 1)[0].rstrip("/").lower()
-        best: list = [-1, None]
-        seen: set = set()
-
-        def visit(value, depth: int = 0) -> None:
-            if depth > 4 or id(value) in seen:
-                return
-            seen.add(id(value))
-            if isinstance(value, (list, tuple)):
-                for v in value:
-                    visit(v, depth + 1)
-                return
-            if not hasattr(value, "__dataclass_fields__"):
-                return
-            entry_url, token = getattr(value, "url", None), getattr(value, "token", None)
-            if isinstance(entry_url, str) and isinstance(token, str) and token:
-                base = entry_url.split("?", 1)[0].rstrip("/").lower()
-                if (want == base or want.startswith(base + "/")) and len(base) > best[0]:
-                    best[:] = [len(base), token]
-            for name in value.__dataclass_fields__:
-                visit(getattr(value, name, None), depth + 1)
-
-        visit(self.config)
-        return best[1]
-
-    @staticmethod
-    def token_for(url: str, token: Optional[str]) -> Optional[str]:
-        """The settings file's token for a service, unless an authentication configuration is chosen for it."""
-        return None if settings.auth_for(url) else token
 
     def _forget_names(self) -> None:
         with self._names_lock:
@@ -235,7 +194,7 @@ class PluginContext(QObject):
         client = client or self.esri()
         names = self.satellite_names(client, cancelled)
         try:
-            choices, whole = load_satellite_choices(client, config.image_catalogs, config.satellite_catalogs, names, self.token_for, cancelled)
+            choices, whole = load_satellite_choices(client, config.image_catalogs, config.satellite_catalogs, names, cancelled)
         except Exception:  # noqa: BLE001 (names only help; the records are kept without them)
             return SatelliteChoices(names=names)
         with self._names_lock:
@@ -269,7 +228,7 @@ class PluginContext(QObject):
             if self._names is not None:
                 return self._names
         try:
-            names, problems = load_satellite_names(client or self.esri(), tables, self.token_for, cancelled)
+            names, problems = load_satellite_names(client or self.esri(), tables, cancelled)
         except Exception:  # noqa: BLE001 (names only make matches better; the work goes on without them)
             return NO_NAMES
         with self._names_lock:
@@ -289,7 +248,7 @@ class PluginContext(QObject):
         if source is None:
             return [], ""
         try:
-            return load_outages(client or self.esri(), source, self.token_for(source.url, source.token), cancelled), ""
+            return load_outages(client or self.esri(), source, None, cancelled), ""
         except Exception as error:  # noqa: BLE001 (the calculation goes on with those known, said so)
             return list(self._outages), f"衛星の障害情報を読めず、前に読んだ {len(self._outages)} 件で計算（{error}）"
 
@@ -335,6 +294,7 @@ class PluginContext(QObject):
             self._gpkg = None
 
     def close(self) -> None:
+        self.sign_in.close()
         self.offline.close()
         place_cache.PLACES.close()
         if self._gpkg is not None:
@@ -345,45 +305,45 @@ class PluginContext(QObject):
         """Every service of the settings file that may need a sign-in, for choosing their authentication."""
         c = self.config
         out: list[Service] = []
-        out += [Service("画像カタログ", x.label, x.url, bool(x.token)) for x in c.image_catalogs]
+        out += [Service("画像カタログ", x.label, x.url) for x in c.image_catalogs]
         # (練習モードだけのカタログ: 判読練習の指導者 open them in production too)
-        out += [Service("画像カタログ", f"{x.label}（練習用）", x.url, bool(x.token)) for x in c.practice_catalogs]
-        out += [Service("衛星カタログ", x.label, x.url, bool(x.token)) for x in c.satellite_catalogs]
-        out += [Service("センサーカタログ", x.label, x.url, bool(x.token)) for x in c.sensor_catalogs if x.url]
-        out += [Service("衛星名の対応表", x.label, x.url, bool(x.token)) for x in c.satellite_aliases]
+        out += [Service("画像カタログ", f"{x.label}（練習用）", x.url) for x in c.practice_catalogs]
+        out += [Service("衛星カタログ", x.label, x.url) for x in c.satellite_catalogs]
+        out += [Service("センサーカタログ", x.label, x.url) for x in c.sensor_catalogs if x.url]
+        out += [Service("衛星名の対応表", x.label, x.url) for x in c.satellite_aliases]
         if c.satellite_outages is not None:
-            out.append(Service("衛星の障害情報", "衛星の障害情報", c.satellite_outages.url, bool(c.satellite_outages.token)))
+            out.append(Service("衛星の障害情報", "衛星の障害情報", c.satellite_outages.url))
         for x in c.observation_stores:
-            out.append(Service("観測記録の保存先", x.label, x.url, bool(x.token)))
+            out.append(Service("観測記録の保存先", x.label, x.url))
             if x.areas:
-                out.append(Service("確認範囲", x.label, x.areas.url, bool(x.areas.token)))
+                out.append(Service("確認範囲", x.label, x.areas.url))
             if x.taxonomy_table:
-                out.append(Service("分類体系", x.label, x.taxonomy_table.url, bool(x.taxonomy_table.token)))
+                out.append(Service("分類体系", x.label, x.taxonomy_table.url))
         if c.glossary is not None:
-            out.append(Service("単語集", "備考の単語集", c.glossary.url, bool(c.glossary.token)))
+            out.append(Service("単語集", "備考の単語集", c.glossary.url))
         # Base maps on an ArcGIS server (their token is not put in the layer: an authentication configuration is).
-        out += [Service("背景地図", x.label, x.url.rstrip("/"), bool(x.token)) for x in c.base_maps if x.type == "esri"]
+        out += [Service("背景地図", x.label, x.url.rstrip("/")) for x in c.base_maps if x.type == "esri"]
         # Processing services, under the URL their sign-in is kept for (the GPServer, or the OGC API landing page).
-        out += [Service("サーバ処理", x.label, gp_service_root(x.url), bool(x.token)) for x in c.gp_services]
+        out += [Service("サーバ処理", x.label, gp_service_root(x.url)) for x in c.gp_services]
         # The request ledger and its history, AI results, the weather and the rest (#75).
         for x in c.request_stores:
-            out.append(Service("撮像依頼台帳", x.label, x.url, bool(x.token)))
+            out.append(Service("撮像依頼台帳", x.label, x.url))
             if x.history:
-                out.append(Service("出力履歴", x.label, x.history, bool(x.token)))
-        out += [Service("AI 結果の送信先", x.label, x.url, bool(x.token)) for x in c.detection_outputs]
-        out += [Service("外部AI結果", x.label, x.url, bool(x.token)) for x in c.ai_result_sources]
+                out.append(Service("出力履歴", x.label, x.history))
+        out += [Service("AI 結果の送信先", x.label, x.url) for x in c.detection_outputs]
+        out += [Service("外部AI結果", x.label, x.url) for x in c.ai_result_sources]
         if c.cloud_forecast is not None and _web(getattr(c.cloud_forecast, "url", "")) and c.cloud_forecast.url != DEFAULT_CLOUD_FORECAST.url:
-            out.append(Service("雲量予報", c.cloud_forecast.label, c.cloud_forecast.url, False))
-        out += [Service("移動体の情報源", x.label, x.url, bool(getattr(x, "token", None))) for x in c.moving_feeds if _web(x.url)]
-        out += [Service("地名検索", x.label, x.url, bool(x.token)) for x in c.geocoders if _web(x.url)]
-        out += [Service("起動時レイヤー", x.layer or x.url, x.url, bool(getattr(x, "token", None))) for x in c.startup_layers if _web(x.url)]
+            out.append(Service("雲量予報", c.cloud_forecast.label, c.cloud_forecast.url))
+        out += [Service("移動体の情報源", x.label, x.url) for x in c.moving_feeds if _web(x.url)]
+        out += [Service("地名検索", x.label, x.url) for x in c.geocoders if _web(x.url)]
+        out += [Service("起動時レイヤー", x.layer or x.url, x.url) for x in c.startup_layers if _web(x.url)]
         for x in c.ai_models:
             for url in (getattr(x, name, "") for name in ("url", "encoder", "decoder")):
                 if _web(url):
-                    out.append(Service("AI モデル", x.label, url, False))
+                    out.append(Service("AI モデル", x.label, url))
         for m in c.text_assist.models if c.text_assist is not None else ():
             if _web(m.path):
-                out.append(Service("文章の手伝い", m.name, m.path, False))
+                out.append(Service("文章の手伝い", m.name, m.path))
         # One row per URL: the first role that names it.
         seen: set = set()
         unique = []

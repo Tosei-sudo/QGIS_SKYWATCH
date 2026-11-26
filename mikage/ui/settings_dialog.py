@@ -23,6 +23,7 @@ from qgis.PyQt.QtWidgets import (
     QWidget,
 )
 
+from ..core import sign_in
 from ..core.obs.api import place_cache
 from ..qgis_io import overviews_io, raster_speed, settings
 from ..qgis_io.context import PluginContext
@@ -137,6 +138,18 @@ class SettingsDialog(QDialog):
         form.addWidget(self.folders, 7, 1)
         form.addWidget(self.clear_folders, 7, 2)
         self._show_folders()
+        # 設定ファイルの signIn (qgis_io/sign_in_io.py): each portal's way of signing in, and who is signed in.
+        self.sign_in = QLabel()
+        self.sign_in.setWordWrap(True)
+        self.sign_in.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.sign_in_again = QPushButton(self.tr("確認し直す"))
+        self.sign_in_again.setToolTip(self.tr("統合 Windows 認証のポータルに、サインインを確かめ直す（トークンを取り直す）"))
+        self.sign_in_again.clicked.connect(self._check_sign_in)
+        form.addWidget(QLabel(self.tr("サインイン")), 8, 0)
+        form.addWidget(self.sign_in, 8, 1)
+        form.addWidget(self.sign_in_again, 8, 2)
+        context.sign_in.changed.connect(self._show_sign_in)
+        self._show_sign_in()
 
         self.services = QTableWidget(0, 4)
         self.services.setHorizontalHeaderLabels([self.tr("用途"), self.tr("名前"), self.tr("URL"), self.tr("認証設定")])
@@ -152,7 +165,7 @@ class SettingsDialog(QDialog):
 
         layout = QVBoxLayout(self)
         layout.addLayout(form)
-        layout.addWidget(QLabel(self.tr("接続の認証（QGIS の認証設定。OAuth2・ESRI token など）")))
+        layout.addWidget(QLabel(self.tr("接続の認証（設定ファイルの signIn にないサーバーは、QGIS の認証設定を選べる）")))
         layout.addWidget(self.services, 2)
         layout.addWidget(QLabel(self.tr("設定ファイルの問題")))
         layout.addWidget(self.problems, 1)
@@ -165,11 +178,24 @@ class SettingsDialog(QDialog):
 
     def done(self, result: int) -> None:
         """Closed: no longer fills itself again on each reading of the settings (#87)."""
-        try:
-            self.context.configChanged.disconnect(self._fill)
-        except (TypeError, RuntimeError):
-            pass
+        for signal, slot in ((self.context.configChanged, self._fill), (self.context.sign_in.changed, self._show_sign_in)):
+            try:
+                signal.disconnect(slot)
+            except (TypeError, RuntimeError):
+                pass
         super().done(result)
+
+    def _show_sign_in(self) -> None:
+        lines = self.context.sign_in.lines()
+        self.sign_in.setText("\n".join(lines) if lines else self.tr("設定ファイルに signIn なし（サーバーごとに下の表で QGIS の認証設定を選ぶ）"))
+        self.sign_in_again.setEnabled(any(r.method == "iwa" for r in sign_in.rules()))
+
+    def _check_sign_in(self) -> None:
+        tokens = sign_in.tokens()
+        if tokens is not None:
+            tokens.forget()
+        if not self.context.sign_in.check():
+            self._show_sign_in()
 
     def _show_raster(self) -> None:
         self.raster.setText(raster_speed.summary())
@@ -260,10 +286,18 @@ class SettingsDialog(QDialog):
                 item = QTableWidgetItem(text)
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 self.services.setItem(i, j, item)
+            rule = sign_in.rule_for(s.url) if s.url.lower().startswith(("http://", "https://")) else None
+            if rule is not None:
+                # The settings file says how this server is signed in to: nothing to choose here.
+                item = QTableWidgetItem(self.tr("設定ファイル（{how}）").format(how=sign_in.METHODS[rule.method]))
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                item.setToolTip(self.tr("signIn の「{label}」").format(label=rule.label))
+                self.services.setItem(i, 3, item)
+                self.services.removeCellWidget(i, 3)
+                continue
+            self.services.takeItem(i, 3)
             select = QgsAuthConfigSelect(self.services)
             select.setConfigId(mapping.get(s.url, ""))
-            if s.has_token:
-                select.setToolTip(self.tr("設定ファイルに token あり（認証設定を選ぶと token は不使用）"))
             self.services.setCellWidget(i, 3, select)
             self._selects[s.url] = select
         # The 認証設定 column as wide as its choice and buttons (narrower, they were drawn over one another).

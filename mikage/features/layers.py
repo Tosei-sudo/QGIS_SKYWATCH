@@ -39,7 +39,7 @@ class Layers(Feature):
         time_zone_fields.register()
         context = self.context
         host.time_zone_fields = time_zone_fields.TimeZoneFields(
-            context.esri, lambda url: context.token_for(url, context.token_of(url)),
+            context.esri,
             lambda text: self.iface.messageBar().pushWarning(tr("タイムゾーン"), text))
         project.layersAdded.connect(host.time_zone_fields.layers_added)
         context.configChanged.connect(self._time_zones_changed)

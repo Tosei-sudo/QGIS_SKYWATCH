@@ -18,8 +18,8 @@ index pip is set to) unless given with --onnxruntime-wheel /
 
 A shipped settings file is read when the person has not chosen one in the
 settings dialog. It is checked first: the zip is not made when it cannot be
-read. Tokens in it travel with the zip, so prefer QGIS authentication
-configurations for services that need a sign-in. With --lock-config the zip
+read or has problems (a `token` in it is one: sign-in is the settings
+file's `signIn`, so nothing secret travels with the zip). With --lock-config the zip
 also carries mikage/config.lock: the plugin then reads only the
 shipped file and a file chosen in the settings dialog is ignored.
 """
@@ -51,14 +51,11 @@ WIN_PYTHON = "3.12"
 
 
 def check_config(path: str) -> list[str]:
-    """What is wrong in a settings file (as the plugin reads it), and a note when it holds tokens."""
+    """What is wrong in a settings file (as the plugin reads it; a `token` left in it is one)."""
     sys.path.insert(0, ROOT)
     from mikage.core.config import read_config_file
 
     _, problems = read_config_file(path)
-    with open(path, encoding="utf-8-sig") as f:
-        if '"token"' in f.read():
-            print(f"注意: {os.path.basename(path)} に token あり。zip を受け取った人すべてに渡る", file=sys.stderr)
     return problems
 
 

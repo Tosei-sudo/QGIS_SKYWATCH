@@ -398,7 +398,7 @@ def test_the_mock_passes_the_connection_check(server):
 
     _, _, _, path = server
     config, _ = read_config_file(path)
-    results = check_all(EsriClient(transport), config, lambda url, token: token)
+    results = check_all(EsriClient(transport), config)
     text = report_text(results)
     assert len(results) >= 15
     # The settings' Esri basemap is on the internet (not the mock).

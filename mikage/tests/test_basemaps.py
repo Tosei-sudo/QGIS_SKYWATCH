@@ -29,7 +29,7 @@ def test_entries_and_their_problems():
     config, problems = parse_config({
         "baseMaps": [
             {"id": "a", "url": "./tiles/{z}/{x}/{y}.png", "maxZoom": 16},
-            {"id": "b", "label": "社内", "url": "https://g/VectorTileServer", "token": "t", "style": "https://g/root.json"},
+            {"id": "b", "label": "社内", "url": "https://g/VectorTileServer", "style": "https://g/root.json"},
             {"id": "c", "url": "https://x/{z}/{x}/{y}.pbf"},
             {"id": "a", "url": "https://dup/{z}/{x}/{y}.png"},
             {"id": "d", "url": "https://x", "type": "wms"},
@@ -40,7 +40,7 @@ def test_entries_and_their_problems():
     })
     a, b, c = config.base_maps
     assert (a.label, a.type, a.max_zoom) == ("a", "xyz", 16)
-    assert (b.label, b.type, b.token, b.style) == ("社内", "esri", "t", "https://g/root.json")
+    assert (b.label, b.type, b.style) == ("社内", "esri", "https://g/root.json")
     assert (c.type, c.max_zoom) == ("mvt", 14)
     assert config.default_base_map == "b"
     assert problems == [

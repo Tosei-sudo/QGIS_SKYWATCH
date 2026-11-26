@@ -407,7 +407,7 @@ def test_every_service_of_the_settings_can_be_given_a_sign_in():
 
 
 def test_a_settings_url_that_cannot_be_read_falls_back_to_the_last_one_read(monkeypatch):
-    """#85: the last file read from the URL (its tokens not kept) rather than nothing; an older answer does not win."""
+    """#85: the last file read from the URL (a token left in it not kept) rather than nothing; an older answer does not win."""
     from mikage.core.esri import EsriError
     from mikage.qgis_io import context as context_module
     from mikage.qgis_io.context import PluginContext
@@ -430,12 +430,12 @@ def test_a_settings_url_that_cannot_be_read_falls_back_to_the_last_one_read(monk
         context = PluginContext()
         context.reload()
         assert wait_for(lambda: not context.loading)
-        assert context.config.request_stores[0].token == "SECRET"
+        assert context.config.request_stores[0].label == "台帳" and any("token は使わない" in p for p in context.problems)
         assert "SECRET" not in QgsSettings().value("mikage/config_cache", "")
         answers["next"] = EsriError("接続できない")
         context.reload()
         assert wait_for(lambda: not context.loading)
-        assert context.config.request_stores[0].label == "台帳" and context.config.request_stores[0].token is None
+        assert context.config.request_stores[0].label == "台帳"
         assert context.problems[0].startswith("設定ファイルの取得に失敗: 接続できない。前回")
     finally:
         settings.set_config_source("")

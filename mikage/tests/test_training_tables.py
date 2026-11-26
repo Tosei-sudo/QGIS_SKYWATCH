@@ -114,8 +114,8 @@ def test_the_exercises_come_by_course_as_entered_and_in_their_order():
 
 def test_training_exercises_in_the_settings_file():
     problems = []
-    s = training_settings_of({"exercises": {"exercises": f"{ORG}/0/", "answers": f"{ORG}/1", "results": f"{ORG}/2", "token": "T"}}, problems)
-    assert problems == [] and s.exercises == tables.ExerciseTables(f"{ORG}/0", f"{ORG}/1", f"{ORG}/2", "T")
+    s = training_settings_of({"exercises": {"exercises": f"{ORG}/0/", "answers": f"{ORG}/1", "results": f"{ORG}/2"}}, problems)
+    assert problems == [] and s.exercises == tables.ExerciseTables(f"{ORG}/0", f"{ORG}/1", f"{ORG}/2")
     # Without the results table: the tries are kept on the computer only.
     assert training_settings_of({"exercises": {"exercises": f"{ORG}/0", "answers": f"{ORG}/1"}}, []).exercises.results == ""
     assert training_settings_of({}, []).exercises is None

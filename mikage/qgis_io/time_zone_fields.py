@@ -111,12 +111,9 @@ _ERROR = "__error__"
 class TimeZoneFields:
     """Gives the layers added to the project their corrected date fields."""
 
-    def __init__(self, esri: Callable[[], EsriClient], token_for: Callable[[str], Optional[str]] = lambda url: None,
-                 warn: Callable[[str], None] = lambda text: None):
-        #: An Esri client for a task (its requests carry the authentication chosen for the service).
+    def __init__(self, esri: Callable[[], EsriClient], warn: Callable[[str], None] = lambda text: None):
+        #: An Esri client for a task (its requests carry the sign-in of the service: signIn, or the authentication chosen).
         self.esri = esri
-        #: The settings file's token for a service URL (None when an authentication configuration is chosen, #86).
-        self.token_for = token_for
         #: Tells the person (the message bar) when the service's zone could not be read.
         self.warn = warn
 
@@ -139,7 +136,7 @@ class TimeZoneFields:
 
         def work(task):
             try:
-                return self.esri().layer(url, self.token_for(url)).raw
+                return self.esri().layer(url).raw
             except EsriError as error:
                 return {_ERROR: str(error)}
 

@@ -21,7 +21,7 @@ may change some of it; exercises.py's Scoring): `{"tolerance": 50,
 
 `"exercises"`: 判読の練習's organisation's exercises, their answers and the
 results' table (tables.py): `{"exercises": "<url>", "answers": "<url>",
-"results": "<url>", "token": "…"}`. Read (and the results written) on the
+"results": "<url>"}`. Read (and the results written) on the
 production while practising.
 """
 from __future__ import annotations

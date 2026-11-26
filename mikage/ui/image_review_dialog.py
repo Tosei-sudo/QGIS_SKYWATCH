@@ -119,9 +119,6 @@ class ImageReviewDialog(QDialog):
     def source(self):
         return self.context.config.image_reviews
 
-    def _token(self, url: str, token: Optional[str]) -> Optional[str]:
-        return self.context.token_for(url, token)
-
     def load(self) -> None:
         """Reads the image's rows and the named areas it shows (in a task), then lists them."""
         source, image, footprint = self.source, self.image, self.footprint
@@ -129,9 +126,9 @@ class ImageReviewDialog(QDialog):
             self.status.setText(self.tr("画像の評価の表が未設定（管理者に連絡: imageReviews）［E703］"))
             return
         client = self.context.esri()
-        token = self._token(source.url, source.token)
+        token = None
         named = settings_for(self.context.config)
-        named_token = self._token(named.areas.url, named.areas.token) if named is not None else None
+        named_token = None
 
         def work(_task):
             saved = load_reviews(client, source, [image.id], token).get(image.id, [])
@@ -324,7 +321,7 @@ class ImageReviewDialog(QDialog):
         if source is None or self.task is not None:
             return
         wanted, cleared = self.wanted()
-        client, token, user = self.context.esri(), self._token(source.url, source.token), edit_stamp.user_name()
+        client, token, user = self.context.esri(), None, edit_stamp.user_name()
         self.save_button.setEnabled(False)
         self.status.setText(self.tr("保存中…"))
 

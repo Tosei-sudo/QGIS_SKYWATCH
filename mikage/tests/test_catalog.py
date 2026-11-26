@@ -594,7 +594,7 @@ def test_the_store_keeps_watches_and_notices_and_checks_what_is_due(tmp_path):
 
     # The first check notes; a later one notices.
     assert check_due(store, ask_for, 600000, now=CREATED + 1).new == 0
-    assert store.watch("w1").seen == ["A"] and store.watch("w1").catalog.token is None
+    assert store.watch("w1").seen == ["A"]
     images.append("B")
     # Not due yet.
     assert check_due(store, ask_for, 600000, now=CREATED + 2).new == 0

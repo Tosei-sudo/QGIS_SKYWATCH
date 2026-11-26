@@ -113,7 +113,7 @@ def _color_of(value: Any) -> Optional[str]:
 def interests_settings_of(value: Any, problems: list[str]) -> Optional[InterestSettings]:
     """
     `interests`: `{ "points": URL, "areas": URL, "label", "color" }` (each layer
-    a URL or `{ "url", "fields", "where", "token" }`); None when it cannot be used.
+    a URL or `{ "url", "fields", "where" }`); None when it cannot be used.
     """
     at = "interests"
     if not is_record(value):
@@ -160,7 +160,7 @@ def _need(types: dict[str, str], source: EsriSource, what: str) -> None:
 
 
 def _layer(client: EsriClient, source: EsriSource, kind: str, token: Optional[str]):
-    info = client.layer(source.url, token or source.token, refresh=True)
+    info = client.layer(source.url, token, refresh=True)
     what = f"関心{KIND_LABELS[kind]}のレイヤー"
     if info.geometry_type != GEOMETRY[kind]:
         raise EsriError(f"{what}が{'ポイント' if kind == POINT else 'ポリゴン'}のレイヤーでない（管理者に連絡: {info.geometry_type or '形状なし'}）", code="E705")
@@ -199,7 +199,7 @@ def load_interests(client: EsriClient, settings: InterestSettings, user: str,
     out: list[Interest] = []
     for kind in settings.kinds:
         source = settings.source(kind)
-        token = (tokens or {}).get(kind) or source.token
+        token = (tokens or {}).get(kind)
         info = _layer(client, source, kind, token)
         rows = client.query_all(source.url, owner_where(source, user), token, geometry=True, limit=LIMIT)
         out.extend(i for i in (interest_of(f, kind, source.fields, info.object_id_field, settings.color) for f in rows) if i is not None)
@@ -239,7 +239,6 @@ def save_interest(client: EsriClient, settings: InterestSettings, item: Interest
     source = settings.source(item.kind)
     if source is None:
         raise EsriError(f"{KIND_LABELS[item.kind]}の保存先が未設定（管理者に連絡: interests.{'points' if item.kind == POINT else 'areas'}）", code="E703")
-    token = token or source.token
     info = _layer(client, source, item.kind, token)
     attributes = _attributes(item, source, user, info.field_types, info.field_lengths)
     feature: dict[str, Any] = {"attributes": attributes, "geometry": item.esri_geometry()}
@@ -272,7 +271,7 @@ def delete_interests(client: EsriClient, settings: InterestSettings, items: Sequ
         source = settings.source(kind)
         if not mine or source is None:
             continue
-        token = (tokens or {}).get(kind) or source.token
+        token = (tokens or {}).get(kind)
         try:
             results = client.delete_features(source.url, [i.oid for i in mine], token)
         except EsriError as error:

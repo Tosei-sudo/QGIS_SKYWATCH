@@ -48,7 +48,7 @@ class ConditionsPart:
             return
         self._sensor_values = []
         client = self.context.esri()
-        token = self.context.token_for(catalog.url, catalog.token)
+        token = None
 
         def listed(sensors: list) -> None:
             if self.catalog() is catalog:

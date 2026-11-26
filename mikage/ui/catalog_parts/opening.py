@@ -275,7 +275,7 @@ class OpeningPart:
                 missing()
             return
         client = self.context.esri()
-        asks = [(c, self.context.token_for(c.url, c.token)) for c in catalogs]
+        asks = [(c, None) for c in catalogs]
         self.status.setText(self.tr("画像カタログで {id} を検索中…").format(id=image_id))
 
         def work(_task):
@@ -318,7 +318,7 @@ class OpeningPart:
             self.status.setText(self.tr("画像 ID で探せる画像カタログがない（管理者に連絡: fields.id）［E703］") if ids else "")
             return
         client = self.context.esri()
-        asks = [(c, self.context.token_for(c.url, c.token)) for c in catalogs]
+        asks = [(c, None) for c in catalogs]
 
         def work(_task):
             best = None

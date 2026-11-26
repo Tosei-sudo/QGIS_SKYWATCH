@@ -225,7 +225,7 @@ class ExportDialog(QDialog):
         return settings_for(config.observation_exports, config.alert_reports)
 
     def _token(self, source) -> Optional[str]:
-        return self.dock.context.token_for(source.url, source.token) if source else None
+        return None
 
     def reset(self) -> None:
         """The formats (built-in, then the settings file's), 大分類 and 確度 of the book (again)."""

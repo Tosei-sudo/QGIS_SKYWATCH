@@ -8,7 +8,7 @@ submitted (the one thing the practice writes to the production).
 * TBL_TRAINING_RESULT (table): one try.
 
 The settings file's `training.exercises` says where they are:
-`{"exercises": "<url>", "answers": "<url>", "results": "<url>", "token": "…"}`
+`{"exercises": "<url>", "answers": "<url>", "results": "<url>"}`
 (`results` may be left out: the tries are then kept on the computer only).
 Their columns (`EXERCISE_FIELDS`, `ANSWER_FIELDS`, `RESULT_FIELDS`) are read
 whatever their case. Pure Python: the rows are Esri JSON features (geometry in
@@ -31,7 +31,7 @@ from .exercises import (
 SOURCE = "組織"
 #: The other sources whose tries the results table keeps (their EXERCISE_ID: the key, 見本:S1).
 OTHER_SOURCES = ("見本",)
-TABLE_KEYS = ("exercises", "answers", "results", "token")
+TABLE_KEYS = ("exercises", "answers", "results")
 #: The columns, with what each holds (tools/arcgis/mikage_schema.py makes the tables).
 EXERCISE_FIELDS = {
     "EXERCISE_ID": "問題の ID（答えの表と結果の表がこれで結ぶ）",
@@ -70,7 +70,6 @@ class ExerciseTables:
     answers: str
     #: "" : the tries kept on the computer only.
     results: str = ""
-    token: str = ""
 
 
 def exercise_tables_of(value: Any, problems: list[str]) -> Optional[ExerciseTables]:
@@ -80,7 +79,7 @@ def exercise_tables_of(value: Any, problems: list[str]) -> Optional[ExerciseTabl
     if not isinstance(value, dict):
         problems.append('training.exercises は {"exercises": "URL", "answers": "URL", "results": "URL"} の形で指定')
         return None
-    unknown = [k for k in value if k not in TABLE_KEYS]
+    unknown = [k for k in value if k not in TABLE_KEYS and k != "token"]  # (a token: said once, config.token_problem)
     if unknown:
         problems.append(f"training.exercises に不明なキー「{'・'.join(unknown)}」（{'・'.join(TABLE_KEYS)}）")
     urls = {}
@@ -90,14 +89,10 @@ def exercise_tables_of(value: Any, problems: list[str]) -> Optional[ExerciseTabl
             problems.append(f"training.exercises.{key} は表の URL で指定")
             v = ""
         urls[key] = v.strip().rstrip("/")
-    token = value.get("token", "")
-    if not isinstance(token, str):
-        problems.append("training.exercises.token は文字列で指定")
-        token = ""
     if not urls["exercises"] or not urls["answers"]:
         problems.append("training.exercises には問題の表（exercises）と答えの表（answers）の URL が必要")
         return None
-    return ExerciseTables(urls["exercises"], urls["answers"], urls["results"], token)
+    return ExerciseTables(urls["exercises"], urls["answers"], urls["results"])
 
 
 # ---- reading the rows ------------------------------------------------------------------------------------

@@ -33,8 +33,6 @@ class BaseMapConfig:
     max_zoom: int = 18
     #: esri: another style for the server.
     style: str = ""
-    #: esri: the settings file's token (QGIS uses the service's authentication configuration instead).
-    token: str = ""
 
 
 _GSI = '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">地理院タイル</a>'
@@ -75,7 +73,7 @@ def base_map_of(value: Any, problems: list[str], index: int) -> Optional[BaseMap
         problems.append(f"baseMaps[{index}] の type「{kind}」は xyz・mvt・style・esri のいずれかで指定")
         return None
     kind = kind or base_map_type(url)
-    style, token, zoom = value.get("style"), value.get("token"), value.get("maxZoom")
+    style, zoom = value.get("style"), value.get("maxZoom")
     if style is not None and not (isinstance(style, str) and _URL.search(style)):
         problems.append(f"baseMaps[{index}] の style は http(s) か相対パスの URL で指定")
     good_zoom = isinstance(zoom, int) and not isinstance(zoom, bool) and 0 <= zoom <= 30
@@ -85,7 +83,6 @@ def base_map_of(value: Any, problems: list[str], index: int) -> Optional[BaseMap
         attributions if isinstance(attributions, str) else "",
         zoom if good_zoom else (14 if kind == "mvt" else 18),
         style if kind == "esri" and isinstance(style, str) and _URL.search(style) else "",
-        token if kind == "esri" and isinstance(token, str) else "",
     )
 
 

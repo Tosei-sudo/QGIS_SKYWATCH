@@ -810,7 +810,7 @@ class ObservationDock(
         c = self.context
         try:
             self.sets = [self.exercise_store] if self.exercise_store is not None else store_sets(
-                c.config.observation_stores, c.config.observation_vocabulary, c.gpkg, c.esri, c.token_for, local=c.config.local_observations)
+                c.config.observation_stores, c.config.observation_vocabulary, c.gpkg, c.esri, local=c.config.local_observations)
         except Exception as error:  # noqa: BLE001 (the local GeoPackage could not be opened)
             self.sets = []
             self._show_status(self.tr("保存先の準備に失敗: {e}").format(e=error_text(error)))

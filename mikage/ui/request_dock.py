@@ -262,12 +262,9 @@ class RequestDock(PluginDock):
         self._update_buttons()
         return True
 
-    def token(self) -> Optional[str]:
-        return self.context.token_for(self.store.url, self.store.token) if self.store else None
-
     def repository(self) -> RequestRepository:
-        """The store's reads and writes (データ窓口), its token as it is now."""
-        return RequestRepository(self.context.esri(), self.store, self.token())
+        """The store's reads and writes (データ窓口)."""
+        return RequestRepository(self.context.esri(), self.store, None)
 
     def reload(self, then: Optional[Callable[[], None]] = None, failed: Optional[Callable[[str], None]] = None) -> None:
         """Reads the ledger again (`then` once read, `failed` with the reason when it cannot be)."""
@@ -457,7 +454,7 @@ class RequestDock(PluginDock):
         if store is None or areas is None or not area_id:
             return False
         repo = self.repository()
-        area_token = self.context.token_for(areas.areas.url, areas.areas.token)
+        area_token = None
 
         def work(task):
             return follow_area(repo.client, store, repo.token, areas, area_id, _now_ms(), area_token, task.isCanceled)

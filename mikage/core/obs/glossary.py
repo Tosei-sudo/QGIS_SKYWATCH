@@ -336,7 +336,7 @@ def glossary_of_rows(rows: Sequence[dict], fields: dict) -> Glossary:
 
 
 def glossary_source_of(value: Any, problems: list[str]):
-    """`glossary`: the table of words (URL or `{ "url", "fields", "where", "token" }`)."""
+    """`glossary`: the table of words (URL or `{ "url", "fields", "where" }`)."""
     from .alerts import esri_source_of
 
     return esri_source_of(value, "glossary", DEFAULT_GLOSSARY_FIELDS, problems)
@@ -345,7 +345,6 @@ def glossary_source_of(value: Any, problems: list[str]):
 def load_glossary(client: EsriClient, source, token: Optional[str] = None,
                   cancelled: Optional[Callable[[], bool]] = None) -> Glossary:
     """Every word of the table (only the attributes it has are asked for)."""
-    token = token or source.token
     info = client.layer(source.url, token, refresh=True)
     missing = [source.fields[r] for r in NEEDED if source.fields[r] not in info.field_types]
     if missing:

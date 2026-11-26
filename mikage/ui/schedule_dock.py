@@ -382,12 +382,9 @@ class ScheduleDock(PluginDock):
         else:
             self.draw()
 
-    def token(self) -> Optional[str]:
-        return self.context.token_for(self.store.url, self.store.token) if self.store else None
-
     def repository(self) -> ScheduleRepository:
-        """The store's reads and writes (データ窓口), its token as it is now."""
-        return ScheduleRepository(self.context.esri(), self.store, self.token())
+        """The store's reads and writes (データ窓口)."""
+        return ScheduleRepository(self.context.esri(), self.store, None)
 
     def chosen_day(self) -> date:
         d = self.calendar.selectedDate()
@@ -442,7 +439,7 @@ class ScheduleDock(PluginDock):
         ledger_notes = dict(self._ledger_notes) if areas is not None else {}
         read_table = refresh or not self.groups_read
         reviews = self.context.config.image_reviews
-        unusable = UnusableImages(self.context.esri(), reviews, self.context.token_for(reviews.url, reviews.token)) if reviews else None
+        unusable = UnusableImages(self.context.esri(), reviews, None) if reviews else None
         self.status.setText(self.tr("{d} の計画を取得中…").format(d=day))
 
         def work(task):

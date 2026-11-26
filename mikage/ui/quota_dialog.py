@@ -164,12 +164,9 @@ class QuotaDialog(QDialog):
         t.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         return t
 
-    def token(self) -> Optional[str]:
-        return self.context.token_for(self.store.url, self.store.token)
-
     def repository(self) -> ScheduleRepository:
-        """The store's reads and writes (データ窓口), its token as it is now."""
-        return ScheduleRepository(self.context.esri(), self.store, self.token())
+        """The store's reads and writes (データ窓口)."""
+        return ScheduleRepository(self.context.esri(), self.store, None)
 
     def chosen_day(self) -> date:
         return _back(self.day, int(self.year.currentData() or 0))

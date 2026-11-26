@@ -377,7 +377,7 @@ class AiResultsDock(PluginDock):
             except RuntimeError:
                 pass
         client = self.context.esri()
-        tokens = {s.url: self.context.token_for(s.url, s.token) for s in sources}
+        tokens = {s.url: None for s in sources}
         self.status.setText(_tr("{id} の結果を取得中").format(id=image_id))
 
         def work(task):

@@ -74,9 +74,9 @@ class ReferenceLine(QToolButton):
             return
         context = self.dock.context
         client = context.esri()
-        token = context.token_for(s.layer.url, s.layer.token)
+        token = None
         named = settings_for(context.config)
-        named_token = context.token_for(named.areas.url, named.areas.token) if named is not None else None
+        named_token = None
         footprint = footprint_of(image.id, image.box, getattr(book, "listed", ()) if book is not None else ())
         image_id, image_time = image.id, image.time
 

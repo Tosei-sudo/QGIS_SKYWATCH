@@ -640,10 +640,10 @@ def add_new_image(store, files: str, base: str) -> str:
 # --- the settings file ------------------------------------------------------------------------------------
 
 
-def write_config(path: str, base: str, files: str, token: Optional[str] = None) -> None:
+def write_config(path: str, base: str, files: str) -> None:
     """A settings file (JSONC) whose services are the mock's (scripts/mock_esri/mock_esri.py)."""
     with open(path, "w", encoding="utf-8") as f:
-        f.write(config_text(base, files, token))
+        f.write(config_text(base, files))
 
 
 #: The optical system's 採否 file as the practice's system would answer (for 「結果ファイルの取り込み」).
@@ -681,16 +681,15 @@ def training_config(base: str, files: str, folder: str) -> str:
     return "\n".join(lines)
 
 
-def config_text(base: str, files: str, token: Optional[str] = None, label: str = "モック", alerts: Optional[str] = None) -> str:
+def config_text(base: str, files: str, label: str = "モック", alerts: Optional[str] = None) -> str:
     """The settings file's text whose services are the server's (`label` begins their names)."""
     rest = f"{base}/arcgis/rest/services"
-    tk = f', "token": "{token}"' if token else ""
     alert_file = json.dumps(alerts or os.path.join(files, "alerts", "alert_{now:%Y%m%d}.txt"), ensure_ascii=False)
     text = f"""// mock_esri.py が書き出した設定ファイル（起動のたびに上書き）。プラグインの「設定…」でこのファイルを選ぶ
 // サービスはすべて {rest} のモック。手で直すならコピーしてから
 {{
   "imageCatalogs": [
-    {{ "label": "モック画像カタログ", "url": "{rest}/Catalog/FeatureServer/0"{tk},
+    {{ "label": "モック画像カタログ", "url": "{rest}/Catalog/FeatureServer/0",
       "fields": {{ "id": "IMG_ID", "acquired": "ACQ_TIME", "registered": "REG_TIME", "systemRegistered": "SYS_TIME",
                   "sensor": "SENSOR_NAME", "angle": "OFF_NADIR", "azimuth": "SAT_AZIMUTH", "source": ["FILE_PATH", "COG_URL"],
                   "keywords": ["NOTE", "IMG_ID"] }},
@@ -699,7 +698,7 @@ def config_text(base: str, files: str, token: Optional[str] = None, label: str =
   ],
   "watchInterval": 1,
   "satelliteCatalogs": [
-    {{ "label": "モック衛星", "url": "{rest}/Satellites/FeatureServer/0"{tk},
+    {{ "label": "モック衛星", "url": "{rest}/Satellites/FeatureServer/0",
       "fields": {{ "name": "SAT_NAME", "id": "NORAD_ID", "tle1": "TLE_LINE1", "tle2": "TLE_LINE2",
                   "maxOffNadir": "MAX_OFF_NADIR", "minOffNadir": "MIN_OFF_NADIR", "swath": "SWATH", "length": "SCENE_LENGTH",
                   "lookSide": "LOOK_SIDE", "kind": "SENSOR_TYPE", "series": "SERIES", "scenesPerPass": "SCENES_PER_PASS",
@@ -707,36 +706,36 @@ def config_text(base: str, files: str, token: Optional[str] = None, label: str =
       "swathUnit": "km", "sarPattern": "SAR", "where": "STATUS = 'ACTIVE'" }}
   ],
   "sensorCatalogs": [
-    {{ "label": "モック SAR モード", "url": "{rest}/Satellites/FeatureServer/1"{tk},
+    {{ "label": "モック SAR モード", "url": "{rest}/Satellites/FeatureServer/1",
       "fields": {{ "sensor": "SENSOR", "mode": "SENSOR_MODE", "minOffNadir": "MIN_OFF_NADIR", "maxOffNadir": "MAX_OFF_NADIR", "swath": "SWATH",
                   "length": "SCENE_LENGTH", "scenesPerPass": "SCENES_PER_PASS", "resolution": "RESOLUTION_M", "primary": "IS_DEFAULT" }},
       "swathUnit": "km" }}
   ],
-  "satelliteAliases": {{ "label": "モック衛星名の対応表", "url": "{rest}/Satellites/FeatureServer/2"{tk},
+  "satelliteAliases": {{ "label": "モック衛星名の対応表", "url": "{rest}/Satellites/FeatureServer/2",
                         "fields": {{ "satellite": "SAT_NAME", "alias": "ALIAS" }} }},
   // 閉じたネットワークでも動くよう雲量予報は使わない（使うなら {{ "url": "https://api.open-meteo.com/v1/forecast" }}）
   "cloudForecast": false,
   "groundStations": [{{ "name": "勝浦", "lon": 140.3, "lat": 35.15, "minElevation": 5 }}],
   "observationStores": [
-    {{ "label": "モック観測記録", "url": "{rest}/Observations/FeatureServer/0"{tk},
+    {{ "label": "モック観測記録", "url": "{rest}/Observations/FeatureServer/0",
       "areas": "{rest}/Observations/FeatureServer/2",
       "taxonomyTable": "{rest}/Observations/FeatureServer/1" }}
   ],
   "aiResultSources": [
-    {{ "label": "モック外部AI", "url": "{rest}/AI/FeatureServer/0"{tk},
+    {{ "label": "モック外部AI", "url": "{rest}/AI/FeatureServer/0",
       "fields": {{ "imageId": "IMAGE_ID", "id": "DET_ID", "class": "CLASS", "score": "SCORE", "model": "MODEL", "detectedAt": "DETECTED_AT",
                   "length": "LENGTH_M", "width": "WIDTH_M", "heading": "HEADING" }},
       "where": "STATUS <> 'rejected'", "minScore": 0.3, "kinds": {{ "ship": "船舶", "plane": "航空機" }}, "activity": "停泊", "confidence": "推定" }}
   ],
   "detectionOutputs": [
-    {{ "label": "モック検出結果DB", "url": "{rest}/Detections/FeatureServer/0"{tk},
+    {{ "label": "モック検出結果DB", "url": "{rest}/Detections/FeatureServer/0",
       "fields": {{ "imageId": "IMAGE_ID", "fileName": "FILE_NAME", "imageTime": "ACQ_TIME", "detectedAt": "DETECTED_AT", "sentAt": "REGISTERED_AT",
                   "class": "CLASS", "classId": "CLASS_ID", "score": "CONFIDENCE", "model": "MODEL", "status": "STATUS", "lon": "LON", "lat": "LAT",
                   "area": "AREA_M2", "length": "LENGTH_M", "width": "WIDTH_M", "angle": "HEADING", "note": "REMARKS" }},
       "constants": {{ "SOURCE": "mock" }} }}
   ],
   "geocoders": [
-    {{ "type": "features", "label": "モック地名", "url": "{rest}/Places/FeatureServer/0", "field": ["NAME", "NAME_KANA", "ALIAS"]{tk} }},
+    {{ "type": "features", "label": "モック地名", "url": "{rest}/Places/FeatureServer/0", "field": ["NAME", "NAME_KANA", "ALIAS"] }},
     {{ "type": "gsi", "label": "地理院", "url": "https://msearch.gsi.go.jp/address-search/AddressSearch" }}
   ],
   // 撮像依頼台帳（docs/imaging-requests.md の既定の属性名）と日次出力のシステム（出力先は確認画面で選ぶ）
@@ -744,7 +743,7 @@ def config_text(base: str, files: str, token: Optional[str] = None, label: str =
     {{ "label": "モック撮像依頼", "url": "{rest}/Requests/FeatureServer/0", "history": "{rest}/Requests/FeatureServer/1",
       "groups": "{rest}/Requests/FeatureServer/2", "shots": "{rest}/Requests/FeatureServer/3",
       "areaChanges": "{rest}/Requests/FeatureServer/4", "catalog": "モック画像カタログ",
-      "fields": {{}}{tk} }}
+      "fields": {{}} }}
   ],
   "requestExports": [
     {{ "system": "MOCK-OPT", "label": "モック光学システム", "kind": "光学", "series": ["OPT-X"], "limit": {{ "count": 10 }},

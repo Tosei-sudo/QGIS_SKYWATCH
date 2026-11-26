@@ -1,4 +1,5 @@
-// The example of the viewer README (usecase/image-viewer/README.md at 8a8563d), with the "]," missing after detectionOutputs added.
+// The example of the viewer README (usecase/image-viewer/README.md at 8a8563d), with the "]," missing after detectionOutputs added,
+// and its tokens taken out (the plugin signs in by signIn: core/sign_in.py).
 {
   // 背景地図の一覧（「背景なし」の後に、この順で並びます）。書くとこの一覧で置き換わります
   "baseMaps": [
@@ -13,7 +14,7 @@
     { "id": "appliance-osm", "label": "OSM（Data Appliance）",
       "url": "https://appliance.example.com/arcgis/rest/services/OpenStreetMap/VectorTileServer" }, // ArcGIS VectorTileServer（type: "esri"）。サーバーの既定スタイルで描きます
     { "id": "secure", "label": "社内地図", "url": "https://gis.example.com/server/rest/services/Base/VectorTileServer",
-      "token": "…", "style": "https://gis.example.com/styles/dark/root.json" },          // token・別スタイル（style）は任意
+      "style": "https://gis.example.com/styles/dark/root.json" },          // 別スタイル（style）は任意
     { "id": "style", "label": "地理院 ベクトル",
       "url": "https://gsi-cyberjapan.github.io/optimal_bvmap/style/std.json" },     // Mapbox / MapLibre のスタイル JSON（type: "style"）
     { "id": "pbf", "label": "ベクタータイル", "url": "https://example.com/tiles/{z}/{x}/{y}.pbf",
@@ -60,7 +61,6 @@
   "imageCatalogs": [
     { "label": "衛星画像カタログ",
       "url": "https://example.com/arcgis/rest/services/Catalog/FeatureServer/0",   // レイヤーの URL
-      "token": "",                                                                   // 任意
       "fields": {
         "id": "IMG_ID", "acquired": "ACQ_TIME", "registered": "REG_TIME",           // 画像ID・撮像日時・登録日時
         "systemRegistered": "SYS_TIME",                                             // システム登録日時
@@ -98,7 +98,6 @@
   "detectionOutputs": [
     { "label": "検出結果DB",
       "url": "https://example.com/arcgis/rest/services/Detections/FeatureServer/0", // ポリゴンかポイントのレイヤー。追加（と更新）できること
-      "token": "",                                                                   // 任意
       "fields": {
         "imageId": "IMAGE_ID", "fileName": "FILE_NAME", "imageTime": "ACQ_TIME",      // 画像ID・ファイル名・撮像日時
         "detectedAt": "DETECTED_AT", "sentAt": "REGISTERED_AT",                       // 検出日時・転記日時
@@ -126,13 +125,13 @@
   // 起動時から標高データに使う ArcGIS の標高サービス（イメージサービス・標高タイルサービス）。URL だけでも可
   "elevationServices": [
     { "url": "https://elevation3d.arcgis.com/arcgis/rest/services/WorldElevation3D/Terrain3D/ImageServer" },
-    { "url": "https://example.com/arcgis/rest/services/DEM/ImageServer", "token": "…" }          // トークンが必要なとき
+    { "url": "https://example.com/arcgis/rest/services/DEM/ImageServer" }
   ],
   // 座標入力欄の地名・住所検索。上から順に並べて表示します。[] で地名検索をしません（既定は国土地理院）
   "geocoders": [
     { "type": "gsi", "label": "地理院", "url": "https://msearch.gsi.go.jp/address-search/AddressSearch" },
     { "type": "nominatim", "label": "OSM", "url": "https://nominatim.openstreetmap.org" },
-    { "type": "arcgis", "label": "ArcGIS", "url": "https://example.com/arcgis/rest/services/Locator/GeocodeServer", "token": "" },
+    { "type": "arcgis", "label": "ArcGIS", "url": "https://example.com/arcgis/rest/services/Locator/GeocodeServer" },
     { "type": "features", "label": "施設", "url": "https://example.com/arcgis/rest/services/Places/FeatureServer/0", "field": "NAME" }, // 名前の属性を LIKE で検索
     { "type": "csv", "label": "地名表", "url": "./places.csv", "field": "名称" }       // 名前・緯度（lat）・経度（lon）の列がある CSV。閉じたネットワーク向け
   ],
@@ -142,7 +141,6 @@
     { "label": "Planetary Computer", "url": "https://planetarycomputer.microsoft.com/api/stac/v1",
       "collections": ["sentinel-2-l2a"], "sign": "planetary-computer" },                 // アセットの URL を Planetary Computer の SAS トークンで署名して開く
     { "label": "社内 STAC", "url": "https://stac.example.com/api",
-      "token": "…",                                                                    // Authorization: Bearer …（このサーバーへの要求にだけ付けます）
       "headers": { "X-Api-Key": "…" },                                                 // 任意のヘッダー（同じく、このサーバーにだけ）
       "cloudFilter": "filter" }                                                        // 雲量を CQL2 の filter で問い合わせる（既定は query 拡張）
   ],
@@ -150,7 +148,6 @@
   "satelliteCatalogs": [
     { "label": "衛星カタログ",
       "url": "https://example.com/arcgis/rest/services/Satellites/FeatureServer/0", // レイヤー（テーブル）の URL
-      "token": "",                                                                    // 任意
       "fields": {
         "name": "SAT_NAME", "id": "NORAD_ID",                                        // 衛星名・ID（任意）
         "tle1": "TLE_LINE1", "tle2": "TLE_LINE2",                                    // TLE の 1・2 行目（1 つの属性に入っているなら "tle": "TLE"）
@@ -199,7 +196,6 @@
   // 撮像計画の保存先（編集できるポリゴンのフィーチャーレイヤー）。1 撮像 1 地物で、撮れたかを imageCatalogs で追跡します
   "planStores": [
     { "label": "撮像計画", "url": "https://example.com/arcgis/rest/services/ImagingPlans/FeatureServer/0",
-      "token": "",                                                                    // 任意
       "fields": { "status": "STATUS" },                                               // 属性名（任意。既定は下の説明）
       "catalog": "衛星画像",                                                          // 追跡に使う imageCatalogs の label（任意。既定は先頭）
       "matchMinutes": 30,                                                             // 撮像時刻から何分以内の画像をその撮像とみなすか（既定 30）
@@ -208,7 +204,6 @@
   // 観測記録の保存先（編集できるポイントのフィーチャーレイヤー）。書かなければブラウザ内に保存します
   "observationStores": [
     { "label": "観測記録", "url": "https://example.com/arcgis/rest/services/Observations/FeatureServer/0",
-      "token": "",                                                                    // 任意
       "fields": { "activity": "ACT" },                                                // 属性名（任意。既定は下の説明）
       "where": "PROJECT = 'A'",                                                       // この条件の記録だけ読む（任意）
       "softDelete": true,                                                             // 削除は DELETED_AT を入れて残す（既定 true。false で地物を消す）
@@ -256,7 +251,7 @@
   ],
   // 「サーバ処理」で選べる処理サービス（ArcGIS の GPServer・GP タスク、OGC API – Processes）。URL だけでも可
   "gpServices": [
-    { "label": "解析ツール", "url": "https://example.com/arcgis/rest/services/Tools/GPServer", "token": "" }, // token は任意
+    { "label": "解析ツール", "url": "https://example.com/arcgis/rest/services/Tools/GPServer" },
     { "label": "OGC 処理", "url": "https://example.com/ogcapi/processes" }
   ],
   // 「新規レイヤー」のテンプレート（標準のものの後に「組織の設定」として並ぶ）

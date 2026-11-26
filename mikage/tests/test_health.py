@@ -1,6 +1,7 @@
 """「接続と表の点検」 (core/health.py) against a fake service."""
 import json
 
+from mikage.core import sign_in
 from mikage.core.config import parse_config
 from mikage.core.esri import EsriClient
 from mikage.core.health import NOTE, OK, PROBLEM, check_all, report_text, targets
@@ -41,17 +42,27 @@ def test_missing_attributes_a_read_only_layer_and_a_refused_sign_in_are_told():
                                     "TAKEN_AT": D, "DONE_AT": D}, "", token="right"))
     # The rules layer is not there at all; the log table is.
     fake.add_layer(LOG, FakeLayer({"OBS_ID": S, "REPORT": S, "TEXT": S, "REPORTED_AT": D, "REPORTED_BY": S}, ""))
-    results = {r.target.path: r for r in check_all(EsriClient(fake), config(), lambda url, token: token)}
+    results = {r.target.path: r for r in check_all(EsriClient(fake), config())}
     texts = {p: " / ".join(f.text for f in r.findings) for p, r in results.items()}
     assert results["observationStores[0]"].level == PROBLEM
     assert "属性 OBS_ID がない（役割 id。この表が使えない）" in texts["observationStores[0]"]
     assert "属性 CONFIDENCE がない" in texts["observationStores[0]"]
     assert "編集できない" in texts["observationStores[0]"]
     assert "作成者・更新者の属性 CREATED_DATE" in texts["observationStores[0]"]
-    assert results["assignments"].level == PROBLEM and "サインイン" in texts["assignments"]
+    assert results["assignments"].level == PROBLEM and "サインイン" in texts["assignments"] and "「設定…」の認証設定を確認" in texts["assignments"]
     assert results["alertReports.rules"].level == PROBLEM and "応答なし" in texts["alertReports.rules"]
     assert results["alertReports.table"].level in (OK, NOTE)
     text = report_text(list(results.values()), "2026-11-08 15:00", "D:/config.json")
     assert text.startswith("接続と表の点検（2026-11-08 15:00）\n設定ファイル: D:/config.json\n")
+    # With signIn: the entry to look at is named, and the sign-in's lines head the text.
+    c, _p = parse_config({"signIn": [{"method": "iwa", "portal": "https://x/portal"}]})
+    sign_in.set_rules(c.sign_in)
+    try:
+        again = {r.target.path: r for r in check_all(EsriClient(fake), config())}
+    finally:
+        sign_in.set_rules([])
+    assert "設定ファイルの signIn の「x」（統合 Windows 認証（IWA））を確認" in again["assignments"].findings[0].text
+    signed = report_text(list(results.values()), "", "", ["x: 統合 Windows 認証（IWA） ・ サインイン中: tsudo"])
+    assert signed.startswith("接続と表の点検\nサインイン: x: 統合 Windows 認証（IWA） ・ サインイン中: tsudo\n")
     # Problems first.
     assert text.index("[問題]") < text.index("alertReports.table")

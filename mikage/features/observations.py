@@ -117,7 +117,7 @@ class Observations(Feature):
 
         def work(task) -> int:
             sets = store_sets(config.observation_stores, config.observation_vocabulary, context.gpkg, context.esri,
-                              context.token_for, local=False)
+                              local=False)
             n = 0
             for s in sets:
                 # Only the server's classification (one kept in the GeoPackage is not read from this thread).

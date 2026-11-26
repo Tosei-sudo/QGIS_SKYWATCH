@@ -19,12 +19,13 @@ def practice() -> dict:
 
 def production() -> dict:
     return {
-        "satelliteCatalogs": [{"label": "本番衛星", "url": f"{PROD}/Sat/FeatureServer/0", "token": "SECRET",
+        "signIn": [{"method": "iwa", "portal": "https://gis.example.jp/portal"}],
+        "satelliteCatalogs": [{"label": "本番衛星", "url": f"{PROD}/Sat/FeatureServer/0",
                                "fields": {"name": "SAT_NAME", "tle1": "TLE_LINE1", "tle2": "TLE_LINE2"}}],
         "requestExports": [{"system": "SYS-A", "format": "csv", "columns": [{"key": "ID", "source": "id"}],
                             "folder": "\\\\share\\systems\\a", "fileName": "a_{date:%Y%m%d}.csv"},
                            {"system": "SYS-J", "format": "json", "schema": "./schemas/j.json"}],
-        "observationStores": [{"label": "本番観測記録", "url": f"{PROD}/Obs/FeatureServer/0", "token": "STORE",
+        "observationStores": [{"label": "本番観測記録", "url": f"{PROD}/Obs/FeatureServer/0",
                                "taxonomyTable": f"{PROD}/Obs/FeatureServer/1", "activities": ["停泊", "航行"]}],
         "geocoders": [{"type": "features", "label": "本番地名", "url": f"{PROD}/Places/FeatureServer/0", "field": "NAME"}],
         "events": {"layer": f"{PROD}/Events/FeatureServer/0", "links": f"{PROD}/Events/FeatureServer/1", "kinds": ["地震", "訓練"]},
@@ -38,16 +39,18 @@ def test_the_masters_are_the_productions_and_what_is_written_stays_on_the_practi
     value, taken = masters.with_production(practice(), production(), list(MASTERS), "/etc/mikage/config.json", OUT)
     assert taken == ["satellites", "taxonomy", "places", "eventKinds", "glossary"]
     # Satellites: the production's (the sample's aliases, sensors and ground stations gone: the production has none).
-    assert [c["label"] for c in value["satelliteCatalogs"]] == ["本番衛星"] and value["satelliteCatalogs"][0]["token"] == "SECRET"
+    assert [c["label"] for c in value["satelliteCatalogs"]] == ["本番衛星"]
+    # The production's servers signed in to as in production.
+    assert value["signIn"] == [{"method": "iwa", "portal": "https://gis.example.jp/portal"}]
     assert not {"sensorCatalogs", "satelliteAliases", "groundStations"} & set(value)
     # Their systems, the files into the practice folder; a path relative to the production's file made whole.
     systems = value["requestExports"]
     assert [s["system"] for s in systems] == ["SYS-A", "SYS-J"] and all(s["folder"] == OUT for s in systems)
     assert systems[1]["schema"].replace("\\", "/") == "/etc/mikage/schemas/j.json"
-    # The classes on the practice's store (with the token they were read with); the records on the practice server.
+    # The classes on the practice's store; the records on the practice server.
     store = value["observationStores"][0]
     assert store["url"].startswith(REST) and store["label"] == "練習用観測記録"
-    assert store["taxonomyTable"] == {"url": f"{PROD}/Obs/FeatureServer/1", "token": "STORE"}
+    assert store["taxonomyTable"] == f"{PROD}/Obs/FeatureServer/1"
     assert store["activities"] == ["停泊", "航行"]
     assert [g["label"] for g in value["geocoders"]] == ["本番地名"]
     assert value["events"]["kinds"] == ["地震", "訓練"] and value["events"]["layer"].startswith(REST)
@@ -57,10 +60,9 @@ def test_the_masters_are_the_productions_and_what_is_written_stays_on_the_practi
     assert value["imageCatalogs"][0]["url"].startswith(REST)
     config, problems = parse_config(value)
     assert problems == [] and [c.label for c in config.satellite_catalogs] == ["本番衛星"]
-    # Written to disk without the production's tokens.
-    text = masters.config_text(masters.without_tokens(value), "練習用")
-    assert "SECRET" not in text and "STORE" not in text and text.startswith("// 練習用\n")
-    assert parse_config(load_jsonc(text))[0].satellite_catalogs[0].token is None
+    assert [r.portal for r in config.sign_in] == ["https://gis.example.jp/portal"]
+    text = masters.config_text(value, "練習用")
+    assert text.startswith("// 練習用\n") and parse_config(load_jsonc(text))[0].sign_in == config.sign_in
 
 
 def test_only_the_masters_named_and_those_the_production_has():
@@ -115,11 +117,12 @@ def catalogs_production() -> dict:
     return {
         "imageCatalogs": [
             {"label": "本番だけ", "url": f"{PROD}/A/FeatureServer/0", "fields": FIELDS},
-            {"label": "練習用", "url": f"{PROD}/T/FeatureServer/0", "fields": FIELDS, "mode": "training", "token": "TT",
+            {"label": "練習用", "url": f"{PROD}/T/FeatureServer/0", "fields": FIELDS, "mode": "training",
              "thumbnail": "./ql/{id}.jpg"},
             {"label": "両方", "url": f"{PROD}/B/FeatureServer/0", "fields": FIELDS, "mode": "both"},
         ],
         "pathMappings": [{"prefix": "\\\\nas\\images", "label": "NAS"}],
+        "signIn": [{"method": "iwa", "portal": "https://gis.example.jp/portal"}],
     }
 
 
@@ -145,8 +148,8 @@ def test_the_productions_catalogs_shown_while_practising_come_after_the_practice
     assert taken == ["練習用", "両方"]
     assert [c.label for c in config.image_catalogs] == [*sample, "練習用", "両方"] and config.practice_catalogs == []
     shown = {c.label: c for c in config.image_catalogs}
-    # With the production's token (kept in memory: the practice's file is not written with them) ...
-    assert shown["練習用"].token == "TT" and shown["練習用"].url == f"{PROD}/T/FeatureServer/0"
+    # With the production's sign-in (signIn: added to the practice's) ...
+    assert shown["練習用"].url == f"{PROD}/T/FeatureServer/0" and [r.portal for r in config.sign_in] == ["https://gis.example.jp/portal"]
     # ... a path relative to the production's settings file made whole ...
     assert shown["練習用"].thumbnail is not None
     # ... and their files where the production finds them (after the practice's own mappings).

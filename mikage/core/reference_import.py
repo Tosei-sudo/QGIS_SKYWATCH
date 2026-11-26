@@ -45,7 +45,7 @@ from .esri import EsriClient, EsriError
 from .json_schema import validate
 from .named_areas import OrgArea
 from .reference_info import (
-    LinkTarget, ReferenceInfo, ReferenceSettings, _info_layer, _token, add_link_pairs, feature_of,
+    LinkTarget, ReferenceInfo, ReferenceSettings, _info_layer, add_link_pairs, feature_of,
     load_infos, load_links, new_id,
 )
 from .shapes import point_inside
@@ -341,7 +341,6 @@ def plan_import(client: EsriClient, settings: ReferenceSettings, data: ImportFil
         return plan
     known = known or Known()
     s = settings.layer
-    token = _token(s, token)
     layer = _info_layer(client, settings, token, refresh=True)
     lengths, has = layer.field_lengths, set(layer.field_types)
     f = s.fields
@@ -518,7 +517,6 @@ def apply_import(client: EsriClient, settings: ReferenceSettings, data: ImportFi
     plan = plan_import(client, settings, data, known, token, links_token, now)
     result = ImportResult(plan)
     s = settings.layer
-    token = _token(s, token)
     writes = [p for p in plan.rows if p.action in (NEW, UPDATE) and p.write and p.info is not None]
     if writes:
         layer = _info_layer(client, settings, token, refresh=True)

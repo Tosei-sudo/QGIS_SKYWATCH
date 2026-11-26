@@ -528,7 +528,6 @@ class DemSettings:
     """
     url: str = ""
     file: str = ""
-    token: Optional[str] = None
     geoid_height: float = 0.0
     rendering_rule: str = '{"rasterFunction":"None"}'
     mosaic_rule: str = ""
@@ -575,8 +574,7 @@ def dem_settings_of(value: Any, problems: list[str]) -> Optional[DemSettings]:
     if not is_number(size) or not 256 <= int(size) <= 16384:
         problems.append("dem.maxSize は 256〜16384 の画素数で指定")
         size = 4096
-    token = value.get("token")
-    return DemSettings(url=url.rstrip("/"), file=file, token=token if isinstance(token, str) and token else None,
+    return DemSettings(url=url.rstrip("/"), file=file,
                        geoid_height=float(geoid), rendering_rule=rule, mosaic_rule=mosaic, max_size=int(size))
 
 
@@ -595,7 +593,6 @@ def load_fixes(client, source, image_ids: Sequence[str], token: Optional[str] = 
     """The corrections of some images (all their files), the newest first."""
     from .esri import quote
 
-    token = token or source.token
     info = client.layer(source.url, token, refresh=True)
     _need(info.field_types, source)
     f = source.fields
@@ -617,7 +614,6 @@ def save_fix(client, source, fix: GeoFix, token: Optional[str] = None) -> GeoFix
     """Writes an image file's correction: over its row when it has one (the first), else a new row."""
     from .esri import EsriError, fit_value
 
-    token = token or source.token
     info = client.layer(source.url, token, refresh=True)
     types = info.field_types
     _need(types, source)
@@ -641,7 +637,6 @@ def save_fix(client, source, fix: GeoFix, token: Optional[str] = None) -> GeoFix
 
 def delete_fix(client, source, fix: GeoFix, token: Optional[str] = None) -> int:
     """Deletes an image file's correction (every row of it); how many rows went."""
-    token = token or source.token
     rows = [x.oid for x in load_fixes(client, source, [fix.image_id], token) if x.key == fix.key and x.oid is not None]
     if not rows:
         return 0
