@@ -24,7 +24,7 @@ def plugin_constants() -> dict:
     from mikage.core.catalog import config as catalog_config
     from mikage.core.enhance import pipeline
     from mikage.core.obs import export as obs_export
-    from mikage.core.obs import alerts, assignments, glossary, handover, model as obs_model, stores as obs_stores
+    from mikage.core.obs import alerts, assignments, continuation, glossary, handover, model as obs_model, stores as obs_stores
     from mikage.core.plan import modes, names, outages, satellites
     from mikage.core.request import export, groups as request_groups, link_id, result_file, store as request_store, systems
 
@@ -112,6 +112,7 @@ def plugin_constants() -> dict:
         "feedTypes": list(moving.FEED_TYPES),
         "feedKinds": list(moving.KINDS),
         "detectTasks": list(model_config.DETECT_TASKS),
+        "continueKinds": [[k, f"{k}（{v}）"] for k, v in continuation.KIND_TEXT.items()],
         "detectFormats": list(model_config.DETECT_FORMATS),
         "detectionStatuses": list(transfer.STATUSES),
         "resamplings": list(overviews.RESAMPLINGS),
