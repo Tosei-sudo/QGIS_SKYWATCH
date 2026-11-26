@@ -41,14 +41,16 @@ def box(lon, lat, dx, dy):
 
 
 @pytest.fixture
-def plugin(tmp_path, monkeypatch):
+def plugin(tmp_path, monkeypatch, request):
     QgsSettings().remove("mikage")
     settings._set("local_gpkg", str(tmp_path / "local.gpkg"))
+    # More of the settings file (indirect parameters): "top" its keys, "ships" the first source's.
+    more = getattr(request, "param", {})
     config = {"aiResultSources": [
         {"label": "船舶検出", "url": POLYGONS, "fields": {"imageId": "IMAGE_ID", "class": "CLS", "score": "SCORE", "id": "DET_ID"},
-         "kinds": {"ship": "船舶"}, "activity": "停泊", "confidence": "推定"},
+         "kinds": {"ship": "船舶"}, "activity": "停泊", "confidence": "推定", **more.get("ships", {})},
         {"label": "車両点", "url": POINTS, "fields": {"imageId": "IMG", "class": "CLS", "name": "NAME"}},
-    ]}
+    ], **more.get("top", {})}
     path = tmp_path / "config.json"
     path.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
     settings.set_config_source(str(path))
@@ -266,3 +268,41 @@ def test_the_thing_to_continue_can_be_chosen_or_left_new(plugin):
     dock.list.itemWidget(dock.list.topLevelItem(1), 6).setCurrentIndex(0)
     [o] = dock.import_rows([1])
     assert o.object_name == "船舶" and o.object_id != ship.object_id and "継続" not in o.note
+
+
+INSIDE_AI = {"rules": [{"label": "AIの範囲の中", "recordInAi": True, "kind": "related"}], "candidateRadius": 0}
+
+
+@pytest.mark.parametrize("plugin", [{"top": {"aiContinuation": INSIDE_AI}}, {"top": {"aiContinuation": False}, "ships": {"continuation": INSIDE_AI}}],
+                         indirect=True, ids=["aiContinuation", "the source's own"])
+def test_a_rule_of_the_settings_file_decides_what_continues(plugin):
+    p, iface, tmp_path = plugin
+    dock = p.api.ai_results
+    first = open_catalog_image(tmp_path, "IMG1")
+    iface.setActiveLayer(first)
+    assert wait_for(lambda: len(dock.rows) == 3)
+    [ship] = dock.import_rows([0])
+    second = open_catalog_image(tmp_path, "IMG2")
+    iface.setActiveLayer(second)
+    assert wait_for(lambda: dock.image_id == "IMG2" and len(dock.rows) == 2)
+    # The ship of IMG1 is inside d-4's polygon: the rule holds (and nothing is offered beyond it: d-3 is far).
+    assert list(dock.continued) == [1] and dock.continued[1].tier == "auto"
+    widget = dock.list.itemWidget(dock.list.topLevelItem(1), 6)
+    assert widget.currentText().startswith("継続: 船舶（AIの範囲の中・")
+    assert widget.toolTip() == "自動で継続（ルール「AIの範囲の中」に当てはまる）"
+    saved = dock.import_rows([1])
+    assert saved[0].object_id == ship.object_id and saved[0].note.endswith("[AI:船舶検出#d-4] [自動継続:AIの範囲の中]")
+
+
+@pytest.mark.parametrize("plugin", [{"top": {"aiContinuation": False}}], indirect=True)
+def test_matching_can_be_turned_off(plugin):
+    p, iface, tmp_path = plugin
+    dock = p.api.ai_results
+    first = open_catalog_image(tmp_path, "IMG1")
+    iface.setActiveLayer(first)
+    assert wait_for(lambda: len(dock.rows) == 3)
+    dock.import_rows([0])
+    second = open_catalog_image(tmp_path, "IMG2")
+    iface.setActiveLayer(second)
+    assert wait_for(lambda: dock.image_id == "IMG2" and len(dock.rows) == 2)
+    assert dock.continued == {} and dock.list.itemWidget(dock.list.topLevelItem(1), 6) is None

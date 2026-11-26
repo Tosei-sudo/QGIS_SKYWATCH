@@ -13,9 +13,10 @@ from typing import Optional
 
 from qgis.core import QgsApplication, QgsAuthMethodConfig
 
-from ..core import edit_stamp, sign_in
+from ..core import edit_stamp, edition, sign_in
 from . import training_io
-from .qsettings import PREFIX, pref, set_pref  # noqa: F401 (PREFIX, pref and set_pref: read from here too)
+from . import qsettings
+from .qsettings import pref, set_pref  # noqa: F401 (pref and set_pref: read from here too)
 
 # Each feature's own (qgis_io/prefs): read through here as before.
 from .prefs.images import (  # noqa: F401
@@ -68,9 +69,15 @@ def config_locked() -> bool:
 
 
 def production_config_source() -> tuple[str, bool]:
-    """The settings file of the production (練習モード or not): the one chosen, else the shipped one; the shipped one when locked."""
+    """
+    The settings file of the production (練習モード or not): the one chosen, else the shipped one; the shipped one
+    when locked. MIKAGE 練習版 (core/edition.py): only the shipped one, read for what 練習モード takes of it.
+    """
     if config_locked():
         return bundled_config(), True
+    if edition.training_only():
+        shipped = bundled_config()
+        return shipped, bool(shipped)
     chosen = config_source()
     if chosen:
         return chosen, False
@@ -81,11 +88,14 @@ def production_config_source() -> tuple[str, bool]:
 def effective_config_source() -> tuple[str, bool]:
     """
     The settings file to read: 練習モード's while practising (qgis_io/training_io.py), else the production's
-    (`production_config_source`). (source, shipped)
+    (`production_config_source`); MIKAGE 練習版 none until 練習モード is on (the screens never have the
+    production's). (source, shipped)
     """
     session = training_io.active()
     if session is not None:
         return session.config_source, False
+    if edition.training_only():
+        return "", False
     return production_config_source()
 
 
@@ -216,7 +226,7 @@ def recorder_name(store_url: Optional[str] = None) -> str:
 
 def profile_folder() -> str:
     """The plugin's folder in the QGIS user profile (created when missing)."""
-    folder = os.path.join(QgsApplication.qgisSettingsDirPath(), "mikage")
+    folder = qsettings.profile_folder()
     os.makedirs(folder, exist_ok=True)
     return folder
 

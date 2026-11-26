@@ -17,7 +17,7 @@ the sort (lists that sort by a header click) and the list's filters.
   lists' 「メモ」, tsudo 2026-11-24 「通常は非表示で」): hidden in the
   plugin's standard view, and also where a kept arrangement or a saved view
   does not name them (made before the column was there).
-- Kept per user (QgsSettings `mikage/listViews/<list>`), not in the settings
+- Kept per user (QgsSettings `<plugin id>/listViews/<list>`), not in the settings
   file or the project: each person has their own.
 
 Columns are told by their titles, so a view still fits when a list gains or
@@ -32,12 +32,12 @@ from __future__ import annotations
 import json
 from typing import Any, Callable, Iterable, Optional, Union
 
-from qgis.core import QgsSettings
 from qgis.PyQt.QtCore import QObject, QSize, Qt, QTimer
 from qgis.PyQt.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QGroupBox, QHBoxLayout, QHeaderView, QInputDialog, QLabel,
     QLineEdit, QListWidget, QListWidgetItem, QMenu, QPushButton, QSpinBox, QStyle, QToolButton, QTreeView, QVBoxLayout, QWidget,
 )
+from ..qgis_io import qsettings
 from .fit import fit_text
 
 try:
@@ -45,7 +45,7 @@ try:
 except ImportError:  # pragma: no cover
     QDoubleSpinBox = QSpinBox
 
-ROOT = "mikage/listViews"
+ROOT = "listViews"
 
 #: A filter: (read its value, set a value).
 Filter = tuple[Callable[[], Any], Callable[[Any], None]]
@@ -184,7 +184,7 @@ class ListViews(QObject):
         return self._key() if callable(self._key) else self._key
 
     def _read(self) -> dict:
-        value = QgsSettings().value(f"{ROOT}/{self.key}", "")
+        value = qsettings.value(f"{ROOT}/{self.key}", "")
         try:
             data = json.loads(value) if isinstance(value, str) and value else {}
         except ValueError:
@@ -196,7 +196,7 @@ class ListViews(QObject):
         return data
 
     def _write(self, data: dict) -> None:
-        QgsSettings().setValue(f"{ROOT}/{self.key}", json.dumps(data, ensure_ascii=False))
+        qsettings.set_value(f"{ROOT}/{self.key}", json.dumps(data, ensure_ascii=False))
 
     def names(self) -> list[str]:
         return list(self._read()["views"])

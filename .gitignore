@@ -7,5 +7,6 @@ mikage/config.json
 mikage/config.jsonc
 mikage/ext/win64/
 mikage/config.lock
+mikage/training.only
 xView
 scripts/mock_esri/data/

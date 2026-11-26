@@ -23,7 +23,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Callable, Optional
 
-from qgis.core import QgsGeometry, QgsProject, QgsSettings, QgsVectorLayer, QgsWkbTypes
+from qgis.core import QgsGeometry, QgsProject, QgsVectorLayer, QgsWkbTypes
 from qgis.gui import QgsColorButton, QgsMapToolEmitPoint, QgsRubberBand
 from qgis.PyQt.QtCore import QDateTime, Qt, QTimer
 from qgis.PyQt.QtGui import QColor
@@ -33,7 +33,7 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ..core.interests import AREA, KIND_LABELS, POINT, Interest, matches, new_interest
-from ..qgis_io import map_tools
+from ..qgis_io import map_tools, qsettings
 from ..qgis_io.geometry import from_wgs84, shape_of, shape_rings, to_wgs84
 from ..qgis_io.interests_io import InterestBook, box_of, geometry_of, layers_of, remove_layers, select_on_map, show_layers
 from ..qgis_io.org_areas_io import OrgAreaBook
@@ -44,9 +44,9 @@ from .list_views import column_menus
 from .org_areas_panel import OrgAreasPanel
 
 #: Whether the items are kept on the map (the person's choice; on until turned off).
-ON_MAP_KEY = "mikage/interestsOnMap"
+ON_MAP_KEY = "interestsOnMap"
 #: The tab shown last (0 「自分」, 1 「組織」).
-TAB_KEY = "mikage/interestsTab"
+TAB_KEY = "interestsTab"
 
 
 def _local(ms: Optional[int]) -> str:
@@ -176,7 +176,7 @@ class InterestsDock(PluginDock):
         if org_book is not None:
             self.org = OrgAreasPanel(iface, context, org_book, self.reveal)
             self.tabs.addTab(self.org, self.tr("組織"))
-            self.tabs.setCurrentIndex(1 if QgsSettings().value(TAB_KEY, 0, type=int) == 1 else 0)
+            self.tabs.setCurrentIndex(1 if qsettings.value(TAB_KEY, 0, type=int) == 1 else 0)
             org_book.changed.connect(self._update_buttons)
         self.tabs.currentChanged.connect(self._tab_changed)
         self.body.addWidget(self.tabs, 1)
@@ -233,7 +233,7 @@ class InterestsDock(PluginDock):
 
     @staticmethod
     def wanted_on_map() -> bool:
-        return QgsSettings().value(ON_MAP_KEY, True, type=bool)
+        return qsettings.value(ON_MAP_KEY, True, type=bool)
 
     def _config_changed(self) -> None:
         s = self.settings
@@ -257,7 +257,7 @@ class InterestsDock(PluginDock):
             self.org.shown_now()
 
     def _tab_changed(self, index: int) -> None:
-        QgsSettings().setValue(TAB_KEY, index)
+        qsettings.set_value(TAB_KEY, index)
         if self.org is not None and self.tabs.widget(index) is self.org:
             self.org.shown_now()
 
@@ -573,7 +573,7 @@ class InterestsDock(PluginDock):
         self.canvas.refresh()
 
     def _map_toggled(self, on: bool) -> None:
-        QgsSettings().setValue(ON_MAP_KEY, on)
+        qsettings.set_value(ON_MAP_KEY, on)
         if on:
             self._place_layers(False)
         else:
@@ -622,7 +622,7 @@ class InterestsDock(PluginDock):
         if self._removing or not mine or not mine & set(ids):
             return
         if len(ids) < len(QgsProject.instance().mapLayers()):
-            QgsSettings().setValue(ON_MAP_KEY, False)
+            qsettings.set_value(ON_MAP_KEY, False)
         QTimer.singleShot(0, self._update_buttons)
 
     def close_down(self) -> None:

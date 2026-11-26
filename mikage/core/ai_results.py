@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from typing import Any, Iterable, Optional, Sequence
 
 from .esri import quote
-from .obs.continuation import CANDIDATE_METRES, CONTINUE_METRES
+from .obs.continuation import CANDIDATE_METRES, CONTINUE_METRES, KIND_LEVELS, Rule, Rules, old_rules
 from .util import is_name, is_number, is_record, is_url, layer_url, ms_of, text_of
 
 #: What an attribute of a result can be, by role (imageId is needed).
@@ -79,6 +79,9 @@ class AiResultSource:
     local: bool = False
     #: A `detectionOutputs` table read back (detections sent there by the plugin or the viewer).
     detections: bool = False
+    #: Its own matching (継続), the keys it writes only: `continuation` (rules / candidate_radius / unique / on), and
+    #: the older `continueRadius` (rules) and `candidateRadius` (0: on False); the rest from `aiContinuation`.
+    continuation: dict[str, Any] = field(default_factory=dict)
 
 
 def ai_result_source_of(value: Any, problems: list[str], index: int) -> Optional[AiResultSource]:
@@ -119,11 +122,23 @@ def ai_result_source_of(value: Any, problems: list[str], index: int) -> Optional
     if "minScore" in value and not (is_number(least) and 0 <= least <= 1):
         problems.append(f"{at} の minScore は 0〜1 で指定")
     radii = {}
+    own: dict[str, Any] = {}
     for key, default in (("continueRadius", CONTINUE_METRES), ("candidateRadius", CANDIDATE_METRES)):
         v = value.get(key)
         if key in value and not (is_number(v) and 0 <= v <= 100_000):
             problems.append(f"{at} の {key} は 0〜100000（m）で指定")
         radii[key] = float(v) if is_number(v) and 0 <= v <= 100_000 else default
+        if key in value and is_number(v) and 0 <= v <= 100_000:
+            if key == "continueRadius":
+                own["rules"] = old_rules(float(v)).rules
+            elif v > 0:
+                own["candidate_radius"] = float(v)
+            else:
+                # 「0 で照合しない」 as it always was.
+                own["on"] = False
+    if "continuation" in value:
+        # Its own rules win over the older keys.
+        own.update(continuation_parts(value["continuation"], problems, f"{at} の continuation"))
     most = value.get("maxResults")
     label, where = value.get("label"), value.get("where")
     activity, confidence = value.get("activity"), value.get("confidence")
@@ -139,6 +154,120 @@ def ai_result_source_of(value: Any, problems: list[str], index: int) -> Optional
         max_results=min(most, 20000) if isinstance(most, int) and not isinstance(most, bool) and most > 0 else 2000,
         continue_radius=radii["continueRadius"],
         candidate_radius=radii["candidateRadius"],
+        continuation=own,
+    )
+
+
+#: A rule's keys in the settings file (`aiContinuation.rules[]`) and what each is.
+RULE_KEYS = {
+    "label": "名前",
+    "near": "記録の位置からの距離（m）",
+    "centerInRecord": "AI の重心が記録の外形の中",
+    "recordInAi": "記録の位置が AI のポリゴンの中",
+    "overlap": "外形の重なり率（0〜1）",
+    "kind": "種別の一致（same / related / sibling / any）",
+    "lengthGap": "長さの差の上限（0〜1）",
+    "headingGap": "向きの差の上限（°）",
+    "minScore": "AI の確信度の下限（0〜1）",
+}
+
+
+def _rule_of(value: Any, problems: list[str], at: str) -> Optional[Rule]:
+    if not is_record(value):
+        problems.append(f"{at} は条件のオブジェクトで指定")
+        return None
+    for key in value:
+        if key not in RULE_KEYS:
+            problems.append(f"{at} の {key} は使えない条件（{' / '.join(RULE_KEYS)}）")
+    rule = Rule()
+    label = value.get("label")
+    if isinstance(label, str):
+        rule.label = label.strip().replace("]", "")
+    elif "label" in value:
+        problems.append(f"{at} の label は文字列で指定")
+    for key, attr, most, what in (("near", "near", 100_000, "0〜100000（m）"), ("overlap", "overlap", 1, "0〜1 "),
+                                  ("lengthGap", "length_gap", 1, "0〜1 "), ("headingGap", "heading_gap", 180, "0〜180（°）"),
+                                  ("minScore", "min_score", 1, "0〜1 ")):
+        if key not in value or value[key] is None:
+            continue
+        v = value[key]
+        if is_number(v) and 0 <= v <= most:
+            setattr(rule, attr, float(v))
+        else:
+            problems.append(f"{at} の {key} は {what}で指定")
+    for key, attr in (("centerInRecord", "center_in_record"), ("recordInAi", "record_in_ai")):
+        if key not in value:
+            continue
+        if isinstance(value[key], bool):
+            setattr(rule, attr, value[key])
+        else:
+            problems.append(f"{at} の {key} は true か false で指定")
+    kind = value.get("kind")
+    if kind in KIND_LEVELS:
+        rule.kind = kind
+    elif kind not in (None, ""):
+        problems.append(f"{at} の kind は {' / '.join(KIND_LEVELS)} で指定")
+    if not rule.placed:
+        problems.append(f"{at} に位置の条件（near・centerInRecord・recordInAi・overlap のどれか）なし")
+        return None
+    return rule
+
+
+def continuation_parts(value: Any, problems: list[str], at: str = "aiContinuation") -> dict[str, Any]:
+    """
+    The keys of a matching (継続) setting it writes (`aiContinuation`, or a
+    source's `continuation`): `false` matches nothing; an object of `rules`,
+    `candidateRadius` and `unique`.
+    """
+    if value is False:
+        return {"on": False}
+    if value is True:
+        return {"on": True}
+    if not is_record(value):
+        problems.append(f"{at} は false かオブジェクト（rules・candidateRadius・unique）で指定")
+        return {}
+    out: dict[str, Any] = {"on": True}
+    for key in value:
+        if key not in ("rules", "candidateRadius", "unique"):
+            problems.append(f"{at} の {key} は使えないキー（rules / candidateRadius / unique）")
+    if "rules" in value:
+        rules = value["rules"]
+        if isinstance(rules, list):
+            out["rules"] = [r for r in (_rule_of(x, problems, f"{at} の rules[{i}]") for i, x in enumerate(rules)) if r is not None]
+        else:
+            problems.append(f"{at} の rules は条件のオブジェクトの配列で指定")
+    if "candidateRadius" in value:
+        v = value["candidateRadius"]
+        if is_number(v) and 0 <= v <= 100_000:
+            out["candidate_radius"] = float(v)
+        else:
+            problems.append(f"{at} の candidateRadius は 0〜100000（m）で指定")
+    if "unique" in value:
+        if isinstance(value["unique"], bool):
+            out["unique"] = value["unique"]
+        else:
+            problems.append(f"{at} の unique は true か false で指定")
+    return out
+
+
+def ai_continuation_of(value: Any, problems: list[str]) -> dict[str, Any]:
+    """`aiContinuation`: the matching (継続) of every source's results, the keys it writes."""
+    return continuation_parts(value, problems)
+
+
+def rules_for(source: AiResultSource, config: Any = None) -> Rules:
+    """
+    How a source's results are matched (継続): the keys the source writes,
+    else `aiContinuation`'s, else the judgement before rules could be set.
+    """
+    base = old_rules()
+    parts = dict(getattr(config, "ai_continuation", None) or {})
+    parts.update(source.continuation)
+    return Rules(
+        rules=list(parts.get("rules", base.rules)),
+        candidate_radius=parts.get("candidate_radius", base.candidate_radius),
+        unique=parts.get("unique", base.unique),
+        on=parts.get("on", True),
     )
 
 

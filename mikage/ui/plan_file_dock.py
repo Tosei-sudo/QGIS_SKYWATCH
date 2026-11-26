@@ -81,6 +81,7 @@ from ..qgis_io.network import get_bytes
 from ..qgis_io.request_io import load_schema
 from ..qgis_io.tasks import error_text, run_task
 from .docks import PluginDock, plain_label, plain_tip
+from .emphasis import emphasize
 from .flow_layout import FlowLayout
 from .list_views import column_menus
 from .memo_column import MEMO, memo_item
@@ -163,7 +164,7 @@ class PlanFileDock(PluginDock):
         today = jst_day(_now_ms())
         self.day.setDate(QDate(today.year, today.month, today.day))
         top.addWidget(self.day)
-        self.run_button = QPushButton(self.tr("計算"))
+        self.run_button = emphasize(QPushButton(self.tr("計算")))
         self.run_button.setToolTip(self.tr("撮像済みの確認、最新の依頼の取得、雲量予報のあと、その日の依頼を枠に詰める"))
         self.run_button.clicked.connect(lambda: self.run())
         top.addWidget(self.run_button)
@@ -263,7 +264,7 @@ class PlanFileDock(PluginDock):
         browse = QPushButton(self.tr("参照…"))
         browse.clicked.connect(self._browse)
         out.addWidget(browse)
-        self.write_button = QPushButton(self.tr("書き出し"))
+        self.write_button = emphasize(QPushButton(self.tr("書き出し")))
         self.write_button.setToolTip(self.tr("採用の依頼をシステムごとのファイルに書き出し、出力履歴と繰り上げを保存。"
                                              "システムを選んでいればそのシステムの分だけ（ほかのシステムのファイル・出力履歴はそのまま）"))
         self.write_button.clicked.connect(lambda: self.write())

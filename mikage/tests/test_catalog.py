@@ -897,6 +897,19 @@ def test_rewrites_need_a_pattern_and_a_to_with_the_groups_it_has():
     assert not problems and config.path_mappings == [PathRewrite(FLAT["pattern"], "D:/$1", "手元の複製")]
 
 
+def test_a_rewrite_may_put_the_overviews_beside_the_images_it_finds():
+    """`overviewsBeside` (tsudo 2026-11-26): only on a rewrite, true or false (false when left out)."""
+    problems = []
+    entries = [dict(FLAT, overviewsBeside=True), dict(FLAT, overviewsBeside=False), dict(FLAT, overviewsBeside="yes"),
+               {"prefix": "\\\\nas\\img", "overviewsBeside": True}]
+    [beside, plain, prefix] = path_mappings_of(entries, problems)
+    assert beside == PathRewrite(FLAT["pattern"], "D:/$1", "手元の複製", True) and beside.overviews_beside
+    assert not plain.overviews_beside and not PathRewrite("x", "D:/", "D").overviews_beside
+    assert prefix == PathMapping("\\\\nas\\img", "\\\\nas\\img")
+    assert problems == ["pathMappings[2] の overviewsBeside は true か false で指定",
+                        "pathMappings[3] の overviewsBeside は pattern・to の読み替えにだけ書ける"]
+
+
 def test_the_spatial_filter_of_each_kind_of_area():
     from mikage.core.catalog.search import spatial_filter
 

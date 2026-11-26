@@ -12,15 +12,15 @@ import json
 from typing import Optional
 
 from qgis.core import (
-    QgsCoordinateReferenceSystem, QgsDefaultValue, QgsEditorWidgetSetup, QgsFieldConstraints, QgsSettings, QgsVectorLayer,
+    QgsCoordinateReferenceSystem, QgsDefaultValue, QgsEditorWidgetSetup, QgsFieldConstraints, QgsVectorLayer,
     QgsWkbTypes,
 )
 
 from ..core.layer_templates import FieldDesign, FieldSpec, LayerTemplate, template_json, template_of
 from .plan_layer import make_field
-from .settings import PREFIX
+from . import qsettings
 
-SAVED_KEY = PREFIX + "layer_templates"
+SAVED_KEY = "layer_templates"
 
 
 def _literal(value) -> str:
@@ -136,7 +136,7 @@ def geometry_of(layer: QgsVectorLayer) -> Optional[str]:
 
 def saved_templates() -> list[LayerTemplate]:
     """The designs kept by the person (QgsSettings)."""
-    value = QgsSettings().value(SAVED_KEY, "")
+    value = qsettings.value(SAVED_KEY, "")
     try:
         items = json.loads(value) if isinstance(value, str) and value else []
     except ValueError:
@@ -147,7 +147,7 @@ def saved_templates() -> list[LayerTemplate]:
 
 
 def _store(templates: list[LayerTemplate]) -> None:
-    QgsSettings().setValue(SAVED_KEY, json.dumps([template_json(t) for t in templates], ensure_ascii=False))
+    qsettings.set_value(SAVED_KEY, json.dumps([template_json(t) for t in templates], ensure_ascii=False))
 
 
 def save_template(template: LayerTemplate) -> None:

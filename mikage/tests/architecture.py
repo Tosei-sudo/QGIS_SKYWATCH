@@ -45,6 +45,8 @@ FEATURE_PACKAGES = ("core.ai", "core.catalog", "core.enhance", "core.obs", "core
 KERNEL = (
     "core.esri", "core.errors", "core.util", "core.time_zone", "core.time_text", "core.audit", "core.edit_stamp", "core.gpkg", "core.offline",
     "core.auth", "core.json_pieces", "core.coords", "core.shapes", "core.sql", "core.sources", "core.win64",
+    # Which plugin this is: MIKAGE or MIKAGE 練習版 (its settings' root and folder, 練習モード only).
+    "core.edition",
     # The features' doors read when asked (core/<機能>/api.py).
     "core.door",
     # Shared by two features each: an image recorded on without its file (the catalog makes them, the observations

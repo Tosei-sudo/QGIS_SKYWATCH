@@ -9,12 +9,13 @@ from qgis.testing import start_app  # noqa: E402
 
 APP = start_app()
 
-from qgis.core import QgsProject, QgsSettings  # noqa: E402
+from qgis.core import QgsProject  # noqa: E402
 from qgis.PyQt.QtCore import Qt  # noqa: E402
 from qgis.PyQt.QtGui import QStandardItem, QStandardItemModel  # noqa: E402
 from qgis.PyQt.QtWidgets import QComboBox, QDialogButtonBox, QLineEdit, QTableView, QTreeWidget, QTreeWidgetItem  # noqa: E402
 
 from mikage.core.config import parse_config  # noqa: E402
+from mikage.qgis_io import qsettings  # noqa: E402
 from mikage.ui.list_views import ROOT, ColumnsDialog, ListViews, column_drag, column_menus, set_column_drag  # noqa: E402
 from mikage.tests.feature_harness import ALL  # noqa: E402
 from mikage.tests.test_qgis_alerts import plugin  # noqa: E402,F401
@@ -27,10 +28,10 @@ HEAD = ["名称", "区分", "期間", "状態"]
 
 @pytest.fixture(autouse=True)
 def clean():
-    QgsSettings().remove(ROOT)
+    qsettings.remove(ROOT)
     set_column_drag(True)
     yield
-    QgsSettings().remove(ROOT)
+    qsettings.remove(ROOT)
     set_column_drag(True)
     QgsProject.instance().removeAllMapLayers()
 
@@ -218,7 +219,7 @@ def test_every_list_of_the_docks_has_the_menu(plugin):  # noqa: F811
     events = d["SatObsEvents"].table_columns
     first = titles(events)[0]
     assert events.move(0, "last") and titles(events)[-1] == first
-    kept = json.loads(QgsSettings().value(f"{ROOT}/events"))["arrangement"]["columns"]
+    kept = json.loads(qsettings.value(f"{ROOT}/events"))["arrangement"]["columns"]
     assert kept[-1]["title"] == first
 
 

@@ -11,7 +11,9 @@ profile's settings that hold data rather than the screen's layout
 reminders of shots, the request files' folder) are kept aside when it
 starts and put back when it ends, and at the next start of the plugin after
 QGIS stopped while practising (`recover`): nothing chosen while practising
-reaches the production tables.
+reaches the production tables. MIKAGE 練習版 (core/edition.py) keeps nothing
+aside: its settings are its own (mikage_training/…) and it never goes back
+to a production.
 
 The masters only read (satellites, the taxonomy, places, …:
 core/training/masters.py) may be the production's (`Production`), signed in
@@ -29,26 +31,27 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
-from qgis.core import QgsApplication, QgsSettings
 
+from ..core import edition
 from ..core.config import load_jsonc
 from ..core.training.api import TrainingServer, masters, open_data, training_config
+from . import qsettings
 
 #: Whether practising (set when it starts, taken away when it ends: still there at a start, QGIS stopped while practising).
-ACTIVE_KEY = "mikage/training/active"
+ACTIVE_KEY = "training/active"
 #: The SAVED_KEYS' values when it started ({key: value or None}).
-SAVED_KEY = "mikage/training/saved"
+SAVED_KEY = "training/saved"
 #: The practice server's last port (the data's URLs carry it: the same one again when it is free).
-PORT_KEY = "mikage/training/port"
+PORT_KEY = "training/port"
 #: The profile's settings that are data (kept aside while practising, put back after).
-SAVED_KEYS = ("mikage/roles", "mikage/rolesPending", "mikage/role", "mikage/plan_reminders", "mikage/request_export_folder")
+SAVED_KEYS = ("roles", "rolesPending", "role", "plan_reminders", "request_export_folder")
 #: A base for the data made before the server has a port (moved to the server's when it starts: core/training/server.rebase).
 NO_BASE = "http://127.0.0.1:0"
 
 
 def folder() -> str:
-    """The practice's folder in the QGIS user profile (mikage/training)."""
-    return os.path.join(QgsApplication.qgisSettingsDirPath(), "mikage", "training")
+    """The practice's folder in the QGIS user profile (mikage/training; mikage_training/training in MIKAGE 練習版)."""
+    return qsettings.profile_folder("training")
 
 
 @dataclass(frozen=True)
@@ -257,29 +260,30 @@ def start_server(f: TrainingFiles, production: Optional[Production] = None) -> t
     practice's settings file written for it (write_config: also the masters
     taken from the production).
     """
-    s = QgsSettings()
     try:
-        port = int(s.value(PORT_KEY, 0) or 0)
+        port = int(qsettings.value(PORT_KEY, 0) or 0)
     except (TypeError, ValueError):
         port = 0
     server = TrainingServer(f.server)
     base = server.start(port)
-    s.setValue(PORT_KEY, server.port)
+    qsettings.set_value(PORT_KEY, server.port)
     os.makedirs(f.outputs, exist_ok=True)
     taken = write_config(f, base, server.files, production)
     return server, taken
 
 
 def begin(session: TrainingSession) -> None:
-    """練習モード on: the profile's data settings kept aside (and kept aside for a start after QGIS stopped meanwhile)."""
+    """
+    練習モード on: the profile's data settings kept aside (and kept aside for a start after QGIS stopped meanwhile);
+    MIKAGE 練習版's are its own, kept as they are.
+    """
     global _session
-    s = QgsSettings()
-    if s.value(ACTIVE_KEY, "") != "1":
-        saved = {key: (s.value(key) if s.contains(key) else None) for key in SAVED_KEYS}
-        s.setValue(SAVED_KEY, json.dumps({k: (v if v is None or isinstance(v, (str, int, float, bool)) else str(v))
-                                          for k, v in saved.items()}, ensure_ascii=False))
-        s.setValue(ACTIVE_KEY, "1")
-        s.sync()
+    if not edition.training_only() and qsettings.value(ACTIVE_KEY, "") != "1":
+        saved = {key: (qsettings.value(key) if qsettings.contains(key) else None) for key in SAVED_KEYS}
+        qsettings.set_value(SAVED_KEY, json.dumps({k: (v if v is None or isinstance(v, (str, int, float, bool)) else str(v))
+                                                   for k, v in saved.items()}, ensure_ascii=False))
+        qsettings.set_value(ACTIVE_KEY, "1")
+        qsettings.sync()
     _session = session
 
 
@@ -295,22 +299,21 @@ def end() -> Optional[TrainingSession]:
 
 def put_back() -> bool:
     """The SAVED_KEYS back as before practising (False: nothing kept aside)."""
-    s = QgsSettings()
-    if s.value(ACTIVE_KEY, "") != "1":
+    if qsettings.value(ACTIVE_KEY, "") != "1":
         return False
     try:
-        saved = json.loads(s.value(SAVED_KEY, "{}") or "{}")
+        saved = json.loads(qsettings.value(SAVED_KEY, "{}") or "{}")
     except ValueError:
         saved = {}
     for key in SAVED_KEYS:
         value = saved.get(key) if isinstance(saved, dict) else None
         if value is None:
-            s.remove(key)
+            qsettings.remove(key)
         else:
-            s.setValue(key, value)
-    s.remove(SAVED_KEY)
-    s.remove(ACTIVE_KEY)
-    s.sync()
+            qsettings.set_value(key, value)
+    qsettings.remove(SAVED_KEY)
+    qsettings.remove(ACTIVE_KEY)
+    qsettings.sync()
     return True
 
 

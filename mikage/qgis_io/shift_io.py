@@ -35,9 +35,9 @@ SHIFT = "satobs/shift"
 
 def shifts_folder() -> str:
     """Where the moved VRTs are written."""
-    from qgis.core import QgsApplication
+    from .qsettings import profile_folder
 
-    folder = os.path.join(QgsApplication.qgisSettingsDirPath(), "mikage", "shifted")
+    folder = profile_folder("shifted")
     os.makedirs(folder, exist_ok=True)
     return folder
 

@@ -58,12 +58,12 @@ from qgis.PyQt.QtWidgets import (
 from ..core.ai.api import DetectModelConfig
 from ..core.ai.api import ACCEPTED, REJECTED_STATE, SURE_SCORE, TO_REVIEW, queue, rejected_tags, rejection_note, review_order, state_of
 from ..core.ai_results import (
-    AiResult, AiResultSource, detected_kind, detection_runs, import_entry, kind_for, recorded_tags, result_sources, result_tag, same_run,
-    score_text,
+    AiResult, AiResultSource, detected_kind, detection_runs, import_entry, kind_for, recorded_tags, result_sources, result_tag, rules_for,
+    same_run, score_text,
 )
 from ..core.obs.api import AUTO, CANDIDATE, Continuation, ContinuationFound as Found, continuations
-from ..core.obs.api import living
-from ..qgis_io.ai_results_io import RESULTS_OF, ROW, add_above, fetch, geometry_of, mark_imported, place_of, results_layer
+from ..core.obs.api import living, outline_of
+from ..qgis_io.ai_results_io import RESULTS_OF, ROW, add_above, fetch, geometry_of, mark_imported, place_of, results_layer, ring_of
 from ..qgis_io.ai_transfer_io import sent_ids
 from ..qgis_io.catalog_io import CATALOG_URL
 from ..qgis_io.detection_results import detection_layers, detection_results, image_ids_of, is_detection_layer, local_source
@@ -72,6 +72,7 @@ from ..qgis_io.pixel_place import original_placement, pixel_in
 from ..qgis_io.review_io import rejection_ring
 from ..qgis_io.tasks import current_feedback, error_text, run_task
 from .docks import PluginDock, ask_no, plain_label
+from .emphasis import LIGHT, emphasize
 from .last_inputs import InputMemory
 from .list_views import column_menus
 
@@ -90,6 +91,19 @@ SAME_POINT_M = 2.0
 
 def _tr(text: str) -> str:
     return QCoreApplication.translate("AiResultsDock", text)
+
+
+def _continue_tip(c: Continuation) -> str:
+    """The 継続 column's tip: why it continues without asking (the rule that holds), or that it may."""
+    if c.tier != AUTO:
+        rules = sorted({o.rule.text for o in c.options if o.rule is not None and not o.rule.default})
+        if rules:
+            return _tr("継続の候補あり（ルール「{r}」に当てはまるが、紛らわしいものがある）: 選ぶと継続として記録").format(r="」「".join(rules))
+        return _tr("継続の候補あり（近いが確かでない）: 選ぶと継続として記録")
+    rule = c.pick.rule if c.pick is not None else None
+    if rule is None or rule.default:
+        return _tr("自動で継続（近く、分類と長さが合い、紛らわしいものがない）")
+    return _tr("自動で継続（ルール「{r}」に当てはまる）").format(r=rule.text)
 
 
 def catalog_image_id(layer) -> Optional[str]:
@@ -237,13 +251,13 @@ class AiResultsDock(PluginDock):
         self.body.addLayout(buttons)
 
         judge = QHBoxLayout()
-        self.next_button = QPushButton(_tr("次の要確認へ"))
+        self.next_button = emphasize(QPushButton(_tr("次の要確認へ")), LIGHT)
         self.next_button.setToolTip(_tr("要確認のうち確信度の最も低い結果を選んで表示"))
         self.next_button.clicked.connect(lambda: self.next_to_review())
-        self.accept_button = QPushButton(_tr("正（記録して次へ）"))
+        self.accept_button = emphasize(QPushButton(_tr("正（記録して次へ）")))
         self.accept_button.setToolTip(_tr("選んだ結果を観測記録として記録（学習の教師データになる）し、次の要確認へ"))
         self.accept_button.clicked.connect(lambda: self.accept_rows(self.selected_rows()))
-        self.reject_button = QPushButton(_tr("誤検出（次へ）"))
+        self.reject_button = emphasize(QPushButton(_tr("誤検出（次へ）")))
         self.reject_button.setToolTip(_tr("選んだ結果を誤検出として、その周りを確認範囲（何もない所）に記録し、次の要確認へ。"
                                           "学習ではその周りを背景として学習。確認範囲を削除すると取り消し"))
         self.reject_button.clicked.connect(lambda: self.reject_rows(self.selected_rows()))
@@ -666,16 +680,21 @@ class AiResultsDock(PluginDock):
             self._read_around(image_id)
             return
         rows, found = [], []
+        rules_of: dict[int, Any] = {}
         for row, (source, r) in enumerate(self.rows):
-            if r.tag in self.imported or source.candidate_radius <= 0:
+            if r.tag in self.imported:
+                continue
+            # The source's own matching, else the settings file's aiContinuation, else as before rules could be set.
+            rules = rules_of.setdefault(id(source), rules_for(source, self.context.config))
+            if not rules.on:
                 continue
             place = place_of(r)
             if place is None:
                 continue
             entry = import_entry(r, source, place[0], place[1], place[2], place[3])
+            ring = ring_of(r) or outline_of(entry.lon, entry.lat, entry.length, entry.width, entry.heading)
             rows.append(row)
-            found.append(Found(entry.lon, entry.lat, entry.kind, entry.length, entry.heading,
-                               source.continue_radius, source.candidate_radius))
+            found.append(Found(entry.lon, entry.lat, entry.kind, entry.length, entry.heading, score=r.score, ring=ring, rules=rules))
         if not found:
             return
         for row, c in zip(rows, continuations(found, book.carried_for(image_id), book.kept_taxonomy())):
@@ -692,8 +711,7 @@ class AiResultsDock(PluginDock):
             tag = self.rows[row][1].tag
             chosen = self.picks.get(tag, c.pick.object_id if c.pick else "")
             box.setCurrentIndex(max(0, box.findData(chosen)))
-            box.setToolTip(_tr("自動で継続（近く、分類と長さが合い、紛らわしいものがない）") if c.tier == AUTO
-                           else _tr("継続の候補あり（近いが確かでない）: 選ぶと継続として記録"))
+            box.setToolTip(_continue_tip(c))
             box.currentIndexChanged.connect(lambda _i, b=box, t=tag: self.picks.__setitem__(t, b.currentData() or ""))
             self.list.setItemWidget(item, 6, box)
 
@@ -880,7 +898,7 @@ class AiResultsDock(PluginDock):
             entry.carry = self.chosen_carry(row)
             if entry.carry is not None:
                 c = self.continued[row]
-                how = "自動継続" if c.pick is not None and c.pick.object_id == entry.carry.object_id else "選択継続"
+                how = c.tag if c.pick is not None and c.pick.object_id == entry.carry.object_id else "選択継続"
                 entry.note = f"{entry.note} [{how}]"
             entries.append(entry)
             done_rows.append(row)

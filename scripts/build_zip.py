@@ -6,6 +6,16 @@ Builds the plugin's zip for QGIS (Plugins → Install from ZIP): dist/mikage-<ve
     python3 scripts/build_zip.py --config my.json --lock-config   # ...and the plugin reads only that file
     python3 scripts/build_zip.py --win64              # the Windows zip: -win64.zip, with onnxruntime, onnxruntime-genai, sgp4 and tzdata inside
     python3 scripts/build_zip.py --version 0.4.0.20261108123000   # the zip's metadata.txt says this version (scripts/make_plugin_repo.py)
+    python3 scripts/build_zip.py --training-only      # MIKAGE 練習版: dist/mikage_training-<version>.zip (with --win64 / --config too)
+
+MIKAGE 練習版 (--training-only) is the same code as another plugin: its
+folder (QGIS's plugin id) is mikage_training, its metadata.txt names it
+「MIKAGE 練習版」, and the marker mikage_training/training.only makes it run
+練習モード only (mikage/core/edition.py). A settings file shipped with it
+(--config) is read only for what 練習モード takes of a production (the
+`training` settings, the masters, the practice catalogs, the
+organisation's exercises); without one it practises on the built-in sample.
+scheduled_follow.py (a production job) is left out of it.
 
 The Windows zip carries ONNX Runtime (for the AI tools, built for QGIS's
 Python 3.12), ONNX Runtime GenAI (文章の手伝い's small generative model, on
@@ -40,8 +50,24 @@ BUNDLED = ("config.json", "config.jsonc")
 #: The marker that locks the plugin to its shipped settings file (qgis_io/settings.LOCK_NAME).
 LOCK = "config.lock"
 LOCK_TEXT = "同梱の設定ファイル（config.json / config.jsonc）だけを読む。ほかの設定ファイルは指定不可（scripts/build_zip.py --lock-config）\n"
-#: Where the Windows zip keeps its packages.
-WIN64 = "mikage/ext/win64"
+#: The plugin's folder in the zip (QGIS's plugin id), by version (core/edition.py's FULL_ID / TRAINING_ID).
+FOLDERS = {False: "mikage", True: "mikage_training"}
+#: MIKAGE 練習版's marker (core/edition.MARKER) and its text.
+TRAINING_MARKER = "training.only"
+TRAINING_MARKER_TEXT = "MIKAGE 練習版: 練習モードだけで動く（scripts/build_zip.py --training-only）\n"
+#: What MIKAGE 練習版 leaves out of the plugin's folder: a production job run without QGIS.
+NOT_IN_TRAINING = {"scheduled_follow.py"}
+#: MIKAGE 練習版's metadata.txt lines (the rest as metadata.txt has them).
+TRAINING_METADATA = {
+    "name": "MIKAGE 練習版",
+    "description": "MIKAGE 練習版: 練習モードだけで動く MIKAGE（研修用）。起動すると練習用のデータで動き、本番には切り替えない（Training-only edition of MIKAGE）",
+    "about": ("MIKAGE と同じコードで、練習モード（練習用のデータ、チュートリアル、判読の練習）だけを使える版。QGIS を起動すると自動で練習モードに入り、"
+              "本番の設定ファイルや表には切り替えない。同梱の設定ファイルからは、練習モードが本番から読むもの（衛星や分類体系、練習用の画像カタログ、"
+              "組織の判読の練習）だけを使う。本番の MIKAGE と同じ QGIS に入れられ（同時に有効にはしない）、個人設定も別に持つ。"),
+    "icon": "resources/icon-training.svg",
+}
+#: Where the Windows zip keeps its packages (under the plugin's folder: mikage/ext/win64).
+WIN64_SUB = "ext/win64"
 #: What of ONNX Runtime's package is carried: its core (the converters, quantization and tools are left out).
 ONNXRUNTIME_KEEP = {"__init__.py", "capi", "LICENSE", "ThirdPartyNotices.txt", "Privacy.md"}
 #: What of ONNX Runtime GenAI's package is left out: its model converter (run once by an administrator, with PyTorch, not in QGIS).
@@ -95,16 +121,27 @@ def wheel_files(path: str, package: str, keep=None, skip=(), drop=()) -> list[tu
     return out
 
 
-def stamp_version(path: str, version: str) -> str:
-    """metadata.txt's text with its version line saying `version` (the rest as written)."""
+def stamp_version(path: str, version: str, training_only: bool = False) -> str:
+    """metadata.txt's text with its version line saying `version` (the rest as written; MIKAGE 練習版's name, description, about and icon)."""
     with open(path, encoding="utf-8") as f:
         text = f.read()
-    return re.sub(r"(?m)^version\s*=.*$", f"version={version}", text, count=1)
+    text = re.sub(r"(?m)^version\s*=.*$", f"version={version}", text, count=1)
+    if training_only:
+        for key, value in TRAINING_METADATA.items():
+            text = re.sub(rf"(?m)^{key}\s*=.*$", lambda _m: f"{key}={value}", text, count=1)
+        text = re.sub(r"(?m)^(tags\s*=.*)$", lambda m: m.group(1) + ",training", text, count=1)
+    return text
 
 
 def main(config: str = "", out_dir: str = "", win64: bool = False, onnxruntime_wheel: str = "", sgp4_wheel: str = "",
-         tzdata_wheel: str = "", lock_config: bool = False, version: str = "", onnxruntime_genai_wheel: str = "") -> str:
-    """Builds the zip; `version` (when given) replaces metadata.txt's in the zip, as an internal plugin repository needs a new one for each release."""
+         tzdata_wheel: str = "", lock_config: bool = False, version: str = "", onnxruntime_genai_wheel: str = "",
+         training_only: bool = False) -> str:
+    """
+    Builds the zip; `version` (when given) replaces metadata.txt's in the zip, as an internal plugin repository needs a
+    new one for each release. `training_only`: MIKAGE 練習版 (mikage_training-<version>.zip).
+    """
+    if training_only and lock_config:
+        raise SystemExit("--training-only に --lock-config は不要（練習版はいつも同梱の設定ファイルだけを読む）")
     if version and not re.fullmatch(r"[0-9]+(\.[0-9]+)*", version):
         raise SystemExit(f"版の書き方が違う: {version}（数字とピリオドだけ、例 0.4.0.20261108123000）")
     meta = configparser.ConfigParser()
@@ -128,26 +165,31 @@ def main(config: str = "", out_dir: str = "", win64: bool = False, onnxruntime_w
         carried += wheel_files(wheel("onnxruntime_genai", onnxruntime_genai_wheel, cache), "onnxruntime_genai", drop=GENAI_DROP)
         carried += wheel_files(wheel("sgp4", sgp4_wheel, cache), "sgp4", skip=("tests.py", "SGP4-VER.TLE", "tcppver.out"))
         carried += wheel_files(wheel("tzdata", tzdata_wheel, cache, "none-any"), "tzdata")
-    target = os.path.join(out_dir, f"mikage-{version}{'-win64' if win64 else ''}.zip")
+    top = FOLDERS[bool(training_only)]
+    target = os.path.join(out_dir, f"{top}-{version}{'-win64' if win64 else ''}.zip")
     with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as z:
         for folder, dirs, files in os.walk(PLUGIN):
             dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS)
             if folder == os.path.join(PLUGIN, "help"):
                 dirs[:] = [d for d in dirs if d != "src"]  # the help's parts: index.html is built from them (scripts/build_help.py)
             for name in sorted(files):
-                if name.endswith(".pyc") or (folder == PLUGIN and (name == LOCK or (config and name in BUNDLED))):
+                if name.endswith(".pyc") or (folder == PLUGIN and (name in (LOCK, TRAINING_MARKER) or (config and name in BUNDLED))):
+                    continue
+                if folder == PLUGIN and training_only and name in NOT_IN_TRAINING:
                     continue
                 path = os.path.join(folder, name)
                 if folder == PLUGIN and name == "metadata.txt":
-                    z.writestr("mikage/metadata.txt", stamp_version(path, version))
+                    z.writestr(f"{top}/metadata.txt", stamp_version(path, version, training_only))
                     continue
-                z.write(path, os.path.relpath(path, ROOT))
+                z.write(path, os.path.join(top, os.path.relpath(path, PLUGIN)))
         if config:
-            z.write(config, os.path.join("mikage", "config.jsonc" if config.endswith(".jsonc") else "config.json"))
+            z.write(config, os.path.join(top, "config.jsonc" if config.endswith(".jsonc") else "config.json"))
         if lock:
-            z.writestr(f"mikage/{LOCK}", LOCK_TEXT)
+            z.writestr(f"{top}/{LOCK}", LOCK_TEXT)
+        if training_only:
+            z.writestr(f"{top}/{TRAINING_MARKER}", TRAINING_MARKER_TEXT)
         for name, data in carried:
-            z.writestr(f"{WIN64}/{name}", data)
+            z.writestr(f"{top}/{WIN64_SUB}/{name}", data)
     return target
 
 
@@ -161,7 +203,8 @@ if __name__ == "__main__":
     parser.add_argument("--onnxruntime-genai-wheel", default="", help="同梱する onnxruntime-genai の wheel（cp312 win_amd64、指定なしで pip で取得）")
     parser.add_argument("--version", default="", help="zip の metadata.txt に書く版（指定なしで metadata.txt のまま）")
     parser.add_argument("--sgp4-wheel", default="", help="同梱する sgp4 の wheel（win_amd64、指定なしで pip で取得）")
+    parser.add_argument("--training-only", action="store_true", help="MIKAGE 練習版（練習モードだけで動く別のプラグイン、mikage_training-….zip）")
     args = parser.parse_args()
     print(main(args.config, win64=args.win64, onnxruntime_wheel=args.onnxruntime_wheel, sgp4_wheel=args.sgp4_wheel,
                tzdata_wheel=args.tzdata_wheel, lock_config=args.lock_config, version=args.version,
-               onnxruntime_genai_wheel=args.onnxruntime_genai_wheel))
+               onnxruntime_genai_wheel=args.onnxruntime_genai_wheel, training_only=args.training_only))

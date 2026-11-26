@@ -20,7 +20,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Callable, Optional
 
-from qgis.core import QgsFeature, QgsGeometry, QgsProject, QgsSettings, QgsVectorLayer, QgsWkbTypes
+from qgis.core import QgsFeature, QgsGeometry, QgsProject, QgsVectorLayer, QgsWkbTypes
 from qgis.gui import QgsColorButton, QgsRubberBand
 from qgis.PyQt.QtCore import QDateTime, Qt, QTimer
 from qgis.PyQt.QtGui import QBrush, QColor, QFont
@@ -34,7 +34,7 @@ from ..core.named_areas import (
     AREA_USES, ORG_ROLES, PRIORITY_DEFAULT, PRIORITY_MAX, USE_BOTH, USE_INTEREST, USE_PLACE, OrgArea, alias_text, aliases_of,
     blank_count, category_names, category_tree, children_of,
 )
-from ..qgis_io import map_tools
+from ..qgis_io import map_tools, qsettings
 from ..qgis_io.geometry import from_wgs84, shape_of, shape_rings, to_wgs84
 from ..qgis_io.org_areas_io import OrgAreaBook, box_of, geometry_of, layer_of, remove_layer, select_on_map, show_layer
 from ..qgis_io.tasks import run_task
@@ -43,7 +43,7 @@ from .docks import ask_no, plain_label, plain_tip
 from .flow_layout import FlowLayout
 
 #: Whether the areas of interest are kept on the map (the person's choice; off until turned on).
-ON_MAP_KEY = "mikage/orgAreasOnMap"
+ON_MAP_KEY = "orgAreasOnMap"
 #: The list's ways (並び).
 BY_CATEGORY, BY_PARENT, FLAT = "category", "parent", "flat"
 WAYS = ((BY_CATEGORY, "カテゴリー別"), (BY_PARENT, "上位の地域別"), (FLAT, "一覧"))
@@ -469,7 +469,7 @@ class OrgAreasPanel(QWidget):
 
     @staticmethod
     def wanted_on_map() -> bool:
-        return QgsSettings().value(ON_MAP_KEY, False, type=bool)
+        return qsettings.value(ON_MAP_KEY, False, type=bool)
 
     def chosen(self) -> list[OrgArea]:
         out = []
@@ -1094,7 +1094,7 @@ class OrgAreasPanel(QWidget):
         self.canvas.refresh()
 
     def _map_toggled(self, on: bool) -> None:
-        QgsSettings().setValue(ON_MAP_KEY, on)
+        qsettings.set_value(ON_MAP_KEY, on)
         if on:
             self._place_layer(False)
         else:
@@ -1134,7 +1134,7 @@ class OrgAreasPanel(QWidget):
         if self._removing or layer is None or layer.id() not in set(ids):
             return
         if len(ids) < len(QgsProject.instance().mapLayers()):
-            QgsSettings().setValue(ON_MAP_KEY, False)
+            qsettings.set_value(ON_MAP_KEY, False)
         QTimer.singleShot(0, self._update_buttons)
 
     def open_categories(self) -> None:

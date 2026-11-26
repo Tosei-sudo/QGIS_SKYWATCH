@@ -50,6 +50,7 @@ from ..qgis_io.geometry import shape_of, shape_rings, to_wgs84
 from ..qgis_io.tasks import run_task
 from .catalog_overlay import DrawTool
 from .docks import plain_label
+from .emphasis import emphasize
 from .fit import VerticalScroll, fit_text
 from .flow_layout import FlowLayout
 from .last_inputs import InputMemory
@@ -464,6 +465,7 @@ class RequestForm(QDialog):
         outer.addWidget(self.message)
         box = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         box.button(QDialogButtonBox.StandardButton.Save).setText(self.tr("保存"))
+        emphasize(box.button(QDialogButtonBox.StandardButton.Save))
         box.button(QDialogButtonBox.StandardButton.Cancel).setText(self.tr("閉じる"))
         box.accepted.connect(self._save_clicked)
         box.rejected.connect(self.reject)

@@ -153,3 +153,62 @@ def test_a_detection_layers_tags_name_its_run():
     # To the second (a database may keep no less), and either unknown.
     assert same_run(1794013200000, 1794013200999) and not same_run(1794013202000, 1794013200000)
     assert same_run(None, 5) and same_run(5, None)
+
+
+def test_how_results_are_matched_is_set_in_the_settings_file():
+    from mikage.core.ai_results import output_source, rules_for
+    from mikage.core.ai.transfer import detection_output_of
+
+    rules = [{"label": "外形の中", "centerInRecord": True, "kind": "sibling"},
+             {"near": 50, "kind": "related", "lengthGap": 0.3, "headingGap": 30, "minScore": 0.6}]
+    config, problems = parse_config({"aiContinuation": {"rules": rules, "candidateRadius": 200, "unique": False}})
+    assert problems == []
+    s, _ = source()
+    r = rules_for(s, config)
+    assert (r.on, r.candidate_radius, r.unique, [x.label for x in r.rules]) == (True, 200, False, ["外形の中", ""])
+    first, second = r.rules
+    assert (first.center_in_record, first.kind, first.near) == (True, "sibling", None)
+    assert (second.near, second.length_gap, second.heading_gap, second.min_score, second.default) == (50, 0.3, 30, 0.6, False)
+    assert second.text == "50 m 以内・同系の分類・長さの差 30% 以内・向きの差 30° 以内・確信度 0.60 以上"
+    # None written: as before rules could be set.
+    r = rules_for(s, parse_config({})[0])
+    assert (r.on, r.candidate_radius, r.unique) == (True, 300, True) and [(x.near, x.default) for x in r.rules] == [(50, True)]
+    # A source's own keys win, key by key; the older ones too.
+    own, problems = source(continuation={"rules": [{"recordInAi": True}]})
+    assert problems == []
+    r = rules_for(own, config)
+    assert (r.candidate_radius, r.unique, [x.record_in_ai for x in r.rules]) == (200, False, [True])
+    old, _ = source(continueRadius=80)
+    r = rules_for(old, config)
+    assert [(x.near, x.default) for x in r.rules] == [(80, True)] and r.candidate_radius == 200
+    assert not rules_for(source(candidateRadius=0)[0], config).on
+    assert not rules_for(source(continuation=False)[0], config).on
+    assert not rules_for(s, parse_config({"aiContinuation": False})[0]).on
+    # The plugin's own detections and the tables read back follow aiContinuation.
+    out = detection_output_of({"label": "転記先", "url": URL, "fields": {"imageId": "IMAGE_ID"}}, [], 0)
+    table = output_source(out)
+    assert table is not None and rules_for(table, config).candidate_radius == 200
+
+
+def test_what_is_wrong_in_a_matching_setting():
+    _, problems = parse_config({"aiContinuation": {"rules": [{"kind": "same"}, {"near": -1}, {"centerInRecord": "yes", "overlap": 2},
+                                                             {"near": 10, "kind": "all", "lengthGap": 3, "extra": 1}, "x"],
+                                                   "candidateRadius": "a", "unique": 1, "radius": 5}})
+    at = "aiContinuation"
+    assert problems == [
+        f"{at} の radius は使えないキー（rules / candidateRadius / unique）",
+        f"{at} の rules[0] に位置の条件（near・centerInRecord・recordInAi・overlap のどれか）なし",
+        f"{at} の rules[1] の near は 0〜100000（m）で指定",
+        f"{at} の rules[1] に位置の条件（near・centerInRecord・recordInAi・overlap のどれか）なし",
+        f"{at} の rules[2] の overlap は 0〜1 で指定",
+        f"{at} の rules[2] の centerInRecord は true か false で指定",
+        f"{at} の rules[2] に位置の条件（near・centerInRecord・recordInAi・overlap のどれか）なし",
+        f"{at} の rules[3] の extra は使えない条件（label / near / centerInRecord / recordInAi / overlap / kind / lengthGap / headingGap / minScore）",
+        f"{at} の rules[3] の lengthGap は 0〜1 で指定",
+        f"{at} の rules[3] の kind は same / related / sibling / any で指定",
+        f"{at} の rules[4] は条件のオブジェクトで指定",
+        f"{at} の candidateRadius は 0〜100000（m）で指定",
+        f"{at} の unique は true か false で指定",
+    ]
+    _, problems = source(continuation=[1])
+    assert problems == ["aiResultSources[0] の continuation は false かオブジェクト（rules・candidateRadius・unique）で指定"]

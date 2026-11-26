@@ -65,6 +65,7 @@ from ..qgis_io.geometry import from_wgs84, multipolygon_of, polygon_of, shape_of
 from ..qgis_io.request_io import load_schema
 from ..qgis_io.tasks import run_task
 from .docks import PluginDock, ask_no, plain_label, plain_tip
+from .emphasis import emphasize
 from .fit import fit_text
 from .flow_layout import FlowLayout
 from .list_views import column_menus
@@ -293,7 +294,7 @@ class ScheduleDock(PluginDock):
         answer.addWidget(self.reason)
         layout.addLayout(answer)
         more = FlowLayout()
-        self.import_button = QPushButton(self.tr("結果ファイルの取り込み…"))
+        self.import_button = emphasize(QPushButton(self.tr("結果ファイルの取り込み…")))
         self.import_button.setToolTip(self.tr("システムから返ってきた採否のファイルを読み込み、採用・不採用と要求外の計画を記録（表示中の日でなく、ファイルの行の日に記録）"))
         self.import_button.clicked.connect(lambda: self.import_file())
         self.add_button = QPushButton(self.tr("要求外を追加…"))

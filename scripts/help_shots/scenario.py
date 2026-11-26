@@ -31,6 +31,7 @@ from qgis.PyQt.QtWidgets import (
     QDialogButtonBox,
     QDockWidget,
     QMessageBox,
+    QScrollArea,
     QToolBar,
     QWidget,
 )
@@ -607,6 +608,10 @@ def flow_request():
     # 2-6 依頼者・メモ・保存.
     form.requester.setText("田中（第1班）")
     form.note.setPlainText("岸壁の船の入れ替わりを確認したい")
+    # The form scrolled to the memo (the form grew: 「地域から…」, its rows above).
+    scroll = form.findChild(QScrollArea)
+    if scroll is not None:
+        scroll.ensureWidgetVisible(form.note)
     yield 500
     box = form.findChildren(QDialogButtonBox)[0]
     save = box.button(QDialogButtonBox.StandardButton.Save)

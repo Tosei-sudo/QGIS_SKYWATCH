@@ -16,7 +16,7 @@ from typing import Any, Callable, Optional
 from . import errors
 from .ai.model_config import AiModelConfig, ai_model_of
 from .ai.transfer import DetectionOutput, detection_output_of
-from .ai_results import AiResultSource, ai_result_source_of
+from .ai_results import AiResultSource, ai_continuation_of, ai_result_source_of
 from .auth import ArcgisPortalConfig, arcgis_portal_of
 from .sign_in import SignInRule, sign_in_rules_of
 from .audit import DEFAULT_AUDIT, AuditSettings, audit_log_of
@@ -127,6 +127,9 @@ class PluginConfig:
     detection_outputs: list[DetectionOutput] = field(default_factory=list)
     #: External AI results shown for the image opened from the catalog (「外部AI結果」).
     ai_result_sources: list[AiResultSource] = field(default_factory=list)
+    #: How AI results are matched with the things of the images before and after (継続): `aiContinuation`'s keys
+    #: as written (ai_results.rules_for; a source's own `continuation` wins).
+    ai_continuation: dict = field(default_factory=dict)
     #: The zone each source's dates are really in, when the service says otherwise:
     #: the `timeZone` of a source entry (its URLs and the layers under them), then `timeZones` rules.
     time_zones: list[TimeZoneRule] = field(default_factory=list)
@@ -378,6 +381,7 @@ SECTIONS = (
     Section("aiModels", "ai_models", ai_model_of, listed=True),
     Section("detectionOutputs", "detection_outputs", detection_output_of, listed=True),
     Section("aiResultSources", "ai_result_sources", ai_result_source_of, listed=True),
+    Section("aiContinuation", "ai_continuation", ai_continuation_of),
     Section("timeZones", "time_zones", time_zones_of, whole=True),
     Section("requestStores", "request_stores", request_store_of, listed=True),
     Section("requestExports", "request_exports", export_systems_of),

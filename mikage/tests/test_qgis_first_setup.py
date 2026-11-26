@@ -9,6 +9,7 @@ APP = start_app()
 from qgis.core import QgsSettings  # noqa: E402
 from qgis.PyQt.QtCore import Qt  # noqa: E402
 
+from mikage.qgis_io import qsettings  # noqa: E402
 from mikage.qgis_io import roles_io, settings  # noqa: E402
 from mikage.tests.qgis_fakes import FakeIface, wait_for  # noqa: E402
 from mikage.ui import first_setup  # noqa: E402
@@ -58,7 +59,7 @@ def test_the_page_comes_on_the_first_start_only():
     assert short == []
     page.reject()  # 「あとで」 also counts: not again
     plugin.unload()
-    assert QgsSettings().value(first_setup.DONE_KEY) == "1"
+    assert QgsSettings().value(qsettings.key(first_setup.DONE_KEY)) == "1"
     plugin = start(fresh=False)
     APP.processEvents()
     assert not first_setup.is_first_start() and plugin.setup_dialog is None
@@ -69,7 +70,7 @@ def test_an_update_of_a_profile_used_before_shows_nothing():
     # Before this page: the plugin's settings are there, the mark is not.
     QgsSettings().setValue("mikage/recorder", "山田")
     assert not first_setup.is_first_start()
-    assert QgsSettings().value(first_setup.DONE_KEY) == "1"
+    assert QgsSettings().value(qsettings.key(first_setup.DONE_KEY)) == "1"
 
 
 def test_a_role_with_docks_in_windows_of_their_own_and_own_settings():
@@ -164,7 +165,7 @@ def test_the_docks_stay_where_they_are_when_asked():
 
 
 def test_the_one_role_chosen_before_becomes_the_ticked_one():
-    QgsSettings().setValue(first_setup.DONE_KEY, "1")
+    QgsSettings().setValue(qsettings.key(first_setup.DONE_KEY), "1")
     QgsSettings().setValue("mikage/role", "画像判読")
     plugin = start(fresh=False)
     assert plugin.role_keeper.names == ["画像判読"] and first_setup.roles() == ["画像判読"]

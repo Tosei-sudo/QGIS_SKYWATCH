@@ -40,6 +40,7 @@ from ..qgis_io.tasks import error_text, run_task
 from . import shortcuts
 from .docks import PluginDock, ask_no, plain_label, plain_tip
 from .elided_combo import ElidedCombo
+from .emphasis import LIGHT, emphasize
 from .flow_layout import FlowLayout
 from .kind_levels import KindLevels
 from .note_assist import NoteAssist
@@ -234,6 +235,9 @@ class ObservationDock(
                                         self._toggle_list_form, checkable=True)
         self.image_event_button = self._button("⚑", tr("この画像を対応中のイベント（地震対応など）に追加"),
                                                 lambda: self.add_image_to_event())
+        # The much used (ui/emphasis.py): going through the images, both ways.
+        emphasize(self.prev_button, LIGHT)
+        emphasize(self.next_button, LIGHT)
         self.image_event_button.hide()
         self.only = QCheckBox(tr("この画像のみ"))
         self.only.setToolTip(tr("この画像だけを地図に表示"))
@@ -346,7 +350,8 @@ class ObservationDock(
 
         # Recording.
         row = QHBoxLayout()
-        self.record_button = self._button(tr("クリック記録"), tr("クリック地点にこの画像の観測を記録（R）"), self._record_pressed, checkable=True)
+        self.record_button = emphasize(self._button(tr("クリック記録"), tr("クリック地点にこの画像の観測を記録（R）"), self._record_pressed,
+                                                    checkable=True))
         self.points_select = QComboBox()
         for n, label in POINT_CHOICES:
             self.points_select.addItem(tr(label), n)
@@ -359,6 +364,7 @@ class ObservationDock(
         self.points_select.currentIndexChanged.connect(lambda _i: self.set_points(self.points_select.currentData()))
         self.area_button = self._button(tr("確認範囲"), tr("確認済みの範囲を記録（A）。範囲内で記録のないモノは消失"),
                                         self.set_area_mode, checkable=True)
+        emphasize(self.area_button, LIGHT)
         # 不可範囲 (tsudo 2026-11-19): a part of the image under cloud, haze…; the things there are 「不可」, not 消失.
         self.unseen_area_button = self._button(tr("不可範囲"), tr("雲などで判読できない範囲を記録（K）\n中の前後の画像のモノは「不可」として記録。消失にはしない"),
                                                lambda on: self.set_area_mode(on, unseen=True), checkable=True)
@@ -393,6 +399,7 @@ class ObservationDock(
         self.carry_label = QLabel()
         self.carry_all_button = self._button(tr("すべて継続"), tr("前後の画像のモノ（白抜きの印）を、この画像でも継続として一括記録。確認範囲内と不可範囲内のものは除く"),
                                              self.carry_all)
+        emphasize(self.carry_all_button, LIGHT)
         self.absent_all_button = self._button(tr("すべて消失"), tr("前後の画像のモノ（白抜きの印）を、この画像での消失として一括記録。不可範囲内のものは除く"),
                                               self.absent_all)
         self.absent_inside_button = self._button("", tr("確認範囲内で記録のない前後の画像のモノを、この画像での消失として一括記録"), self.absent_inside)
@@ -546,6 +553,10 @@ class ObservationDock(
         self.unseen_menu = QMenu(self.unseen_button)
         self.unseen_button.setMenu(self.unseen_menu)
         self.unseen_button.clicked.connect(lambda _on=False: self.submit(False, unseen=self._unseen_reason()))
+        # The much used (ui/emphasis.py): 「記録」 every time, 「消失」「不可」 often; 「削除」 plain.
+        emphasize(self.submit_button)
+        emphasize(self.absent_button, LIGHT)
+        emphasize(self.unseen_button, LIGHT)
         self.delete_button = self._button(tr("削除"), tr("この記録を削除（「詳細 ▸ 削除済みも表示」で復元できる）"), self._delete_pending)
         self.alert_button = self._button(tr("通報"), tr("この記録を通報文に追加（通報の条件に合わなくても）"),
                                          lambda: self.add_to_alerts([self.pending[2]]) if self.pending and self.pending[2] else None)
