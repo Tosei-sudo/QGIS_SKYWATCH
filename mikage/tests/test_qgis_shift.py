@@ -314,3 +314,64 @@ def test_with_a_group_chosen_every_image_under_it_moves_by_the_same(group_plugin
     assert shift.group() is None and shift.targets() == [a]
     tool.keyPressEvent(QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Up, Qt.KeyboardModifier.NoModifier))
     assert shift_io.get_shift(a)[1] == pytest.approx(per_pixel) and shift_io.get_shift(b) == (0, 0)
+
+
+def test_an_image_in_quick_pansharpen_moves_with_its_pan(tmp_path, monkeypatch):
+    """クイックパンシャープン (tsudo 2026-11-27): the picture moves as one, still sharpened, whichever of the two is chosen."""
+    from mikage.qgis_io import enhance_renderer as er
+    from mikage.qgis_io import quick_pan as qp
+    from mikage.tests.test_qgis_quick_pan import X0, Y0, images, shown, started
+
+    monkeypatch.setattr(shift_io, "shifts_folder", lambda: str(tmp_path))
+    QgsSettings().remove("mikage")
+    settings.set_config_source("")
+    iface = FakeIface()
+    p = small_plugin(iface, Enhance)
+    p.initGui()
+    try:
+        for dock in p.docks.values():
+            dock.hide()
+        pan, ms = images(tmp_path)
+        link = started(ms, pan)
+        canvas = iface.canvas
+        canvas.setDestinationCrs(ms.crs())
+        canvas.setLayers([ms])
+        canvas.resize(400, 400)
+        canvas.setExtent(QgsRectangle(X0, Y0 - 240, X0 + 240, Y0))
+        iface.setActiveLayer(ms)
+        shift = p.api.shift
+        shift.action.trigger()
+        per_pixel = canvas.mapUnitsPerPixel()
+        tool = shift.tool
+        tool.canvasPressEvent(at(canvas, QEvent.Type.MouseButtonPress, 100, 100))
+        # The drag's copy: the picture as the map shows it (sharpened).
+        assert shift.overlay.image is not None
+        tool.canvasReleaseEvent(at(canvas, QEvent.Type.MouseButtonRelease, 110, 95))
+        assert shift_io.get_shift(ms) == pytest.approx((10 * per_pixel, 5 * per_pixel))
+        assert shift_io.get_shift(pan) == shift_io.get_shift(ms)
+        # Still sharpened, the pan hidden, the model as it was (the two where they were to each other).
+        assert qp.link_of(ms) is link and not shown(pan) and er.enhance_renderer(ms).state.pan is link
+        assert link.as_fitted() and not link.fitting
+        assert "ずらし量: 東 +" in shift.readout_of(shift.targets())
+        # The (hidden) pan chosen: the image moves with it.
+        iface.setActiveLayer(pan)
+        tool.keyPressEvent(QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Right, Qt.KeyboardModifier.NoModifier))
+        assert shift_io.get_shift(pan)[0] == pytest.approx(11 * per_pixel) and shift_io.get_shift(ms) == shift_io.get_shift(pan)
+        # By metres (the API) too.
+        shift.set_shift_metres(ms, 20, 0)
+        assert shift_io.get_shift(pan) == pytest.approx(shift_io.get_shift(ms)) and shift_io.get_shift(ms)[1] == 0
+        assert link.as_fitted()
+        # 「位置ずらしの解除」: both back where their files say, still sharpened.
+        iface.setActiveLayer(ms)
+        shift.reset()
+        assert shift_io.get_shift(ms) == (0, 0) and shift_io.get_shift(pan) == (0, 0)
+        assert ms.extent().xMinimum() == X0 and pan.extent().xMinimum() == X0
+        assert qp.link_of(ms) is link and link.as_fitted() and not shown(pan)
+        # Once it has ended, the image moves alone.
+        qp.stop(ms)
+        tool.keyPressEvent(QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Right, Qt.KeyboardModifier.NoModifier))
+        assert shift_io.get_shift(ms)[0] == pytest.approx(per_pixel) and shift_io.get_shift(pan) == (0, 0)
+    finally:
+        p.unload()
+        QgsProject.instance().removeAllMapLayers()
+        QgsSettings().remove("mikage")
