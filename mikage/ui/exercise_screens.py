@@ -36,6 +36,7 @@ from ..core.training.api import (
     best_of, CHANGE, exam_taken, EXAM, Exercise, ITEM_NAMES, kind_text, MEASURE, MISSED, MISSED_BONUS, mistaken, Outcome,
     RIGHT, tries_of,
 )
+from .emphasis import emphasize
 from .fit import fit_text
 
 #: The names the tests and the help's pictures find the windows by.
@@ -294,8 +295,7 @@ class ExerciseBar(QWidget):
         self.quit.clicked.connect(self.quit_pressed)
         self.submit = QPushButton(self.tr("提出して答え合わせ"))
         self.submit.setDefault(True)
-        self.submit.setStyleSheet("QPushButton { background: #2563eb; color: white; border-radius: 3px; padding: 4px 12px; }"
-                                  " QPushButton:disabled { background: #93c5fd; }")
+        emphasize(self.submit)
         self.submit.clicked.connect(self.submit_pressed)
         for b in (self.hint, self.area, self.quit):
             row.addWidget(b)
@@ -494,7 +494,7 @@ class ReviewWindow(QWidget):
         self.again.setVisible(not e.exam)
         self.again.clicked.connect(self.again_pressed)
         self.next = QPushButton(self.tr("次の問題へ") if has_next else self.tr("問題の一覧へ"))
-        self.next.setStyleSheet("QPushButton { background: #2563eb; color: white; border-radius: 3px; padding: 4px 12px; }")
+        emphasize(self.next)
         self.next.clicked.connect(self.next_pressed)
         close = QPushButton(self.tr("閉じる"))
         close.clicked.connect(self.close)

@@ -59,6 +59,7 @@ from .catalog_overlay import DrawTool
 from .exercise_map import ClickTool, ExerciseMarks, fit_into, free_part, Spot
 from .exercise_screens import BAD, GOOD, GREY, ORANGE
 from .docks import ask_no
+from .emphasis import emphasize
 from .fit import fit_text
 
 #: The names the tests and the help's pictures find the windows by.
@@ -454,8 +455,7 @@ class ExerciseEditor(QDialog):
         self.try_button.setToolTip(self.tr("保存してから、練習モードでみんなと同じように解く（試した結果は残らない）"))
         self.save_button = QPushButton(self.tr("保存"))
         self.save_button.setDefault(True)
-        self.save_button.setStyleSheet("QPushButton { background: #2563eb; color: white; border-radius: 3px; padding: 4px 14px; }"
-                                       " QPushButton:disabled { background: #93c5fd; }")
+        emphasize(self.save_button)
         self.close_button = QPushButton(self.tr("閉じる"))
         for b in (self.try_button, self.save_button, self.close_button):
             row.addWidget(b)

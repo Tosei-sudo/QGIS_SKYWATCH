@@ -48,6 +48,7 @@ from ..qgis_io.file_manager import show_folder
 from .catalog_model import CatalogModel
 from .catalog_overlay import DrawTool, FootprintOverlay, FootprintTool
 from .docks import PluginDock, plain_label
+from .emphasis import LIGHT, emphasize
 from .flow_layout import FlowLayout
 from .list_views import ListViews, MenuToolButton
 from .map_orient import release_orienter, shared_orienter
@@ -138,6 +139,7 @@ class CatalogDock(
         self.draw_button.setCheckable(True)
         self.draw_button.setToolTip(self.tr("クリックで頂点を追加（描いている形は地図に表示）、ダブルクリックか右クリックで確定、Esc で取消"))
         self.draw_button.toggled.connect(self._draw_toggled)
+        emphasize(self.draw_button, LIGHT)
         # 「保存…」: the area drawn kept under a name, chosen again later from 「保存した範囲」.
         self.save_area_button = QPushButton(self.tr("保存…"))
         self.save_area_button.setToolTip(self.tr("描いた範囲に名前を付けて保存。あとで「保存した範囲」から選べる（自分の PC に保存）"))
@@ -253,7 +255,7 @@ class CatalogDock(
         self.body.addWidget(self.similar)
 
         row = QHBoxLayout()
-        self.search_button = QPushButton(self.tr("検索"))
+        self.search_button = emphasize(QPushButton(self.tr("検索")))
         self.search_button.clicked.connect(self.search)
         row.addWidget(self.search_button)
         self.status = plain_label(QLabel())
@@ -378,6 +380,10 @@ class CatalogDock(
                 button.clicked.connect(slot)
             buttons.addWidget(button)
             self.buttons[key] = button
+        # The much used (ui/emphasis.py): 「開く」 every time; 「ファイルなしで記録」 is shown instead of it
+        # in a catalog of images without files (`imageFiles: false`), so it is pressed every time there.
+        emphasize(self.buttons["open"])
+        emphasize(self.buttons["record"])
         # 「フットプリント」: how the listed images are drawn on the map (filled ones hid the images opened under them).
         self.footprint_box = QComboBox()
         for text, style in ((self.tr("塗りつぶし"), "fill"), (self.tr("枠だけ"), "outline"), (self.tr("非表示"), "hidden")):
