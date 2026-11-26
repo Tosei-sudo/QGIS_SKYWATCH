@@ -164,12 +164,14 @@ def test_an_iwa_portals_token_goes_to_its_domains_only_and_nothing_stays_after_u
         ("/arcgis/rest/services/S/FeatureServer/0?f=json", None, None),
     ]
 
-    # 「確認し直す」: a new token.
+    # A new token asked by a request (on its task's thread): written into the layers' authcfg from the main thread.
     sign_in.tokens().forget()
-    assert keeper.check()
-    assert wait_for(lambda: "サインイン中" in "".join(keeper.lines()))
     assert _in_task(lambda: client.ask(ours)) == {"ok": LAYER} and Handler.seen[-1][1] == "Bearer T2"
     assert wait_for(lambda: _headers_of(authcfg).get("X-Esri-Authorization") == "Bearer T2")
+    # 「確認し直す」 after it: the same token (still good), who is signed in asked again.
+    assert keeper.check()
+    assert wait_for(lambda: "サインイン中" in "".join(keeper.lines()))
+    assert _headers_of(authcfg).get("X-Esri-Authorization") == "Bearer T2"
     # The next token is asked a little before this one ends (the layers on the map keep theirs).
     assert keeper._renew.isActive()
 
