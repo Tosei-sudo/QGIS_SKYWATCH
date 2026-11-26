@@ -17,8 +17,8 @@ from typing import Any, Optional
 
 from ..util import is_number, time_of
 from .model import (
-    ACHIEVES, CATEGORIES, KINDS, LOOK_SIDES, ORBIT_DIRS, SHAPE_KINDS, STATUSES, TIMES_OF_DAY, ImagingRequest, clamp_priority,
-    day_bounds, jst_day, level_value,
+    ACHIEVES, BY_CLOCK, CATEGORIES, KINDS, LOOK_SIDES, ORBIT_DIRS, SHAPE_KINDS, STATUSES, TIMES_OF_DAY, ImagingRequest,
+    clamp_priority, clock_minutes, clock_text, day_bounds, jst_day, level_value,
 )
 from .area_link import rings_moved
 from .store import DEFAULT_REQUEST_FIELDS, new_request_id
@@ -29,7 +29,7 @@ HEADINGS = {
     "repeat": "繰り返し", "status": "状態", "priority": "優先度", "boost": "繰り上げ量", "kind": "種別",
     "series": "衛星シリーズ", "satellites": "衛星", "modes": "センサーモード", "offNadirMin": "オフナディア角下限",
     "offNadirMax": "オフナディア角上限", "incidenceMin": "入射角下限", "incidenceMax": "入射角上限", "lookSide": "観測方向",
-    "orbitDir": "軌道方向", "resolution": "分解能", "timeOfDay": "時間帯", "cloudNoGo": "実施しない雲量",
+    "orbitDir": "軌道方向", "resolution": "分解能", "timeOfDay": "時間帯", "timeFrom": "時刻（から）", "timeTo": "時刻（まで）", "cloudNoGo": "実施しない雲量",
     "timesMin": "1日の回数下限", "timesMax": "1日の回数上限", "timesGap": "回の間隔", "systems": "優先システム", "shapeKind": "範囲の種類",
     "namedAreaId": "地域の管理番号", "areaFollow": "地域の形に合わせる", "requester": "依頼者", "note": "メモ",
 }
@@ -108,6 +108,15 @@ def _list(v: Any) -> list:
     return [s.strip() for s in re.split(r"[,、]", _text(v)) if s.strip()]
 
 
+def _clock(v: Any) -> str:
+    """A 時刻 cell as text: 「10:00」 as written, a QTime / time's hours and minutes."""
+    if hasattr(v, "hour") and hasattr(v, "minute") and callable(getattr(v, "hour")):
+        return f"{v.hour()}:{v.minute():02d}"  # QTime
+    if hasattr(v, "hour") and hasattr(v, "minute"):
+        return f"{v.hour}:{v.minute:02d}"  # datetime.time
+    return _text(v)
+
+
 def request_of_row(values: dict, roles: dict, rings: list, shape_kind: str, existing: Optional[ImagingRequest] = None,
                    default_category: str = "定点") -> ImagingRequest:
     """A request from a layer's row (`roles`: item → field); `existing` (same id) keeps its object id and history."""
@@ -138,6 +147,7 @@ def request_of_row(values: dict, roles: dict, rings: list, shape_kind: str, exis
         incidence_min=_number(get("incidenceMin")), incidence_max=_number(get("incidenceMax")),
         look_side=_choice(get("lookSide"), LOOK_SIDES, "任意"), orbit_dir=_choice(get("orbitDir"), ORBIT_DIRS, "任意"),
         resolution=_number(get("resolution")), time_of_day=_choice(get("timeOfDay"), TIMES_OF_DAY, "任意"),
+        time_from=clock_text(clock_minutes(_clock(get("timeFrom")))), time_to=clock_text(clock_minutes(_clock(get("timeTo")))),
         cloud_no_go=_number(get("cloudNoGo")), systems=_list(get("systems")),
         times_min=_count(get("timesMin")) or 1, times_max=_count(get("timesMax")),
         times_gap=_number(get("timesGap")) if (_number(get("timesGap")) or 0) >= 0 else None,
@@ -149,6 +159,9 @@ def request_of_row(values: dict, roles: dict, rings: list, shape_kind: str, exis
         rings=rings,
     )
     r.area_follow = r.area_follow and bool(r.named_area_id)
+    if not _text(get("timeOfDay")) and r.time_from and r.time_to:
+        # Only the 時刻 given: by the clock.
+        r.time_of_day = BY_CLOCK
     if existing is not None:
         r.object_id, r.created = existing.object_id, existing.created
         # Its area changed in the layer: no longer the area's shape (the link kept, for reference).
@@ -181,7 +194,8 @@ def row_of(r: ImagingRequest) -> dict:
         "series": ",".join(r.series), "satellites": ",".join(r.satellites), "modes": ",".join(r.modes),
         "offNadirMin": r.off_nadir_min, "offNadirMax": r.off_nadir_max, "incidenceMin": r.incidence_min,
         "incidenceMax": r.incidence_max, "lookSide": r.look_side, "orbitDir": r.orbit_dir, "resolution": r.resolution,
-        "timeOfDay": r.time_of_day, "cloudNoGo": r.cloud_no_go,
+        "timeOfDay": r.time_of_day, "timeFrom": clock_text(r.window[0]) if r.window else None,
+        "timeTo": clock_text(r.window[1]) if r.window else None, "cloudNoGo": r.cloud_no_go,
         "timesMin": r.times_min if r.times_min > 1 else None, "timesMax": r.times_max, "timesGap": r.times_gap,
         "systems": ",".join(r.systems), "shapeKind": r.shape_kind,
         "namedAreaId": r.named_area_id or None, "areaFollow": 1 if r.area_follow and r.named_area_id else 0,

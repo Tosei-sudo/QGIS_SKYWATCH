@@ -31,10 +31,10 @@ from typing import Callable, Optional
 
 from qgis.core import QgsGeometry, QgsPointXY, QgsRectangle, QgsVectorLayer
 from qgis.gui import QgsMapToolEmitPoint, QgsMapToolExtent
-from qgis.PyQt.QtCore import QDate, QEvent, QObject, Qt, QTimer
+from qgis.PyQt.QtCore import QDate, QEvent, QObject, Qt, QTime, QTimer
 from qgis.PyQt.QtWidgets import (
     QCheckBox, QComboBox, QDateEdit, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout, QFrame, QGroupBox, QHBoxLayout,
-    QLabel, QLineEdit, QPlainTextEdit, QPushButton, QSpinBox, QVBoxLayout, QWidget,
+    QLabel, QLineEdit, QPlainTextEdit, QPushButton, QSpinBox, QTimeEdit, QVBoxLayout, QWidget,
 )
 
 from ..core.request.api import FORM_DAYS, form_span, form_text
@@ -42,8 +42,8 @@ from ..core.request.api import conditions_of, from_area, rings_moved
 from ..core.request.api import find_passes
 from ..core.request.api import Picked, checks_of, picked, summary, unknown
 from ..core.request.api import (
-    ACHIEVES, CATEGORIES, REQUEST_KINDS as KINDS, LOOK_SIDES, ORBIT_DIRS, PRIORITY_LEVELS, STATUSES, TIMES_OF_DAY,
-    ImagingRequest, bbox_of, day_bounds, jst_day, level_of, priority_text, repeat_of, repeat_text, shape_text, square_rings,
+    ACHIEVES, BY_CLOCK, CATEGORIES, REQUEST_KINDS as KINDS, LOOK_SIDES, ORBIT_DIRS, PRIORITY_LEVELS, STATUSES, TIMES_OF_DAY,
+    ImagingRequest, clock_minutes, bbox_of, day_bounds, jst_day, level_of, priority_text, repeat_of, repeat_text, shape_text, square_rings,
 )
 from ..qgis_io import map_tools
 from ..qgis_io.geometry import shape_of, shape_rings, to_wgs84
@@ -61,6 +61,8 @@ from .satellite_tree import SatelliteTree
 _WEEKDAYS = "月火水木金土日"
 #: How long after the last change the chances are counted again (ms).
 CHANCE_DELAY_MS = 700
+#: 時間帯 「時刻」's first from … to ((hour, minute) each).
+DEFAULT_CLOCK = ((10, 0), (14, 0))
 #: A field 依頼文から下書き filled, until it is touched.
 DRAFTED_STYLE = "background-color: #fef9c3;"
 
@@ -161,7 +163,7 @@ class RequestForm(QDialog):
         for signal in (self.start.dateChanged, self.end.dateChanged, self.category.currentTextChanged,
                        self.repeat_kind.currentTextChanged, self.every.valueChanged, self.kind.currentTextChanged,
                        self.look.currentTextChanged, self.orbit.currentTextChanged, self.time_of_day.currentTextChanged,
-                       self.ona_min.valueChanged, self.ona_max.valueChanged, self.inc_min.valueChanged, self.inc_max.valueChanged,
+                       self.clock_from.timeChanged, self.clock_to.timeChanged, self.ona_min.valueChanged, self.ona_max.valueChanged, self.inc_min.valueChanged, self.inc_max.valueChanged,
                        self.resolution.valueChanged, *(b.toggled for b in self.weekdays)):
             signal.connect(self._chances_changed)
         #: The size of a clicked point's area last used (入力の初期値の記憶).
@@ -327,6 +329,25 @@ class RequestForm(QDialog):
             kinds.addWidget(w)
         kinds.addStretch(1)
         cf.addRow(kinds)
+        # 時間帯 「時刻」: from … to, JST (tsudo 2026-11-26), shown only then.
+        self.clock_row = QWidget()
+        clock = QHBoxLayout(self.clock_row)
+        clock.setContentsMargins(0, 0, 0, 0)
+        self.clock_from, self.clock_to = QTimeEdit(QTime(*DEFAULT_CLOCK[0])), QTimeEdit(QTime(*DEFAULT_CLOCK[1]))
+        for edit in (self.clock_from, self.clock_to):
+            edit.setDisplayFormat("HH:mm")
+            edit.setToolTip(self.tr("撮像してよい時刻（日本時間）。パスの時刻がこの間にあるときだけ撮る"))
+            edit.timeChanged.connect(self._clock_changed)
+        self.clock_note = QLabel()
+        clock.addWidget(QLabel(self.tr("時刻（日本時間）")))
+        clock.addWidget(self.clock_from)
+        clock.addWidget(QLabel("〜"))
+        clock.addWidget(self.clock_to)
+        clock.addWidget(self.clock_note)
+        clock.addStretch(1)
+        cf.addRow(self.clock_row)
+        self.clock_row.setVisible(False)
+        self.time_of_day.currentTextChanged.connect(self._time_of_day_changed)
         # The satellites as in the imaging plan: kind → series → satellite → mode (none checked: any satellite).
         self.tree = SatelliteTree(start_checked=False, whole_satellites=True)
         self.tree.setToolTip(self.tr("チェックなしは衛星を問わない。シリーズ全体なら衛星シリーズ、一部なら衛星（チェック順に優先）、モードの一部ならセンサーモードとして保存"))
@@ -497,6 +518,12 @@ class RequestForm(QDialog):
         self.look.setCurrentText(r.look_side)
         self.orbit.setCurrentText(r.orbit_dir)
         self.time_of_day.setCurrentText(r.time_of_day)
+        w = r.window
+        for edit, minutes, default in ((self.clock_from, w[0] if w else None, DEFAULT_CLOCK[0]),
+                                       (self.clock_to, w[1] if w else None, DEFAULT_CLOCK[1])):
+            # 24:00 (a day's end) as the last minute.
+            edit.setTime(QTime(min(minutes, 1439) // 60, min(minutes, 1439) % 60) if minutes is not None else QTime(*default))
+        self._time_of_day_changed(self.time_of_day.currentText())
         self.series.setText(",".join(r.series))
         self.satellites.setText(",".join(r.satellites))
         self.modes.setText(",".join(r.modes))
@@ -604,6 +631,15 @@ class RequestForm(QDialog):
             edit.setText(",".join(names))
             edit.blockSignals(False)
         self._names_changed()
+
+    def _time_of_day_changed(self, text: str) -> None:
+        self.clock_row.setVisible(text == BY_CLOCK)
+        self._clock_changed()
+
+    def _clock_changed(self, *_args) -> None:
+        """「日をまたぐ」 when the end comes before the start (22:00 〜 02:00)."""
+        past = self.clock_to.time() < self.clock_from.time()
+        self.clock_note.setText(self.tr("（翌日まで。日をまたぐ）") if past else "")
 
     def _category_changed(self, text: str) -> None:
         self.repeat_row.setEnabled(text == "定点")
@@ -859,7 +895,8 @@ class RequestForm(QDialog):
             "name": [self.name], "management_no": [self.management_no], "identification_no": [self.identification_no],
             "status": [self.status], "category": [self.category], "achieve": [self.achieve],
             "repeat": [self.repeat_kind, self.every], "times": [self.times_min, self.times_max], "priority": [self.level],
-            "kind": [self.kind], "look_side": [self.look], "orbit_dir": [self.orbit], "time_of_day": [self.time_of_day],
+            "kind": [self.kind], "look_side": [self.look], "orbit_dir": [self.orbit],
+            "time_of_day": [self.time_of_day, self.clock_from, self.clock_to],
             "satellites": [self.picked_label, self.series, self.satellites, self.modes], "resolution": [self.resolution],
             "cloud_no_go": [self.cloud], "requester": [self.requester],
         }
@@ -983,6 +1020,9 @@ class RequestForm(QDialog):
         out.times_gap = _get(self.times_gap)
         out.kind, out.look_side, out.orbit_dir, out.time_of_day = (self.kind.currentText(), self.look.currentText(),
                                                                     self.orbit.currentText(), self.time_of_day.currentText())
+        by_clock = out.time_of_day == BY_CLOCK
+        out.time_from = self.clock_from.time().toString("HH:mm") if by_clock else ""
+        out.time_to = self.clock_to.time().toString("HH:mm") if by_clock else ""
         out.series, out.satellites, out.modes = _words(self.series.text()), _words(self.satellites.text()), _words(self.modes.text())
         out.off_nadir_min, out.off_nadir_max = _get(self.ona_min), _get(self.ona_max)
         out.incidence_min, out.incidence_max = _get(self.inc_min), _get(self.inc_max)
@@ -1009,6 +1049,8 @@ class RequestForm(QDialog):
         for low, high, label in ((r.off_nadir_min, r.off_nadir_max, "オフナディア角"), (r.incidence_min, r.incidence_max, "入射角")):
             if low is not None and high is not None and low > high:
                 out.append(self.tr("{label}の下限が上限より大きい").format(label=label))
+        if r.time_of_day == BY_CLOCK and clock_minutes(r.time_from) == clock_minutes(r.time_to):
+            out.append(self.tr("時刻の始まりと終わりが同じ"))
         return out
 
     def _save_clicked(self) -> None:

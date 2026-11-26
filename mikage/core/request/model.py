@@ -12,6 +12,11 @@ A request may be taken several times a day (1 日の回数, tsudo 2026-11-11:
 `times_gap` hours apart, up to `times_max` (m; n when not given) where
 there is room; a day counts when n of them are taken.
 
+Its 時間帯 may be 昼 or 夜, or a time of day from … to (「時刻」, tsudo
+2026-11-26: 「具体的に何時から何時で」): its shots only on passes inside
+that window, in Japan Standard Time (one that ends before it starts runs
+past midnight: 22:00 〜 02:00).
+
 Priorities run 1 (highest) … 1000; five named levels are bands of 200.
 Days are JST days.
 """
@@ -19,6 +24,7 @@ from __future__ import annotations
 
 import math
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional, Sequence
@@ -63,7 +69,9 @@ class _Kinds:
 KINDS = _Kinds()
 LOOK_SIDES = ("任意", "右", "左")
 ORBIT_DIRS = ("任意", "昇交", "降交")
-TIMES_OF_DAY = ("任意", "昼", "夜")
+#: 時間帯 by the clock: `time_from` … `time_to` (JST).
+BY_CLOCK = "時刻"
+TIMES_OF_DAY = ("任意", "昼", "夜", BY_CLOCK)
 SHAPE_KINDS = ("範囲", "点")
 
 #: (name, lowest, highest, the value chosen by name).
@@ -167,6 +175,9 @@ class ImagingRequest:
     orbit_dir: str = "任意"
     resolution: Optional[float] = None
     time_of_day: str = "任意"
+    #: 時間帯 「時刻」: from … to, JST 「HH:MM」 ("" when not by the clock; see `window`).
+    time_from: str = ""
+    time_to: str = ""
     #: 「この雲量以上なら実施しない」 (optical); None for no limit.
     cloud_no_go: Optional[float] = None
     #: 1 日の回数: at least `times_min` shots a day (the day counts with them), up to `times_max` (None: times_min)
@@ -204,10 +215,62 @@ class ImagingRequest:
         return n, max(n, int(self.times_max)) if self.times_max else n
 
     @property
+    def window(self) -> Optional[tuple[int, int]]:
+        """(from, to) minutes of the JST day its shots are asked for (時間帯 「時刻」); None: any time (or 昼 / 夜)."""
+        if self.time_of_day != BY_CLOCK:
+            return None
+        first, last = clock_minutes(self.time_from), clock_minutes(self.time_to)
+        return (first, last) if first is not None and last is not None else None
+
+    @property
     def gap_ms(self) -> float:
         """The least time between two of its shots on one day (ms)."""
         hours = self.times_gap if self.times_gap is not None and self.times_gap >= 0 else DEFAULT_TIMES_GAP
         return hours * 3600000
+
+
+_CLOCK = re.compile(r"(\d{1,2})\s*[:：時]\s*(\d{1,2})?\s*分?")
+
+
+def clock_minutes(text) -> Optional[int]:
+    """「10:00」「9:30」「24:00」「10時」 → minutes of the day (0 … 1440); None for anything else."""
+    t = unicodedata.normalize("NFKC", str(text or "")).strip()
+    m = _CLOCK.fullmatch(t)
+    if not m:
+        return None
+    h, mi = int(m.group(1)), int(m.group(2) or 0)
+    if h > 24 or mi > 59 or h * 60 + mi > 1440:
+        return None
+    return h * 60 + mi
+
+
+def clock_text(minutes: Optional[int]) -> str:
+    """Minutes of the day as 「HH:MM」 ("" for None)."""
+    if minutes is None:
+        return ""
+    return f"{int(minutes) // 60:02d}:{int(minutes) % 60:02d}"
+
+
+def in_window(req: ImagingRequest, ms: float) -> bool:
+    """Whether a moment falls in a request's window (its 時刻, ends included); always for a request without one."""
+    w = req.window
+    if w is None:
+        return True
+    first, last = w
+    clock = datetime.fromtimestamp(ms / 1000, tz=JST)
+    now = clock.hour * 60 + clock.minute + (clock.second + clock.microsecond / 1e6) / 60
+    if first <= last:
+        return first <= now <= last
+    # Past midnight (22:00 〜 02:00).
+    return now >= first or now <= last
+
+
+def window_text(req: ImagingRequest) -> str:
+    """「10:00〜14:00」 for a request by the clock, else its 時間帯 (任意・昼・夜)."""
+    w = req.window
+    if w is None:
+        return "任意" if req.time_of_day == BY_CLOCK else req.time_of_day
+    return f"{clock_text(w[0])}〜{clock_text(w[1])}"
 
 
 def day_bounds(day: date) -> tuple[float, float]:

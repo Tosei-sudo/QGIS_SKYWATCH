@@ -46,7 +46,7 @@ from datetime import date, datetime, timedelta
 from typing import Any, NamedTuple, Optional, Sequence
 
 from .plan.api import kinds
-from .request.api import PRIORITY_LEVELS, ImagingRequest, day_bounds, jst_day, repeat_of, square_rings
+from .request.api import BY_CLOCK, PRIORITY_LEVELS, ImagingRequest, clock_text, day_bounds, jst_day, repeat_of, square_rings
 from .text_assist import Message, TextTask, numbers_in
 from .text_tasks import answer_lines, bare
 
@@ -484,6 +484,59 @@ def look_of(text: str) -> Optional[str]:
     return sides.pop() if len(sides) == 1 else None
 
 
+class Clock(NamedTuple):
+    """時間帯 by the clock (「時刻」): from … to, minutes of the JST day (one past midnight when `last` < `first`)."""
+    first: int
+    last: int
+
+    @property
+    def text(self) -> str:
+        return f"{clock_text(self.first)}〜{clock_text(self.last)}"
+
+
+def _at(p: str, bare: bool = False) -> str:
+    """One time of a range (named groups prefixed `p`): 「午後2時」「14:00」「10時半」「翌2時」; `bare`: 「10」 too (「10〜14時」)."""
+    unit = (rf"(?:時\s*(?:(?P<{p}m>\d{{1,2}})\s*分|(?P<{p}half>半))?|:\s*(?P<{p}mm>\d{{2}}))" + ("?" if bare else ""))
+    return rf"(?P<{p}ap>午前|午後)?\s*(?P<{p}next>翌)?\s*(?P<{p}h>\d{{1,2}})\s*{unit}"
+
+
+#: 「10時から14時」「10:00〜14:00」「10〜14時」: from … to (not a duration, 「3〜5時間」).
+_CLOCK_RANGE = re.compile(rf"(?<![\d.:/\-]){_at('a', bare=True)}\s*(?:から|より|〜|-|–)\s*{_at('b')}(?!間|\s*[日分%度])")
+
+
+def _minutes(m: re.Match, p: str) -> Optional[int]:
+    """The minutes of the day of one time of a range; None when it is no time."""
+    h = int(m[p + "h"])
+    mi = int(m[p + "m"] or m[p + "mm"] or (30 if m[p + "half"] else 0))
+    if m[p + "ap"] == "午後" and h < 12:
+        h += 12
+    elif m[p + "ap"] == "午前" and h == 12:
+        h = 0
+    if h > 24 or mi > 59 or h * 60 + mi > 1440:
+        return None
+    return h * 60 + mi
+
+
+def clock_of(text: str) -> Optional[tuple[Clock, str]]:
+    """
+    A time of day from … to the text asks for (「10時から14時」「10:00〜14:00」「午前10時〜午後2時」
+    「22時〜翌2時」), JST: (the window, the words); None when it names none. 「午後2時から5時」: both after noon.
+    """
+    t = _nfkc(text)
+    m = _CLOCK_RANGE.search(t)
+    if not m:
+        return None
+    first, last = _minutes(m, "a"), _minutes(m, "b")
+    if first is None or last is None:
+        return None
+    if m["aap"] == "午後" and m["bap"] is None and last < 12 * 60 and last + 12 * 60 > first:
+        # 「午後2時から5時」: the second is after noon too.
+        last += 12 * 60
+    if first == last:
+        return None
+    return Clock(first, last), m[0].strip()
+
+
 def time_of_day_of(text: str) -> Optional[str]:
     """昼 or 夜 when the text asks for one (「夜は不要」 asks for 昼); None for either or not said."""
     t = _nfkc(text)
@@ -885,7 +938,7 @@ def value_text(key: str, v: Any) -> str:
         return f"{v:g} m 以下"
     if key == "cloud_no_go":
         return f"{v:g}%（{v:g}% 以上なら実施しない）"
-    if key == "satellites":
+    if key == "satellites" or isinstance(v, Clock):
         return v.text
     return str(v)
 
@@ -1133,8 +1186,11 @@ def request_draft(raw: str, text: str, today: date, sats: Sequence[Any] = (), pl
     orbit = orbit_of(text)
     if orbit:
         d.values["orbit_dir"] = orbit
+    clock = clock_of(text)
     tod = time_of_day_of(text)
-    if tod:
+    if clock is not None:
+        d.values["time_of_day"], d.why["time_of_day"] = clock
+    elif tod:
         d.values["time_of_day"] = tod
     if sats:
         named = satellites_of(text, sats)
@@ -1286,6 +1342,8 @@ def applied(r: ImagingRequest, d: RequestDraft, keys: Sequence[str], text: str =
             out.series, out.satellites, out.modes = list(value.series), list(value.satellites), list(value.modes)
         elif key == "priority":
             out.priority = int(value)
+        elif key == "time_of_day" and isinstance(value, Clock):
+            out.time_of_day, out.time_from, out.time_to = BY_CLOCK, clock_text(value.first), clock_text(value.last)
         else:
             setattr(out, key, value)
     if note and text.strip():

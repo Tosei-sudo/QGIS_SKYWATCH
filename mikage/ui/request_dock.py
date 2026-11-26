@@ -26,7 +26,7 @@ from ..core.request.api import RequestChange, RequestRepository
 from ..core.request.api import requests_of_plan
 from ..core.request.api import first_group, offered
 from ..core.request.api import remembered, with_remembered
-from ..core.request.api import REQUEST_KINDS as KINDS, STATUSES, ImagingRequest, jst_day, priority_text
+from ..core.request.api import REQUEST_KINDS as KINDS, STATUSES, ImagingRequest, jst_day, priority_text, window_text
 from ..core.plan.api import kinds as kinds_in_use
 from ..core.request.api import code_text, field_roles, request_of_row, row_problems
 from ..core.request.api import (RequestStoreConfig, new_request_id, waiting_ids)
@@ -47,9 +47,10 @@ from .plan_overlay import PlanOverlay
 from .request_groups import NO_GROUP_TEXT, GroupFilter
 
 STATUS_COLORS = {"有効": "#2563eb", "停止": "#6b7280", "完了": "#16a34a"}
-#: The list's columns; 「メモ」 (the request's note) hidden until shown from the header's menu. 「地域」: the organisation's
-#: area it was made from (組織の関心地域), ↻ when its area follows the area's shape.
-COLUMNS = ("名称", "地域", "依頼グループ", "管理番号", "識別番号", "区分", "達成条件", "期間", "優先度", "種別", "状態", MEMO)
+#: The list's columns; 「時間帯」 (任意・昼・夜 or its 時刻 「10:00〜14:00」) and 「メモ」 (the request's note) hidden until shown
+#: from the header's menu. 「地域」: the organisation's area it was made from (組織の関心地域), ↻ when its area follows the area's shape.
+TIME_OF_DAY = "時間帯"
+COLUMNS = ("名称", "地域", "依頼グループ", "管理番号", "識別番号", "区分", "達成条件", "期間", "優先度", "種別", TIME_OF_DAY, "状態", MEMO)
 _STATUS = COLUMNS.index("状態")
 #: The 「地域」 filter's first entries: every request, and those not made from an area.
 ALL_AREAS, NO_AREA = "", "<地域なし>"
@@ -163,10 +164,11 @@ class RequestDock(PluginDock):
         self.table.selectionModel().selectionChanged.connect(lambda *_: self._update_buttons())
         self.table.doubleClicked.connect(lambda _: self.edit())
         self.body.addWidget(self.table, 1)
-        # 「ビュー」: the columns and the filters kept under a name (per user). 「メモ」 hidden until shown (tsudo 2026-11-24).
+        # 「ビュー」: the columns and the filters kept under a name (per user). 「メモ」 hidden until shown (tsudo 2026-11-24),
+        # 「時間帯」 too (most requests: 任意).
         self.views = ListViews("requests", self.table, {"category": self.category_filter, "status": self.status_filter,
                                                         "group": self.group_filter, "area": self.area_filter}, None, self,
-                               hidden=(self.tr(MEMO),))
+                               hidden=(self.tr(TIME_OF_DAY), self.tr(MEMO)))
         top.addWidget(self.views.button)
 
         edit = FlowLayout()
@@ -343,7 +345,7 @@ class RequestDock(PluginDock):
                                                 (CHANGED_MARK if mark else "") + self.area_text(r),
                                                 r.group, r.management_no, r.identification_no,
                                                 r.category + (f"（{r.repeat}）" if r.category == "定点" else ""),
-                                                r.achieve, _period(r), prio, r.kind, r.status)] + [memo_item(r.note)]
+                                                r.achieve, _period(r), prio, r.kind, window_text(r), r.status)] + [memo_item(r.note)]
             items[_STATUS].setForeground(QBrush(QColor(STATUS_COLORS.get(r.status, "#2563eb"))))
             if r.note:
                 items[0].setToolTip(plain_tip(r.note))
