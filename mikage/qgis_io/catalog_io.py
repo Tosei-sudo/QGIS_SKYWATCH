@@ -572,7 +572,9 @@ def add_record_layers(layers: Sequence[QgsMapLayer], record: CatalogRecord, proj
     """
     project = project or QgsProject.instance()
     if layers:
-        audit.record("open", "image", record.id or layers[0].name(), count=len(layers), detail={"files": [layer.source() for layer in layers]})
+        # (A layer reading its copy on this PC, localCopy: the image on the share.)
+        audit.record("open", "image", record.id or layers[0].name(), count=len(layers),
+                     detail={"files": [image_path(layer) or layer.source() for layer in layers]})
     root = project.layerTreeRoot()
     if len(layers) <= 1:
         for layer in layers:

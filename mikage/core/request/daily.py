@@ -151,6 +151,8 @@ PART = "この日の撮像機会で範囲の約 "
 SHOT_CLOUD = "撮像時刻の雲量 "
 #: Held back as the passes left are too close to the request's other times that day (1 日の回数).
 GAP = "撮像機会なし（ほかの回との間隔）"
+#: Held back as its passes that day are all outside its 時刻 (時間帯 by the clock, tsudo 2026-11-26).
+OFF_CLOCK = "撮像機会なし（指定の時刻にパスなし）"
 #: The start of the warning of a request taken fewer times than its 1 日の回数 asks (the day does not count).
 FEW = "回数が足りない（"
 #: Held back as its area is taken already (撮像済み), or about to be by what was handed out on earlier days (撮像待ち).
@@ -832,7 +834,7 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
             blocked = passes.blocked_on(c.request, day, i)
             if blocked:
                 hits.setdefault(id(c), []).extend(blocked)
-            why.add(OUTAGE if blocked else NO_PASS)
+            why.add(OUTAGE if blocked else OFF_CLOCK if passes.off_clock_on(c.request, day, i) else NO_PASS)
             return None
         # The request's other times that day: on other passes, `times_gap` hours or more away.
         taken = [t for o in times[c.request.id] if o.occurrence != c.occurrence and o.result == TAKEN for t in times_of(o)]
@@ -1056,7 +1058,7 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
             c.reason = (NO_SYSTEM if not tried_any else QUOTA if QUOTA in why else USE_DAY if USE_DAY in why
                         else USE_PASS if USE_PASS in why else OVER if OVER in why else BUSY if BUSY in why
                         else CLOUDY if CLOUDY in why else GAP if GAP in why else OUTAGE if OUTAGE in why
-                        else NO_PASS if NO_PASS in why else OVER)
+                        else OFF_CLOCK if OFF_CLOCK in why else NO_PASS if NO_PASS in why else OVER)
 
     def share(c: Candidate) -> None:
         """

@@ -221,6 +221,9 @@ def form_text(req: ImagingRequest, passes: Optional[Passes], sats: Sequence[Sate
     ops = [o for o in passes.ops.get(req.id, ()) if first <= o.time <= last and occurs_on(req, jst_day(o.time))]
     span_text = f"{short_day(jst_day(last))} まで" if whole else f"今後 {days} 日"
     if not ops:
+        if any(first <= t <= last and occurs_on(req, jst_day(t)) for _i, t in passes.off_clock.get(req.id, ())):
+            # Passes there are, outside its 時刻.
+            return f"撮像機会なし（{span_text}、指定の時刻にパスなし）", True
         return f"撮像機会なし（{span_text}、範囲の上を通るパスなし）", True
     o = min(ops, key=lambda x: x.time)
     until = f"{span_text}に" if whole else f"{span_text}で"

@@ -19,7 +19,7 @@ from ..util import is_number, is_record, layer_url, time_of, use_legacy_names
 from .groups import DEFAULT_GROUP_FIELDS
 from .model import (
     ACHIEVES, CATEGORIES, KINDS, LOOK_SIDES, ORBIT_DIRS, SHAPE_KINDS, STATUSES, TIMES_OF_DAY, ImagingRequest, clamp_priority,
-    day_bounds,
+    clock_minutes, clock_text, day_bounds,
 )
 
 #: The attribute names used when the settings do not map a role.
@@ -30,8 +30,8 @@ DEFAULT_REQUEST_FIELDS: dict[str, str] = {
     "priority": "PRIORITY", "boost": "BOOST", "kind": "KIND", "series": "SERIES", "satellites": "SATELLITES",
     "modes": "SENSOR_MODES", "offNadirMin": "OFF_NADIR_MIN", "offNadirMax": "OFF_NADIR_MAX",
     "incidenceMin": "INCIDENCE_MIN", "incidenceMax": "INCIDENCE_MAX", "lookSide": "LOOK_SIDE", "orbitDir": "ORBIT_DIR",
-    "resolution": "RESOLUTION_MAX", "timeOfDay": "TIME_OF_DAY", "cloudNoGo": "CLOUD_NO_GO",
-    "timesMin": "TIMES_MIN", "timesMax": "TIMES_MAX", "timesGap": "TIMES_GAP", "systems": "SYSTEMS",
+    "resolution": "RESOLUTION_MAX", "timeOfDay": "TIME_OF_DAY", "timeFrom": "TIME_FROM", "timeTo": "TIME_TO",
+    "cloudNoGo": "CLOUD_NO_GO", "timesMin": "TIMES_MIN", "timesMax": "TIMES_MAX", "timesGap": "TIMES_GAP", "systems": "SYSTEMS",
     "shapeKind": "SHAPE_KIND", "namedAreaId": "NAMED_AREA_ID", "areaFollow": "AREA_FOLLOW",
     "requester": "REQUESTER", "note": "NOTE", "created": "CREATED_AT", "updated": "UPDATED_AT",
 }
@@ -252,7 +252,8 @@ def attributes_of(req: ImagingRequest, f: dict) -> dict[str, Any]:
         f["offNadirMin"]: req.off_nadir_min, f["offNadirMax"]: req.off_nadir_max,
         f["incidenceMin"]: req.incidence_min, f["incidenceMax"]: req.incidence_max,
         f["lookSide"]: req.look_side, f["orbitDir"]: req.orbit_dir, f["resolution"]: req.resolution,
-        f["timeOfDay"]: req.time_of_day, f["cloudNoGo"]: req.cloud_no_go,
+        f["timeOfDay"]: req.time_of_day, f["timeFrom"]: clock_text(req.window[0]) if req.window else None,
+        f["timeTo"]: clock_text(req.window[1]) if req.window else None, f["cloudNoGo"]: req.cloud_no_go,
         f["timesMin"]: req.times_min if req.times_min and req.times_min > 1 else None, f["timesMax"]: req.times_max,
         f["timesGap"]: req.times_gap, f["systems"]: join(req.systems),
         f["shapeKind"]: req.shape_kind, f["namedAreaId"]: req.named_area_id[:255] or None,
@@ -299,6 +300,7 @@ def request_of(a: dict, geometry: Any, f: dict, oid: str) -> Optional[ImagingReq
         orbit_dir=_choice(a.get(f["orbitDir"]), ORBIT_DIRS, "任意"),
         resolution=_number(a.get(f["resolution"])),
         time_of_day=_choice(a.get(f["timeOfDay"]), TIMES_OF_DAY, "任意"),
+        time_from=clock_text(clock_minutes(a.get(f["timeFrom"]))), time_to=clock_text(clock_minutes(a.get(f["timeTo"]))),
         cloud_no_go=_number(a.get(f["cloudNoGo"])), systems=_list(a.get(f["systems"])),
         times_min=_times(a.get(f["timesMin"])) or 1, times_max=_times(a.get(f["timesMax"])),
         times_gap=_hours(a.get(f["timesGap"])),
@@ -500,6 +502,18 @@ def save_request(client: EsriClient, store: RequestStoreConfig, token: Optional[
     return saved
 
 
+def _clock_missing(store: RequestStoreConfig, req: ImagingRequest, names: set) -> Optional[EsriError]:
+    """
+    A request by the clock (時間帯 「時刻」) for a ledger without its two
+    attributes: not saved, rather than kept as any time (the 時刻 lost).
+    """
+    f = store.fields
+    missing = [f[k] for k in ("timeFrom", "timeTo") if f[k] not in names]
+    if req.window is None or not missing:
+        return None
+    return EsriError(f"{store.label}に時間帯の時刻の項目がない（管理者に連絡: {'・'.join(missing)}）", code="E704")
+
+
 def _save_online(client: EsriClient, store: RequestStoreConfig, token: Optional[str], req: ImagingRequest, now: float,
                  tried: Sequence[float] = ()) -> ImagingRequest:
     """
@@ -529,6 +543,9 @@ def _save_online(client: EsriClient, store: RequestStoreConfig, token: Optional[
             raise ConflictError(f"「{req.name}」はほかの人が先に変更。「最新を取得」を押してから変更")
     elif req.object_id is not None:
         raise ConflictError(f"「{req.name}」はほかの人が削除済み。「最新を取得」を押して確認", code="E302")
+    missing = _clock_missing(store, req, names)
+    if missing is not None:
+        raise missing
     baseline = req.updated
     if req.created is None:
         req.created = now
@@ -662,6 +679,10 @@ def _send_requests(client: EsriClient, store: RequestStoreConfig, token: Optiona
                     continue
             elif req.object_id is not None:
                 sent.failed.append((req, ConflictError(f"「{req.name}」はほかの人が削除済み（「最新を取得」で確認）")))
+                continue
+            missing = _clock_missing(store, req, names)
+            if missing is not None:
+                sent.failed.append((req, missing))
                 continue
             baseline = req.updated
             if req.created is None:

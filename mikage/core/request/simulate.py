@@ -54,7 +54,7 @@ from typing import Callable, Optional, Sequence
 from ..plan.api import OUTAGE_REASONS, on_day
 from ..plan.api import SatelliteSpec
 from .covered import GOAL, Covered, subtracts
-from .daily import BUSY, CLOUDY, GAP, NO_PASS, NO_SYSTEM, OVER, TAKEN, Candidate, _systems_for, allocate, gather
+from .daily import BUSY, CLOUDY, GAP, NO_PASS, NO_SYSTEM, OFF_CLOCK, OVER, TAKEN, Candidate, _systems_for, allocate, gather
 from .follow import missed_ids
 from .model import ImagingRequest, day_bounds, days_left, jst_day
 from .passes import Passes, find_passes
@@ -266,7 +266,7 @@ def simulate(requests: Sequence[ImagingRequest], start: date, days: int, systems
                 result.over += 1
             elif c.reason == NO_SYSTEM:
                 result.no_system += 1
-            elif c.reason in (NO_PASS, GAP):
+            elif c.reason in (NO_PASS, GAP, OFF_CLOCK):
                 result.no_pass += 1
             elif c.reason.startswith(OUTAGE_REASONS):
                 result.outage += 1

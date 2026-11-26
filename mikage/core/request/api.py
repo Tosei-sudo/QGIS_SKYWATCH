@@ -73,8 +73,8 @@ if TYPE_CHECKING:  # the door (core/door.py): each name is imported from its mod
         unlink_findings, with_links,
     )
     from .model import (
-        ACHIEVES, LOOK_SIDES, ORBIT_DIRS, KINDS as REQUEST_KINDS, Repeat, STATUSES, TIMES_OF_DAY, repeat_of, repeat_text,
-        shape_text,
+        ACHIEVES, BY_CLOCK, LOOK_SIDES, ORBIT_DIRS, KINDS as REQUEST_KINDS, Repeat, STATUSES, TIMES_OF_DAY, clock_minutes,
+        clock_text, in_window, repeat_of, repeat_text, shape_text, window_text,
     )
     from .place_plans import (
         DAYS, DAY_CHOICES, MOST_PLACES, NOT_HELD_BACK, KINDS as PLACE_KINDS, Place, SHOWN, lanes_of, mark_name, next_of,
@@ -116,7 +116,7 @@ __all__ = [
     "kind_text", "lanes_of", "link_findings", "link_text", "linking_time_text", "mark_name", "merge_text", "next_of",
     "occurrence_text", "pace_text", "part_text", "pass_text", "read_answers", "repeat_of", "repeat_text", "room_text",
     "satellite_name", "shape_text", "sort_by_next", "span_of", "taken_text", "tally_text", "units_of",
-    "unlink_findings", "with_links",
+    "unlink_findings", "with_links", "BY_CLOCK", "clock_minutes", "clock_text", "in_window", "window_text",
     "AreaLinks", "area_links", "conditions_of", "from_area", "links_of", "previous_for", "rings_moved", "unlinked",
     "AreaChange", "apply_follows", "FOLLOW_CHANGED", "Follow", "follow_area", "follow_areas", "FollowResult", "FollowRun", "follows",
     "FOLLOW_HOLD", "FOLLOW_KEPT", "load_changes", "redo_count", "redo_mark", "redo_text", "FOLLOW_REDO", "FOLLOW_SKIP", "undo_change", "FOLLOW_UNDO",

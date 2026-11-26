@@ -12,9 +12,10 @@ fitting counts requests for it as before.
 
 A request's own conditions narrow its passes: the off-nadir range, the
 incidence, the look side, the orbit direction (昇交 / 降交), the time of
-day (昼: the sun at least 10° up; 夜: below the horizon; optical
-satellites only in daylight in any case) and the window of the day it is
-asked for. A satellite's `leadTime` (hours before a shot that it has to be
+day (昼: the sun at least 10° up; 夜: below the horizon; 時刻: the pass
+inside its from … to, JST; optical satellites only in daylight in any case)
+and the window of the day it is asked for. Passes left out only for its
+時刻 are kept (`Passes.off_clock`) so that the request is told so. A satellite's `leadTime` (hours before a shot that it has to be
 ordered) leaves out the passes too soon to order, as in the imaging plan.
 
 A satellite's outages (衛星の障害情報, core/plan/outages.py: those attached to
@@ -35,7 +36,7 @@ from ..plan.api import Outage, blocking
 from ..plan.api import Orbit, ecef_of, unit
 from ..plan.api import SatelliteSpec
 from ..plan.api import MAX_POINTS, spread_out
-from .model import ImagingRequest, bbox_of, center_of, day_bounds, in_rings
+from .model import ImagingRequest, bbox_of, center_of, day_bounds, in_rings, in_window
 from .route import why_not
 
 #: About how many points sample an area larger than one shot (fewer than the imaging plan's 600: every request,
@@ -71,6 +72,8 @@ class Passes:
     now: Optional[float] = None
     #: request id → the passes an outage left out: (satellite index, moment ms, the outage), in time order.
     blocked: dict = field(default_factory=dict)
+    #: request id → the passes outside its 時刻 (時間帯 by the clock) that would suit it otherwise: (satellite index, ms).
+    off_clock: dict = field(default_factory=dict)
 
     def of(self, req: ImagingRequest, day: date, sat: Optional[int] = None) -> list[Opportunity]:
         """A request's opportunities on a day (within its window that day), of one satellite when given."""
@@ -82,6 +85,11 @@ class Passes:
         first, last = window_of(req, day)
         found = [o for i, t, o in self.blocked.get(req.id, ()) if first <= t <= last and (sat is None or i == sat)]
         return list(dict.fromkeys(found))
+
+    def off_clock_on(self, req: ImagingRequest, day: date, sat: Optional[int] = None) -> list[float]:
+        """The moments of a request's passes on a day left out only for its 時刻 (of one satellite when given)."""
+        first, last = window_of(req, day)
+        return [t for i, t in self.off_clock.get(req.id, ()) if first <= t <= last and (sat is None or i == sat)]
 
 
 def window_of(req: ImagingRequest, day: date) -> tuple[float, float]:
@@ -237,6 +245,10 @@ def _search(out: Passes, key: tuple, members: list, start: float, end: float, sa
         req = reqs[op.target]
         index = used[op.satellite]
         if index not in ables[op.target] or not req.start <= op.time <= req.end or not _keeps(req, sats[index], op, now):
+            continue
+        if not in_window(req, op.time):
+            # Outside its 時刻: kept apart, so that a request with none inside is told why.
+            out.off_clock.setdefault(req.id, []).append((index, op.time))
             continue
         hit = blocking(sats[index], op.time, op.ascending, op.side, op.offNadir, op.sunElevation, clock)
         if hit is not None:

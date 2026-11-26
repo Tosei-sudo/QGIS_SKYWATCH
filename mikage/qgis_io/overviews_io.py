@@ -529,7 +529,11 @@ def share_beside(path: str, options: OverviewOptions) -> bool:
         return False
     target = original + ".ovr"
     folder = os.path.dirname(os.path.abspath(original))
-    if not (options.location == "auto" or beside_wanted(original)) or os.path.exists(target) or not writable_folder(folder):
+    if not (options.location == "auto" or beside_wanted(original)) or not writable_folder(folder):
+        return False
+    if os.path.exists(target):
+        QgsMessageLog.logMessage(f"手元のコピー: 共有フォルダの画像の隣にはもう {os.path.basename(target)} があるので置かない", LOG_TAG,
+                                 Qgis.MessageLevel.Info, notifyUser=False)
         return False
     part = os.path.join(folder, f".{os.path.basename(target)}.{uuid.uuid4().hex[:8]}.part")
     try:
@@ -537,9 +541,12 @@ def share_beside(path: str, options: OverviewOptions) -> bool:
         if os.path.exists(target):
             return False
         os.replace(part, target)
+        QgsMessageLog.logMessage(f"手元のコピー: {os.path.basename(target)} を共有フォルダの画像の隣にも置いた（{target}）", LOG_TAG,
+                                 Qgis.MessageLevel.Info, notifyUser=False)
         return True
     except OSError as error:
-        QgsMessageLog.logMessage(f"{os.path.basename(target)} を共有フォルダの画像の隣に置けず（{error}）", LOG_TAG, Qgis.MessageLevel.Info)
+        QgsMessageLog.logMessage(f"手元のコピー: {os.path.basename(target)} を共有フォルダの画像の隣に置けず（{error}）", LOG_TAG,
+                                 Qgis.MessageLevel.Info, notifyUser=False)
         return False
     finally:
         if os.path.exists(part):
