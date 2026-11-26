@@ -20,7 +20,6 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
-from qgis.core import QgsSettings
 from qgis.PyQt.QtCore import QCoreApplication, Qt, QTimer
 from qgis.PyQt.QtWidgets import (
     QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDockWidget, QFormLayout, QGridLayout, QGroupBox, QLabel, QLineEdit,
@@ -29,13 +28,12 @@ from qgis.PyQt.QtWidgets import (
 
 from ..core import roles as role_list
 from ..core.coords import NOTATIONS
-from ..qgis_io import roles_io, settings
+from ..qgis_io import qsettings, roles_io, settings
 from .dock_layouts import DockLayoutStore, apply as apply_layout, float_docks, merged  # noqa: F401 (float_docks also from here)
 from .fit import fit_text
 
-GROUP = "mikage"
-DONE_KEY = GROUP + "/firstSetupDone"
-FLOATING_KEY = GROUP + "/docksFloating"
+DONE_KEY = "firstSetupDone"
+FLOATING_KEY = "docksFloating"
 #: Off in the tests (conftest), where a page popping up in every plugin test would get in the way.
 ENABLED = True
 
@@ -54,29 +52,25 @@ def is_first_start() -> bool:
     profile with any of the plugin's settings already (used before) is marked
     set up instead. Called before the plugin writes anything at start.
     """
-    s = QgsSettings()
-    if s.value(DONE_KEY, "") == "1":
+    if qsettings.value(DONE_KEY, "") == "1":
         return False
-    s.beginGroup(GROUP)
-    used = bool(s.allKeys())
-    s.endGroup()
-    if used:
+    if qsettings.any_kept():
         mark_done()
         return False
     return True
 
 
 def mark_done() -> None:
-    QgsSettings().setValue(DONE_KEY, "1")
+    qsettings.set_value(DONE_KEY, "1")
 
 
 def docks_floating() -> bool:
     """「ドックを別ウィンドウで開く」: each dock in a window of its own instead of joined to the main window."""
-    return QgsSettings().value(FLOATING_KEY, "") == "1"
+    return qsettings.value(FLOATING_KEY, "") == "1"
 
 
 def set_docks_floating(on: bool) -> None:
-    QgsSettings().setValue(FLOATING_KEY, "1" if on else "0")
+    qsettings.set_value(FLOATING_KEY, "1" if on else "0")
 
 
 def roles() -> list[str]:

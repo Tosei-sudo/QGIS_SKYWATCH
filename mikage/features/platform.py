@@ -10,7 +10,7 @@ from typing import Optional
 from qgis.core import Qgis
 from qgis.PyQt.QtWidgets import QPushButton
 
-from ..core import errors
+from ..core import edition, errors
 from ..qgis_io import settings
 from ..ui import error_help, first_setup
 from ..ui.dock_layouts import DockLayoutMenu
@@ -21,6 +21,10 @@ from .base import Feature, close, icon, tr
 
 #: The dialogs closed when the roles in use no longer have their entry (担当).
 ROLE_DIALOGS = (("health_dialog", "接続と表の点検…"), ("api_reference", "Python API リファレンス…"))
+
+
+#: The help's section on MIKAGE 練習版 (help/src/025-training.html).
+TRAINING_EDITION_HELP = "training-edition"
 
 
 class Platform(Feature):
@@ -131,12 +135,17 @@ class Platform(Feature):
     # ---- the plugin's own dialogs ------------------------------------------------------------------------
 
     def open_help(self, section: Optional[str] = None):
-        """「使い方（ヘルプ）…」: the help for everyday users (not blocking QGIS), at a section (its id) if given."""
+        """
+        「使い方（ヘルプ）…」: the help for everyday users (not blocking QGIS), at a section (its id) if given;
+        MIKAGE 練習版's first opened at its own (what differs in it).
+        """
         from ..ui.help_dialog import HelpDialog
 
         host = self.host
         if host.help_dialog is None:
             host.help_dialog = HelpDialog(host.run_menu_entry, self.window())
+            if not section and edition.training_only():
+                section = TRAINING_EDITION_HELP
         host.help_dialog.show()
         host.help_dialog.raise_()
         if section:
@@ -182,7 +191,8 @@ class Platform(Feature):
         host.setup_dialog = first_setup.FirstSetupDialog(
             self.window(), lambda: host.allowed_docks(), first=first,
             observation_dock=host.ports.observations, coordinates=lambda: host.coordinates,
-            open_settings=self.open_settings, keeper=host.role_keeper, all_docks=lambda: host.docks,
+            # (MIKAGE 練習版: its settings file is the one shipped, 「設定…」 not used)
+            open_settings=None if edition.training_only() else self.open_settings, keeper=host.role_keeper, all_docks=lambda: host.docks,
             text_assist=getattr(self.context, "text_assist", None),
             # 「まず練習」: 練習モード (features/training.py), when it is there and the settings file does not hide it.
             practise=(lambda: host.start_training()) if hasattr(host, "start_training") and host.allows(tr("練習モードを始める")) else None)

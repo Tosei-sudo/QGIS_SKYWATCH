@@ -17,6 +17,7 @@ APP = start_app()
 
 from qgis.core import QgsProject, QgsSettings  # noqa: E402
 
+from mikage.qgis_io import qsettings  # noqa: E402
 from mikage.core.esri import EsriClient  # noqa: E402
 from mikage.core.obs.alerts import DEFAULT_PLACE_FIELDS  # noqa: E402
 from mikage.core.request.model import jst_day  # noqa: E402
@@ -51,8 +52,8 @@ AREA_COLUMN = COLUMNS.index("地域")
 def plugin(tmp_path, monkeypatch, request):
     QgsProject.instance().removeAllMapLayers()
     QgsSettings().remove("mikage")
-    QgsSettings().remove(org_areas_panel.ON_MAP_KEY)
-    QgsSettings().remove(TAB_KEY)
+    QgsSettings().remove(qsettings.key(org_areas_panel.ON_MAP_KEY))
+    QgsSettings().remove(qsettings.key(TAB_KEY))
     settings._set("local_gpkg", str(tmp_path / "local.gpkg"))
     monkeypatch.setenv("USERNAME", "tsudo")
     fake = FakeEsri()
@@ -98,8 +99,8 @@ def plugin(tmp_path, monkeypatch, request):
     p.unload()
     QgsProject.instance().removeAllMapLayers()
     QgsSettings().remove("mikage")
-    QgsSettings().remove(org_areas_panel.ON_MAP_KEY)
-    QgsSettings().remove(TAB_KEY)
+    QgsSettings().remove(qsettings.key(org_areas_panel.ON_MAP_KEY))
+    QgsSettings().remove(qsettings.key(TAB_KEY))
 
 
 def make_request(p, name="横須賀港", follow=True):

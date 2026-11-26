@@ -10,9 +10,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-#: How a script gets the API.
+from . import edition
+
+#: How a script gets the API (the plugin's id: 「mikage_training」 in MIKAGE 練習版).
 HOW_TO = ('import qgis.utils\n'
-          'api = qgis.utils.plugins["mikage"].api')
+          f'api = qgis.utils.plugins["{edition.plugin_id()}"].api')
 
 
 @dataclass

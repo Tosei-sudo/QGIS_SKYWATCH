@@ -165,3 +165,59 @@ def test_plain_http_is_warned_about(repo, tmp_path, monkeypatch, capsys):
     assert "http://" in capsys.readouterr().err
     repo.main([str(tmp_path / "repo"), "--zip", *zips, "--url", "https://intra.example/qgis-plugins"])
     assert capsys.readouterr().err == ""
+
+
+def _entries(path):
+    return {n.findtext("file_name").partition(".")[0]: n for n in ET.parse(path).getroot().iter("pyqgis_plugin")}
+
+
+def test_lists_both_plugins_and_mikage_training_alone(repo, tmp_path):
+    """MIKAGE and MIKAGE 練習版 in plugins.xml (chosen in QGIS's plugin manager); 練習版 alone in plugins-training.xml."""
+    b = load("build_zip")
+    regular = b.main("", str(tmp_path / "dist"), version="0.4.0.20261126090000")
+    training = b.main("", str(tmp_path / "dist"), version="0.4.0.20261126090000", training_only=True)
+    out = tmp_path / "repo"
+    addresses = repo.publish(str(out), [regular, training], "https://intra.example/qgis", today="2026-11-26")
+    assert addresses == ["https://intra.example/qgis/plugins.xml", "https://intra.example/qgis/plugins-training.xml"]
+    assert sorted(os.listdir(out)) == ["icon-training.svg", "icon.svg", "mikage.0.4.0.20261126090000.zip",
+                                       "mikage_training.0.4.0.20261126090000.zip", "plugins-training.xml", "plugins.xml"]
+    both = _entries(out / "plugins.xml")
+    assert list(both) == ["mikage", "mikage_training"]
+    assert both["mikage_training"].get("name") == "MIKAGE 練習版" and both["mikage"].get("name") == "MIKAGE"
+    assert both["mikage_training"].findtext("icon") == "https://intra.example/qgis/icon-training.svg"
+    assert both["mikage_training"].findtext("download_url") == "https://intra.example/qgis/mikage_training.0.4.0.20261126090000.zip"
+    assert list(_entries(out / "plugins-training.xml")) == ["mikage_training"]
+    # MIKAGE alone published later: MIKAGE 練習版's entry stays listed beside it.
+    newer = b.main("", str(tmp_path / "dist2"), version="0.4.0.20261127090000")
+    repo.publish(str(out), [newer], "https://intra.example/qgis", today="2026-11-27")
+    both = _entries(out / "plugins.xml")
+    assert both["mikage"].get("version") == "0.4.0.20261127090000"
+    assert both["mikage_training"].get("version") == "0.4.0.20261126090000"
+    # A 練習版 not newer than the one listed is refused like MIKAGE's.
+    with pytest.raises(SystemExit):
+        repo.publish(str(out), [training])
+
+
+def test_main_builds_both_plugins_unless_told(repo, tmp_path, monkeypatch):
+    seen = []
+
+    class Fake:
+        @staticmethod
+        def main(config, out_dir, **kw):
+            seen.append((kw.get("training_only", False), kw.get("win64", False), kw.get("lock_config")))
+            return ""
+
+    monkeypatch.setattr(repo, "build_module", lambda: Fake)
+    monkeypatch.setattr(repo, "publish", lambda *a, **k: [])
+    config = os.path.join(ROOT, "mikage", "tests", "data", "viewer-config.jsonc")
+    repo.main([str(tmp_path / "r"), "--config", config, "--lock-config"])
+    # MIKAGE first (locked when asked), then MIKAGE 練習版 (never locked: it reads only the shipped file).
+    assert seen == [(False, False, True), (False, True, True), (True, False, False), (True, True, False)]
+    seen.clear()
+    repo.main([str(tmp_path / "r"), "--no-training", "--no-win64"])
+    assert seen == [(False, False, False)]
+    seen.clear()
+    repo.main([str(tmp_path / "r"), "--training-only", "--no-win64"])
+    assert seen == [(True, False, False)]
+    with pytest.raises(SystemExit):
+        repo.main([str(tmp_path / "r"), "--training-only", "--no-training"])

@@ -1,7 +1,7 @@
 """
 入力の初期値の記憶: what was last chosen in a form (a satellite, a system,
 a condition, a part of a report…) is offered first the next time, in this
-QGIS user profile (QgsSettings `mikage/last_inputs/<form>`),
+QGIS user profile (QgsSettings `<plugin id>/last_inputs/<form>`),
 never in the settings file.
 
 `InputMemory(form, {name: widget})` keeps the values of combo boxes (by
@@ -16,17 +16,16 @@ from __future__ import annotations
 import json
 from typing import Mapping, Optional
 
-from qgis.core import QgsSettings
 from qgis.PyQt.QtWidgets import QAbstractButton, QAbstractSpinBox, QComboBox, QDoubleSpinBox, QLineEdit, QSpinBox, QWidget
 
-from ..qgis_io.settings import PREFIX
+from ..qgis_io import qsettings
 
 KEY = "last_inputs"
 
 
 def read(form: str) -> dict:
     """The values kept for `form` ({} when none or unreadable)."""
-    value = QgsSettings().value(f"{PREFIX}{KEY}/{form}", "")
+    value = qsettings.value(f"{KEY}/{form}", "")
     try:
         value = json.loads(value) if isinstance(value, str) and value else {}
     except ValueError:
@@ -35,7 +34,7 @@ def read(form: str) -> dict:
 
 
 def write(form: str, values: Mapping) -> None:
-    QgsSettings().setValue(f"{PREFIX}{KEY}/{form}", json.dumps(dict(values), ensure_ascii=False))
+    qsettings.set_value(f"{KEY}/{form}", json.dumps(dict(values), ensure_ascii=False))
 
 
 #: The observation form's last kind, activity and 確度, per store (core.obs.book.ObservationBook.remember).
@@ -44,8 +43,8 @@ OBSERVATION_LAST = "observations/last_values"
 
 def forget_all() -> None:
     """Every form's kept values cleared (the observation form's too): the forms start from their own defaults again."""
-    QgsSettings().remove(f"{PREFIX}{KEY}")
-    QgsSettings().remove(f"{PREFIX}{OBSERVATION_LAST}")
+    qsettings.remove(KEY)
+    qsettings.remove(OBSERVATION_LAST)
 
 
 def value_of(widget: QWidget):

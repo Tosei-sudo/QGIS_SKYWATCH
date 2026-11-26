@@ -74,7 +74,7 @@ plugin.py ── features/<機能>.py（登録票） ── ui/ ── qgis_io/ 
 
 ## 共通基盤（`KERNEL`）
 
-`core.esri`（EsriClient・Transport）、`core.util`、`core.time_zone`・`core.time_text`（日時）、`core.sql`（SQL の日時の書き方・`since_condition`）、`core.sources`（Esri の表の指定）、`core.shapes`（図形・`esri_rings`）、`core.listed_image`（一覧の画像）、`core.json_schema`（JSON Schema の確かめ）、`core.file_values`（ファイルに書く値の形）、`core.audit`・`core.edit_stamp`・`core.offline`・`core.auth`・`core.gpkg` ほか、`qgis_io.tasks`・`qgis_io.network`・`qgis_io.geometry`・`qgis_io.pinned_layers`（「一番上に固定」の下に置く位置）、`qgis_io.map_tools`（地図のツールの受け渡し: ツールを終えると利用者の元のツールに戻し、プラグインのほかのツールには戻さない）、`ui.fit` など。一覧は `architecture.py` の `KERNEL`。
+`core.esri`（EsriClient・Transport）、`core.util`、`core.time_zone`・`core.time_text`（日時）、`core.sql`（SQL の日時の書き方・`since_condition`）、`core.sources`（Esri の表の指定）、`core.shapes`（図形・`esri_rings`）、`core.listed_image`（一覧の画像）、`core.json_schema`（JSON Schema の確かめ）、`core.file_values`（ファイルに書く値の形）、`core.audit`・`core.edit_stamp`・`core.offline`・`core.auth`・`core.gpkg`・`core.edition`（MIKAGE か MIKAGE 練習版か）ほか、`qgis_io.tasks`・`qgis_io.network`・`qgis_io.geometry`・`qgis_io.pinned_layers`（「一番上に固定」の下に置く位置）、`qgis_io.map_tools`（地図のツールの受け渡し: ツールを終えると利用者の元のツールに戻し、プラグインのほかのツールには戻さない）、`ui.fit` など。一覧は `architecture.py` の `KERNEL`。
 
 二つの機能が使う小さな部品は、どちらかの機能に置かずに基盤へ移す（機能どうしの依存を一方向に保つため）。いまの向きは ai → obs → (request, catalog, plan)、request → (catalog, plan)、catalog → plan。
 
@@ -95,6 +95,7 @@ plugin.py ── features/<機能>.py（登録票） ── ui/ ── qgis_io/ 
 
 - 設定ファイル: `core/config.py` の `SECTIONS` が、キー・`PluginConfig` の項目・読み方の一覧表（読む順 = 問題を知らせる順）。`KEYS` はそこから作る。ほかの項目から作る項目（`imageCatalogs` の練習モードだけのカタログ `practice_catalogs`）は `DERIVED` に並べる。新しいキーは `PluginConfig` の項目と `SECTIONS` の 1 行、設定ビルダー（`tools/config_builder.html`）の画面を足し、`python3 -m mikage.tests.test_config_builder` で定数を書き直す
 - 個人設定（QgsSettings）: 機能ごとのモジュール `qgis_io/prefs/<機能>.py`（画像・観測記録・撮像計画・地図・AI・撮像依頼）。読み書きは `qgis_io/qsettings.py` の `pref` / `set_pref`（キーは `mikage/<キー>`）。`qgis_io/settings.py` から従来どおり `settings.<名前>` で読める
+- 版（`core/edition.py`、2026-11-26）: 同じコードから MIKAGE（`mikage`）と MIKAGE 練習版（`mikage_training`、`scripts/build_zip.py --training-only`、練習モードだけ）を作る。個人設定のキーの頭（`mikage/` か `mikage_training/`）とプロファイルの中のフォルダー（`qsettings.profile_folder`）は版ごとなので、モジュールは `QgsSettings()` や `qgisSettingsDirPath()` を直接使わず、`qgis_io/qsettings.py` の `value` / `set_value` / `remove` / `contains` / `pref` / `set_pref` / `profile_folder` に頭なしのキー・名前を渡す（`tests/test_edition.py` が確かめる。QGIS 自身のキーを変える `qgis_io/raster_speed.py` だけ例外）
 
 ## 大きなドックの部分
 

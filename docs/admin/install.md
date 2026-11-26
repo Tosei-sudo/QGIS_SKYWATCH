@@ -53,6 +53,22 @@ python3 scripts/build_zip.py --config /path/to/config.json --lock-config --win64
 - 設定ファイルなしで `--lock-config` を付けると zip を作らない
 - 固定を外すには `--lock-config` なしで作った zip を入れ直す（またはプラグインのフォルダの `config.lock` を消す）。各自が前に指定していたファイルがあれば、またそちらを読む
 
+### MIKAGE 練習版（練習モードだけの別のプラグイン、`--training-only`）
+
+研修用の PC など、本番を使わせずに練習だけをさせたいところに入れる版（2026-11-26）。コードは MIKAGE と同じで、作るときの指定だけで別のプラグインになる。
+
+```
+python3 scripts/build_zip.py --training-only
+python3 scripts/build_zip.py --training-only --win64 --config /path/to/config.json
+```
+
+- `dist/mikage_training-<版>[-win64].zip` を作る。zip の中のフォルダー（QGIS のプラグイン ID）は `mikage_training`、名前は「MIKAGE 練習版」、アイコンは MIKAGE のものに橙色の「練」の印。目印のファイル `mikage_training/training.only` があると練習版として動く（`mikage/core/edition.py`）。本番の仕事の `scheduled_follow.py`（定期照合）は入れない
+- 動き: QGIS を起動すると確認なしで練習モードに入り（初回だけ練習用の画像を作る）、終えられない（「練習モードを始める」「練習モードを終える」・帯の「練習モードを終える」なし）。練習モードに入る前も、ドックに本番の設定ファイルを渡さない。開いているプロジェクトはそのまま（新しいプロジェクトにしない）。監査ログは書かない。「判読の練習の問題を作る…」「判読の練習の成績…」は出さない（指導者は本番の MIKAGE で使う）。「設定…」は練習モードと同じく使えない（「最初の設定」の「設定ファイルの指定・接続の認証…」も出さない）
+- 設定ファイル: 同梱しなければ内蔵の見本（横須賀）だけで練習し、ネットワークには出ない。同梱すれば、練習モードが本番の設定ファイルから読むもの（`training` の設定、`training.fromProduction` の台帳、`mode` が `training`・`both` の画像カタログ、`training.exercises` の組織の問題と成績の書き込み）だけを使い、ほかの表（本番の依頼・記録・カタログなど）は読まない。各自が「設定…」で指定した設定ファイルは読まない（同梱のものだけ）。そのため `--lock-config` は付けない（付けると zip を作らない）。本番の表を読むのにサインインが要る場合は、設定ファイルの `token` を使う（各自の QGIS の認証設定は「設定…」で選ぶため、練習版では選べない）
+- 個人設定（`QgsSettings`）は `mikage_training/…`、プロファイルの中のフォルダーは `mikage_training/`（練習データは `mikage_training/training`）で、MIKAGE の `mikage/…` とは混ざらない。担当は練習版の中で選んだものがそのまま残る（MIKAGE の練習モードのように終えると戻す、ということはない）
+- MIKAGE と同じ QGIS（同じプロファイル）に両方入れられる。ただし同時には動かさない（Processing の ID `mikage`、式の関数、ショートカット、ドックの名前が同じため）。両方を有効にすると、あとから読み込まれた方がメッセージバーに「…が有効なため、…は動かさない」と出して何もしない。両方使う人（指導者など）は MIKAGE の練習モードで足りる
+- ソースのまま試すときは `mikage/` に空のファイル `training.only` を置く（git の対象外。MIKAGE の zip には入れない）
+
 ### 社内のプラグインリポジトリで更新を配る（閉域）
 
 公式のプラグインリポジトリ（plugins.qgis.org）に届かない閉域でも、社内の共有フォルダーか Web サーバーに「社内リポジトリ」を置けば、各 PC の QGIS が普通のプラグインと同じく更新を知らせ、「プラグインの管理」のボタン 1 つで入れ替えられる。
@@ -63,12 +79,24 @@ python3 scripts/build_zip.py --config /path/to/config.json --lock-config --win64
 python3 scripts/make_plugin_repo.py \\fileserver\share\qgis-plugins
 python3 scripts/make_plugin_repo.py /srv/www/qgis-plugins --url https://intra.example/qgis-plugins
 python3 scripts/make_plugin_repo.py \\fileserver\share\qgis-plugins --config config.json --lock-config --changelog "通報の地名を追加"
+python3 scripts/make_plugin_repo.py \\fileserver\share\qgis-plugins --no-training      # MIKAGE だけ
+python3 scripts/make_plugin_repo.py \\fileserver\share\qgis-plugins --training-only    # MIKAGE 練習版だけ
 ```
 
-- 通常版と Windows 版の zip を新しい版で作り、フォルダーに `plugins.xml`（通常版）・`plugins-win64.xml`（Windows 版）・`mikage.<版>.zip`・`mikage.<版>.win64.zip`・`icon.svg` を置く。最後に各 PC で登録するアドレスを出す
+- MIKAGE と [MIKAGE 練習版](#mikage-練習版練習モードだけの別のプラグイン--training-only) のそれぞれ通常版と Windows 版の zip を新しい版で作り、フォルダーに置く。最後に各 PC で登録するアドレスを出す
+
+| ファイル | 中身 |
+|---|---|
+| `plugins.xml` | 通常版の一覧。MIKAGE と MIKAGE 練習版の両方が載り、各 PC の「プラグインの管理」でどちらを入れるか選ぶ |
+| `plugins-win64.xml` | Windows 版の一覧（同じく両方） |
+| `plugins-training.xml`・`plugins-training-win64.xml` | MIKAGE 練習版だけの一覧。研修用の PC にはこちらを登録すると、MIKAGE（本番）は一覧に出ない |
+| `mikage.<版>[.win64].zip`・`mikage_training.<版>[.win64].zip` | それぞれの zip |
+| `icon.svg`・`icon-training.svg` | 一覧に出すアイコン |
+
+- 片方だけ（`--no-training`・`--training-only`、`--zip` で作ってある片方だけ）を載せても、一覧にあるもう片方はそのまま残る
 - 版は `metadata.txt` の版の後ろに UTC の日時（秒まで）を付けたもの（例 `0.4.0.20261108123000`）。QGIS は掲載の版が入っている版より大きいときだけ更新と見なすため、作るたびに必ず大きくなるようにしている。`--version` で指定もできる。大きな変更では `metadata.txt` の版（`0.4.0` → `0.5.0`）を上げる
 - 掲載中の版より新しくない zip は載せない。前の版に戻すときは、残っている古い zip を `--zip 古い.zip --allow-older` で載せ直す（各 PC では「プラグインの管理」で入れ直し）。古い zip は消さずに残す
-- `--config`・`--lock-config`（同梱の設定ファイルに固定）は `build_zip.py` と同じで、通常版・Windows 版の両方に効く。`--zip a.zip a-win64.zip` で作ってある zip を載せる（中の版のまま、Windows 版かどうかは中身で判断）。`--no-win64`・`--no-regular` で片方だけ作る
+- `--config`・`--lock-config`（同梱の設定ファイルに固定）は `build_zip.py` と同じで、通常版・Windows 版の両方に効く。`--config` は MIKAGE 練習版にも同梱する（練習版は固定しなくても同梱のものだけを読むので `--lock-config` は MIKAGE だけに効く）。`--zip a.zip a-win64.zip` で作ってある zip を載せる（中の版のまま、MIKAGE か練習版か・Windows 版かどうかは中身で判断）。`--no-win64`・`--no-regular` で片方だけ作る
 - 閉域では Windows 版の wheel（onnxruntime・onnxruntime-genai・sgp4・tzdata）を pip で取れないので、外で `pip download onnxruntime onnxruntime-genai sgp4 tzdata --only-binary=:all: --platform win_amd64 --python-version 3.12 --no-deps -d wheels` で取ったものを持ち込み、`dist/wheels/` に置く（そのまま使われる）か `--onnxruntime-wheel`・`--onnxruntime-genai-wheel`・`--sgp4-wheel`・`--tzdata-wheel` で指定する。持ち込み直すのはライブラリの版を上げるときだけ
 - zip を先に置いてから `plugins.xml` を差し替えるので、作っている途中に各 PC が読んでも、ない zip を指すことはない
 - `--url` を付けないと、ダウンロード先はフォルダーの `file://` アドレス（`\\fileserver\share\qgis-plugins` なら `file://fileserver/share/qgis-plugins`）。Linux でマウントした共有フォルダーに作るときは、各 PC から見えるアドレスを `--url file://fileserver/share/qgis-plugins` のように付ける
@@ -82,10 +110,10 @@ python3 scripts/make_plugin_repo.py \\fileserver\share\qgis-plugins --config con
 **各 PC で登録する（最初の 1 回）**
 
 1. 「プラグイン」→「プラグインの管理とインストール」→「設定」→「追加…」
-2. 名前（例「社内」）と URL を入れる。Windows 版を使う PC は `…/plugins-win64.xml`、それ以外は `…/plugins.xml`。共有フォルダーなら `file://fileserver/share/qgis-plugins/plugins-win64.xml`、Web サーバーなら `https://intra.example/qgis-plugins/plugins-win64.xml`（http:// は経路で zip を差し替えられるため避ける）
+2. 名前（例「社内」）と URL を入れる。Windows 版を使う PC は `…/plugins-win64.xml`、それ以外は `…/plugins.xml`（研修用で MIKAGE 練習版だけを入れさせる PC は `…/plugins-training-win64.xml`・`…/plugins-training.xml`）。共有フォルダーなら `file://fileserver/share/qgis-plugins/plugins-win64.xml`、Web サーバーなら `https://intra.example/qgis-plugins/plugins-win64.xml`（http:// は経路で zip を差し替えられるため避ける）
 3. 公式のリポジトリ（QGIS Official Plugin Repository）は届かないので、チェックを外して無効にしておくとエラーが出ない
 4. 同じ画面の「起動時に更新を確認する」を入れておくと、QGIS は 3 日おきに起動時に確かめ、新しい版があれば知らせる。すぐ確かめるときは「すべてのリポジトリを再読み込み」
-5. 「すべて」の一覧で「MIKAGE」を選び「プラグインをインストール」（入っていれば「プラグインをアップグレード」）
+5. 「すべて」の一覧で「MIKAGE」（練習だけの PC は「MIKAGE 練習版」）を選び「プラグインをインストール」（入っていれば「プラグインをアップグレード」）
 
 QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に入るので、多くの PC に配るときは QGIS の `qgis_global_settings.ini` の `[app]` に `plugin_repositories\internal\url=file://fileserver/share/qgis-plugins/plugins-win64.xml` と書いておくこともできる（公式のリポジトリは消しても QGIS が足し直すので、`plugin_repositories\QGIS%20Official%20Plugin%20Repository\enabled=false` のように無効にする）。
 

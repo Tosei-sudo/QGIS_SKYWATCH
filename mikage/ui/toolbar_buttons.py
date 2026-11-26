@@ -20,15 +20,15 @@ from __future__ import annotations
 import json
 from typing import Callable, Optional
 
-from qgis.core import QgsSettings
 from qgis.PyQt.QtCore import QCoreApplication, Qt
 from qgis.PyQt.QtWidgets import (
     QAbstractItemView, QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QPushButton, QToolBar,
     QToolButton, QVBoxLayout, QWidget,
 )
+from ..qgis_io import qsettings
 from .fit import fit_text
 
-KEY = "mikage/toolbarButtons"
+KEY = "toolbarButtons"
 
 #: Without a role (and for a layout of the person's own): what the toolbar showed before roles.
 DEFAULT = [
@@ -79,7 +79,7 @@ def tr(text: str) -> str:
 # ---- what is kept --------------------------------------------------------
 
 def _own_all() -> dict:
-    raw = QgsSettings().value(KEY, "")
+    raw = qsettings.value(KEY, "")
     try:
         data = json.loads(raw) if isinstance(raw, str) and raw else {}
     except ValueError:
@@ -100,7 +100,7 @@ def set_own(role: str, texts: Optional[list[str]]) -> None:
         data.pop(role, None)
     else:
         data[role] = list(texts)
-    QgsSettings().setValue(KEY, json.dumps(data, ensure_ascii=False))
+    qsettings.set_value(KEY, json.dumps(data, ensure_ascii=False))
 
 
 def standard(role: str) -> list[str]:
