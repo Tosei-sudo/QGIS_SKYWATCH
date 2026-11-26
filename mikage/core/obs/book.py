@@ -33,9 +33,10 @@ from .satellites import clean as clean_satellite
 from .scope import RecordQuery, grown, merged
 from .stores import AreaStore, ObservationStore, TaxonomyStore, quantity_supported, satellite_supported, unseen_supported
 from .taxonomy import (
-    SpecField, Taxon, activities_at, find, kind_of, move_taxon, name_label_of, normalize, path_of, place_taxon, remove_taxon, rewrite,
-    taxonomy_of, update_taxon, with_kinds, within,
+    MemberHit, SpecField, Taxon, activities_at, find, find_member, kind_of, move_taxon, name_label_of, normalize, path_of, place_taxon,
+    remove_taxon, rewrite, segment_name, taxonomy_of, update_taxon, with_kinds, within,
 )
+from . import taxonomy as _tx
 from ..together import read_together
 from ..util import read_number
 
@@ -232,6 +233,8 @@ class ObservationBook:
         self.records: list[Observation] = []
         self.areas: list[CheckedArea] = []
         self._taxonomy: list[Taxon] = list(vocabulary.taxonomy)
+        #: The individuals' words for 備考 (note_words) and the classification they are of.
+        self._note_words: tuple[Optional[list[Taxon]], tuple] = (None, ())
         self.spec_fields: list[SpecField] = list(vocabulary.spec_fields)
         #: The images in time order: the open ones and those listed without their file.
         self.images: list[ObservedImage] = []
@@ -1779,6 +1782,104 @@ class ObservationBook:
         records = [replace(o, kind=kind_of(up), updated_at=now) for o in self.records if within(o.kind, path)]
         note = f"（記録 {len(records)} 件は「{kind_of(up) or '種別なし'}」に）" if records else ""
         return self._save_taxonomy(remove_taxon(self.taxonomy(), path), records, f"分類「{kind_of(path)}」を削除{note}")
+
+    # ---- known individuals (既知の個体) -----------------------------------
+
+    @property
+    def members_kept(self) -> bool:
+        """Whether what known individuals say of themselves (別名・諸元・参考写真・備考) is kept by the classification's
+        store (else their names only: an Esri store needs `taxonomyTable.members`)."""
+        return bool(getattr(self.taxonomy_store, "keeps_members", False))
+
+    def note_words(self) -> tuple:
+        """The known individuals' names and other names, offered in 備考 besides the glossary's words (glossary.member_terms;
+        the same tuple while the classification is the same)."""
+        taxa = self._taxonomy
+        if self._note_words[0] is not taxa:
+            from .glossary import member_terms
+
+            self._note_words = (taxa, member_terms(taxa))
+        return self._note_words[1]
+
+    def find_member(self, name: str) -> Optional[MemberHit]:
+        """The known individual a name (its own, or one of its other names) stands for."""
+        return find_member(self.taxonomy(), name, self.spec_fields)
+
+    def _member_edit(self, change: Callable[[list[Taxon]], list[Taxon]], done: str, action: str, target: str,
+                     records: Sequence[Observation] = ()) -> bool:
+        try:
+            taxa = change(self.taxonomy())
+        except ValueError as error:
+            self._say(str(error))
+            return False
+        if not self._save_taxonomy(taxa, list(records), done):
+            return False
+        from .. import audit
+
+        audit.record("edit", action, self.taxonomy_store.label, count=1, detail={"member": target})
+        return True
+
+    def add_members(self, path: Sequence[str], names: Iterable[str]) -> list[str]:
+        """Adds known individuals to a class (names it has already are left); the names added."""
+        path = list(path)
+        t = find(self.taxonomy(), path)
+        if t is None:
+            self._say(f"分類「{kind_of(path)}」なし")
+            return []
+        have = set(t.members or [])
+        added = [n for n in dict.fromkeys(segment_name(n) for n in names) if n and n not in have]
+        if not added:
+            self._say("追加する個体なし（同じ名前の個体はこの分類にある）")
+            return []
+        elsewhere = [n for n in added if (hit := self.find_member(n)) is not None and kind_of(hit.path) != kind_of(path)]
+        note = f"（{'・'.join(elsewhere[:3])} は別の分類にも同じ名前・別名あり）" if elsewhere else ""
+        ok = self._member_edit(lambda taxa: _tx.add_members(taxa, path, added),
+                               f"分類「{kind_of(path)}」に個体 {len(added)} 件を追加{note}", "taxonomy-member-add", "、".join(added))
+        return added if ok else []
+
+    def update_member(self, path: Sequence[str], name: str, new_name: Optional[str] = None, specs: Optional[dict[str, str]] = None,
+                      photos: Optional[list[str]] = None, note: Optional[str] = None) -> Optional[str]:
+        """
+        Changes a known individual: its name (records written with the old
+        name keep it, and it becomes one of the individual's 別名 so they still
+        find it), its specifications (別名 among them), photos and note
+        (each given replaces; None keeps). Its name after, or None.
+        """
+        path = list(path)
+        t = find(self.taxonomy(), path)
+        if t is None or name not in (t.members or []):
+            self._say(f"個体「{name}」が分類「{kind_of(path)}」にない")
+            return None
+        to = segment_name(new_name) if new_name is not None else name
+        if not to:
+            self._say("個体の名前が空")
+            return None
+        used = to != name and any(o.object_name == name for o in self.records if o.deleted_at is None)
+
+        def change(taxa: list[Taxon]) -> list[Taxon]:
+            if specs is not None or photos is not None or note is not None:
+                taxa = _tx.update_member(taxa, path, name, specs, photos, note)
+            if to != name:
+                taxa = _tx.rename_member(taxa, path, name, to, keep_old=used)
+            return taxa
+
+        done = (f"個体「{name}」を「{to}」に変更" + ("（記録の古い名前は別名に）" if used else "")) if to != name else f"個体「{name}」を変更"
+        if not self.members_kept and (specs or photos or (note or "").strip()):
+            done += f"（{self.taxonomy_store.label}には個体の表がなく、別名・諸元などは未保存）"
+        return to if self._member_edit(change, done, "taxonomy-member", to) else None
+
+    def move_member(self, path: Sequence[str], name: str, dst: Sequence[str], before: Optional[str] = None) -> bool:
+        """Moves a known individual to another class (or to another place among its class's, `before` one of them; None:
+        last). Its records keep their kinds."""
+        path, dst = list(path), list(dst)
+        where = f"「{kind_of(dst)}」に移動" if kind_of(dst) != kind_of(path) else "の順序を変更"
+        return self._member_edit(lambda taxa: _tx.move_member(taxa, path, name, dst, before), f"個体「{name}」{where}",
+                                 "taxonomy-member-move", name)
+
+    def remove_member(self, path: Sequence[str], name: str) -> bool:
+        """Removes a known individual (records written with its name keep it)."""
+        path = list(path)
+        return self._member_edit(lambda taxa: _tx.remove_member(taxa, path, name), f"個体「{name}」を削除", "taxonomy-member-remove", name)
 
     def _under(self, path: Sequence[str]) -> bool:
         """Every record of a class (and below) read, before they follow it to another (a shared store); False when they could not be."""

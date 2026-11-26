@@ -5,14 +5,15 @@ methods as they were, on the dock's widgets and state.
 """
 from __future__ import annotations
 
+import re
 from typing import Callable, Optional
 
 from qgis.PyQt.QtCore import Qt
 from qgis.PyQt.QtWidgets import QLabel, QLineEdit, QToolButton, QWidget
 
 from ...core.obs.api import (
-    FormValues, local_time, MatchCandidate, js_round, UNSEEN, Observation, unseen_label, find, kind_of,
-    member_index, name_label_of, path_of, quantity_of, read_quantity, spec_text, specs_at,
+    FormValues, local_time, MatchCandidate, js_round, UNSEEN, Observation, unseen_label, find, kind_of, member_names,
+    member_specs_at, name_label_of, path_of, quantity_of, read_quantity, spec_text, specs_at,
 )
 from ...core.util import read_number
 from ..docks import plain_tip
@@ -70,6 +71,8 @@ class FormPart:
         self.form.setTitle(f"{title}（{unseen_label(editing.unseen)}）" if editing is not None and editing.unseen else title)
         self.form.show()
         self.reveal(self.form)
+        typed = self.object_input.text().strip()
+        self._render_member_hint(typed, self.book.find_member(typed) if typed else None)
         self._render_chips()
         self._render_kind_path()
         self._render_candidates()
@@ -281,17 +284,37 @@ class FormPart:
             flow = FlowLayout(chips)
             typed = self.object_input.text().strip()
             for m in members[:24]:
-                flow.addWidget(self._chip_button(m, f"{m} として記録", lambda m=m: (self.object_input.setText(m), self._object_typed()), typed == m))
+                others = member_names(here, m, self.book.spec_fields)
+                own = {k: v for k, v in (here.member(m).specs or {}).items() if k not in ("別名",)}
+                tip = f"{m} として記録" + (f"（別名: {'、'.join(others)}）" if others else "")
+                if own:
+                    tip += "\n" + "・".join(f"{k} {v}" for k, v in list(own.items())[:6])
+                flow.addWidget(self._chip_button(m, tip, lambda m=m: (self.object_input.setText(m), self._object_typed()), typed == m))
             self.kind_levels.add_row(label or "個体", chips)
         self.kind_path_box.setVisible(self.kind_levels.rows > 0)
         self.object_label.setText(f"モノ（{label}）" if label else "モノ")
         self._render_specs(taxa, path)
         self._render_measure()
 
+    def _member_typed(self, path: list[str]) -> Optional[str]:
+        """The known individual of the class at `path` whose name (or other name) is in 「モノ」, else None."""
+        hit = self.book.find_member(self.object_input.text()) if self.book and path else None
+        return hit.name if hit is not None and kind_of(hit.path) == kind_of(path) else None
+
+    def _specs_here(self, taxa, path: list[str]) -> dict:
+        """The specifications shown: the known individual's own first (when 「モノ」 names one of the class), then the class's."""
+        if not path:
+            return {}
+        member = self._member_typed(path)
+        return member_specs_at(taxa, path, member) if member else specs_at(taxa, path)
+
     def _render_specs(self, taxa, path: list[str]) -> None:
-        specs = specs_at(taxa, path) if path else {}
+        specs = self._specs_here(taxa, path)
         fields = {f.name: f for f in self.book.spec_fields}
-        order = [*[f.name for f in self.book.spec_fields], *[k for k in specs if k not in fields]]
+        member = self._member_typed(path)
+        own = [k for k in specs if member and specs[k][1][-1:] == [member]]
+        order = [*[f.name for f in self.book.spec_fields if f.name in own], *[k for k in own if k not in fields],
+                 *[f.name for f in self.book.spec_fields if f.name not in own], *[k for k in specs if k not in fields and k not in own]]
         text = "・".join(f"{k} {spec_text(fields.get(k), specs[k][0])}" for k in order if k in specs)
         self.specs_label.setText(text)
         self.specs_label.setVisible(bool(text))
@@ -301,7 +324,7 @@ class FormPart:
         import re
 
         path = path_of(self.kind_input.text())
-        specs = specs_at(self.book.taxonomy(), path) if self.book and path else {}
+        specs = self._specs_here(self.book.taxonomy(), path) if self.book and path else {}
         parts = []
         for edit, name in ((self.length_input, "全長"), (self.width_input, "全幅")):
             try:
@@ -318,16 +341,29 @@ class FormPart:
         self.measure_note.setText("・".join(parts))
 
     def _object_typed(self) -> None:
-        """A known thing's name typed: its kind and latest activity come with it; a known individual's name brings its class."""
+        """A known thing's name typed: its kind and latest activity come with it; a known individual's name (or one of its
+        other names) brings its class, and an other name is offered its individual's own name (one click)."""
         if self.book is None or not self.form.isVisible():
             return
         name = self.object_input.text().strip()
+        # 「いずも（DDH-183）」 chosen from the list: the individual's own name.
+        picked = re.match(r"^(.+)（(.+)）$", name)
+        if picked:
+            hit = self.book.find_member(picked.group(2))
+            if hit is not None and hit.name == picked.group(1).strip():
+                name = hit.name
+                self.object_input.setText(name)
+        hit = self.book.find_member(name) if name else None
+        self._render_member_hint(name, hit)
         flow = self.book.flow_by_name(name)
         if flow is None:
-            member = member_index(self.book.taxonomy()).get(name)
-            if member:
-                self.kind_input.setText(kind_of(member))
+            if hit is not None and kind_of(hit.path) != self.kind_input.text().strip():
+                self.kind_input.setText(kind_of(hit.path))
                 self._render_kind_path()
+            else:
+                path = path_of(self.kind_input.text())
+                self._render_specs(self.book.taxonomy(), path)
+                self._render_measure()
             self._render_candidates()
             return
         self.kind_input.setText(flow.kind)
@@ -337,6 +373,28 @@ class FormPart:
             self.activity_input.setText(flow.activity)
         self._render_chips()
         self._render_candidates()
+
+    def _render_member_hint(self, typed: str, hit) -> None:
+        """Under 「モノ」: an other name (or another way of writing) of a known individual typed, with a button for its own name."""
+        if hit is None or hit.name == typed:
+            self.member_hint.hide()
+            return
+        if hit.alias:
+            text = self.tr("「{t}」は「{n}」の別名（{k}）").format(t=typed, n=hit.name, k=hit.path[-1])
+        else:
+            text = self.tr("「{t}」は既知の個体「{n}」（{k}）").format(t=typed, n=hit.name, k=hit.path[-1])
+        self.member_hint_label.setText(text)
+        self.member_hint_button.setText(self.tr("{n} にする").format(n=hit.name))
+        self.member_hint_button.setToolTip(self.tr("モノの名前を既知の個体の名前「{n}」に（語彙をそろえる）").format(n=hit.name))
+        self._hinted_member = hit.name
+        self.member_hint.show()
+
+    def use_member_name(self) -> None:
+        """The hint's button: 「モノ」 set to the known individual's own name."""
+        name = getattr(self, "_hinted_member", None)
+        if name:
+            self.object_input.setText(name)
+            self._object_typed()
 
     def _number(self, edit: QLineEdit) -> Optional[float]:
         try:

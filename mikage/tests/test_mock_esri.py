@@ -191,6 +191,9 @@ def test_observations_areas_and_taxonomy_are_stored_and_read_back(server):
     taxa = EsriTaxonomyStore(c.taxonomy_table, client, "分類").load()
     ships = next(t for t in taxa if t.path == ["船舶"])
     assert ships.activities == ["入港", "出港", "停泊", "航行", "荷役"] and ships.levels == ["大分類", "種別", "級"]
+    # The known individuals' other names and specifications (TBL_TAXONOMY_MEMBER).
+    sankaku = next(t for t in taxa if t.path[-1] == "〇〇級").member("△△")
+    assert sankaku.aliases() == ["AA-101", "Sankaku"] and sankaku.specs["番号"] == "101" and sankaku.id
     assert EsriAreaStore("確認範囲", c.areas, client).load() == []
 
 

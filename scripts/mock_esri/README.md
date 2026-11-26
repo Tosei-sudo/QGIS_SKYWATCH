@@ -47,6 +47,7 @@ URL は `http://127.0.0.1:8765/arcgis/rest/services/<名前>/FeatureServer/<番�
 | Observations | 0 | 観測記録（ポイント、2 件）。`NAMED_AREA_OBJECTID` は属性ルール（下記）で、記録を含むいちばん小さい地名（Alerts/3）の `OBJECTID` が入る | `observationStores` |
 | Observations | 1 | 分類体系テーブル（`ACTIVITIES` 付き。船舶・航空機・車両・建物に活動） | `observationStores[].taxonomyTable` |
 | Observations | 2 | 確認範囲（空） | `observationStores[].areas` |
+| Observations | 3 | 分類の既知の個体（〇〇級の △△・□□ に別名・番号・拠点・状態） | `observationStores[].taxonomyTable.members` |
 | AI | 0 | 外部AIの結果（画像ごとの船と誤検出 1 件） | `aiResultSources` |
 | Detections | 0 | AI 結果の転記先（空） | `detectionOutputs` |
 | Places | 0 | 地名（横須賀港など 6 件。`NAME`・`NAME_KANA`（読み）・`ALIAS`（別名）） | `geocoders`（`type: "features"`） |

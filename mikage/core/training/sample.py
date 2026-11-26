@@ -329,6 +329,10 @@ AREA_FIELDS = {"AREA_ID": {"type": S, "length": 64}, "IMAGE_ID": S, "IMAGE_NAME"
 TAXONOMY_FIELDS = {"PATH": {"type": S, "length": 1000}, "LEVELS": S, "NAME_LABEL": S, "MEMBERS": {"type": S, "length": 8000},
                    "SPECS": {"type": S, "length": 16000}, "PHOTOS": {"type": S, "length": 8000}, "ACTIVITIES": {"type": S, "length": 2000},
                    "SORT_ORDER": I}
+#: 分類の既知の個体 (TBL_TAXONOMY_MEMBER): other names and specifications of the classification's individuals.
+TAXONOMY_MEMBER_FIELDS = {"MEMBER_ID": {"type": S, "length": 64}, "CLASS_PATH": {"type": S, "length": 1000}, "MEMBER_NAME": S,
+                          "ALIASES": {"type": S, "length": 1000}, "SPECS": {"type": S, "length": 16000}, "PHOTOS": {"type": S, "length": 8000},
+                          "NOTE": {"type": S, "length": 4000}, "SORT_ORDER": I}
 REQUEST_FIELDS = {
     "REQ_ID": {"type": S, "length": 64}, "REQ_NAME": S, "MANAGEMENT_NO": S, "IDENTIFICATION_NO": S, "REQUEST_GROUP": S, "CATEGORY": S, "ACHIEVE": S, "START_AT": T, "END_AT": T, "REPEAT": S, "STATUS": S,
     "PRIORITY": I, "BOOST": I, "KIND": S, "SERIES": S, "SATELLITES": S, "SENSOR_MODES": S, "OFF_NADIR_MIN": D, "OFF_NADIR_MAX": D,
@@ -468,6 +472,13 @@ TAXONOMY_ROWS = [
 ]
 
 
+#: The individuals that say something of themselves: class, name, other names, specifications (JSON), note.
+TAXONOMY_MEMBER_ROWS = [
+    ("船舶 > 支援船 > 〇〇級", "△△", "AA-101,Sankaku", '{"番号":"101","拠点":"横須賀","状態":"現役"}', ""),
+    ("船舶 > 支援船 > 〇〇級", "□□", "AA-102", '{"番号":"102","拠点":"呉","状態":"改修中"}', "2026 年度まで改修"),
+]
+
+
 def services(files: str, base: str, with_features: bool = True, now: Optional[int] = None) -> dict:
     """The sample services (the format of mock_esri.py --services), with their features when `with_features`."""
     now = now if now is not None else int(time.time() * 1000)
@@ -522,6 +533,8 @@ def services(files: str, base: str, with_features: bool = True, now: Optional[in
 
     taxonomy = [{"attributes": {"PATH": p, "LEVELS": lv, "NAME_LABEL": nl, "MEMBERS": m, "SPECS": "", "PHOTOS": "", "ACTIVITIES": act, "SORT_ORDER": i}}
                 for i, (p, lv, nl, m, act) in enumerate(TAXONOMY_ROWS)]
+    members = [{"attributes": {"MEMBER_ID": str(uuid.UUID(int=9000 + i)), "CLASS_PATH": p, "MEMBER_NAME": n, "ALIASES": a, "SPECS": sp, "PHOTOS": "",
+                               "NOTE": note, "SORT_ORDER": i}} for i, (p, n, a, sp, note) in enumerate(TAXONOMY_MEMBER_ROWS)]
 
     out = {"services": [
         {"name": "Catalog", "layers": [{
@@ -543,7 +556,8 @@ def services(files: str, base: str, with_features: bool = True, now: Optional[in
             {"id": 0, "name": "観測記録", "geometryType": "point", "fields": OBSERVATION_FIELDS, "attributeRules": OBSERVATION_RULES,
              "features": feats(observations)},
             {"id": 1, "name": "分類体系", "fields": TAXONOMY_FIELDS, "features": feats(taxonomy)},
-            {"id": 2, "name": "確認範囲", "geometryType": "polygon", "fields": AREA_FIELDS, "features": []}]},
+            {"id": 2, "name": "確認範囲", "geometryType": "polygon", "fields": AREA_FIELDS, "features": []},
+            {"id": 3, "name": "分類の既知の個体", "fields": TAXONOMY_MEMBER_FIELDS, "features": feats(members)}]},
         {"name": "AI", "layers": [{
             "id": 0, "name": "外部AI結果", "geometryType": "polygon",
             "fields": {"DET_ID": {"type": S, "length": 128}, "IMAGE_ID": S, "CLASS": S, "SCORE": D, "MODEL": S, "DETECTED_AT": T,
@@ -720,7 +734,7 @@ def config_text(base: str, files: str, label: str = "モック", alerts: Optiona
   "observationStores": [
     {{ "label": "モック観測記録", "url": "{rest}/Observations/FeatureServer/0",
       "areas": "{rest}/Observations/FeatureServer/2",
-      "taxonomyTable": "{rest}/Observations/FeatureServer/1" }}
+      "taxonomyTable": {{ "url": "{rest}/Observations/FeatureServer/1", "members": "{rest}/Observations/FeatureServer/3" }} }}
   ],
   "aiResultSources": [
     {{ "label": "モック外部AI", "url": "{rest}/AI/FeatureServer/0",

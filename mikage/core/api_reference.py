@@ -63,6 +63,13 @@ ENTRIES: list[Entry] = [
           "uses は列ごとの使い方（「階層 1」「既知の個体」「諸元: 全長」「使わない」など。省略で列名から推測）、mode は \"add\"（追加・更新）か \"replace\"（置き換え）。",
           'r = api.import_taxonomy("C:/data/分類一覧.xlsx", sheet="分類一覧")\nprint(r["summary"])\napi.import_taxonomy("C:/data/分類一覧.xlsx", save=True)'),
 
+    Entry("known_individuals", "観測記録の関数", "既知の個体の一覧",
+          "分類体系の既知の個体（分類・名前・別名・個体の諸元・参考写真・備考・ID）。kind でその分類と下位、name でその名前か別名の個体（全角・半角などの違いは無視）。",
+          'api.known_individuals(kind="船舶 > 護衛艦")\napi.known_individuals(name="DDH-184")'),
+    Entry("set_individual", "観測記録の関数", "既知の個体を追加・変更",
+          "分類に既知の個体を追加し（その名前の個体がなければ）、別名（一覧か読点区切り）・諸元（{項目: 値}、空で消す）・備考を設定する。"
+          "new_name で名前を変える（記録に古い名前があれば別名に残る）。保存先に個体の表がないと、別名・諸元などは保存されない。",
+          'api.set_individual("船舶 > 護衛艦 > いずも型", "かが", aliases=["DDH-184", "Kaga"], specs={"番号": "184"})'),
     Entry("import_reference_infos", "観測記録の関数", "参考情報の取り込み（JSON から）",
           "JSON ファイル（形は mikage/resources/schemas/reference-info.schema.json）の参考情報をまとめて登録・更新する。"
           "save=False（既定）は試行だけで、各行がどうなるか（summary・rows・notes。ファイルごと使えなければ problems）を返す。"

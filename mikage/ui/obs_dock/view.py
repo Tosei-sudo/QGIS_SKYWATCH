@@ -14,7 +14,7 @@ from qgis.PyQt.QtWidgets import QHeaderView, QTableWidgetItem
 
 from ...core.obs.api import (
     area_label, local_time, CarryOver, flow_of, heading_text, time_key, km_text, is_mine, my_names, Observation, state_text,
-    unseen_label, kind_of, quantity_mark, quantity_of,
+    unseen_label, kind_of, member_names, quantity_mark, quantity_of,
 )
 from ...core import edit_stamp
 from ..obs_overlay import UNSEEN_COLOR
@@ -107,7 +107,13 @@ class ViewPart:
         taxa = self._once("taxonomy", book.taxonomy)
         every = len([o for o in here if o.deleted_at is None])
         # What the form offers.
-        self.objects_model.setStringList(list(dict.fromkeys(f.name for f in objects if f.name)))
+        # Things' names, then the known individuals' (and 「いずも（DDH-183）」 for each other name: chosen, its own name goes in).
+        known = []
+        for t in taxa:
+            for m in t.members or []:
+                known.append(m)
+                known.extend(f"{m}（{a}）" for a in member_names(t, m, book.spec_fields))
+        self.objects_model.setStringList(list(dict.fromkeys([*(f.name for f in objects if f.name), *known])))
         kinds = list(dict.fromkeys(k for k in [*book.vocabulary.kinds, *(kind_of(t.path) for t in taxa), *(f.kind for f in objects)] if k))
         self.kinds_model.setStringList(kinds)
         self.area_kinds_model.setStringList(kinds)

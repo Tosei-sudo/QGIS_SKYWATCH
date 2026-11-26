@@ -26,10 +26,14 @@ _ROW = Qt.ItemDataRole.UserRole + 1
 class NoteAssist(QObject):
     """Suggestions and 表記ゆれ for one line edit, from `keeper` (qgis_io/glossary_io.GlossaryKeeper)."""
 
-    def __init__(self, edit: QLineEdit, keeper, root: Callable[[], str] = lambda: "", parent: Optional[QObject] = None):
+    def __init__(self, edit: QLineEdit, keeper, root: Callable[[], str] = lambda: "", parent: Optional[QObject] = None,
+                 extra: Optional[Callable[[], tuple]] = None):
         super().__init__(parent or edit)
         self.edit = edit
         self.keeper = keeper
+        #: More words offered (the classification's individuals and their other names: book.note_words), never pointed out.
+        self.extra = extra
+        self._joined: tuple = (None, None, None)
         #: The 大分類 of the thing being recorded ("" for none): its words come first, other 大分類's are left out.
         self.root = root
         #: The words offered now (the list's rows).
@@ -77,14 +81,29 @@ class NoteAssist(QObject):
 
     @property
     def glossary(self):
-        return self.keeper.glossary
+        """The glossary's words with the extra ones (the same object while neither changes)."""
+        g = self.keeper.glossary
+        try:
+            extra = self.extra() if self.extra is not None else ()
+        except RuntimeError:
+            extra = ()
+        if not extra:
+            return g
+        if self._joined[0] is not g or self._joined[1] is not extra:
+            self._joined = (g, extra, g.with_terms(extra))
+        return self._joined[2]
 
     def _glossary_changed(self) -> None:
         g = self.glossary
-        if g:
+        words = self.keeper.glossary
+        if words:
             self.edit.setPlaceholderText(self.tr("単語集の語を候補に表示（Tab で先頭、↓ で選んで Enter）"))
-            tip = self.tr("単語集（{n} 語）から、打っている語の候補を表示。Tab で先頭の候補、↓ で選んで Enter・クリックで入れる。"
-                          "表記ゆれは欄の下に表示").format(n=len(g))
+            tip = self.tr("単語集（{n} 語）と既知の個体の名前・別名から、打っている語の候補を表示。Tab で先頭の候補、↓ で選んで Enter・"
+                          "クリックで入れる。表記ゆれは欄の下に表示").format(n=len(words))
+            self.edit.setToolTip(f"{self._tip}\n{tip}" if self._tip else tip)
+        elif g:
+            self.edit.setPlaceholderText(self._placeholder)
+            tip = self.tr("既知の個体の名前・別名を候補に表示。Tab で先頭の候補、↓ で選んで Enter・クリックで入れる")
             self.edit.setToolTip(f"{self._tip}\n{tip}" if self._tip else tip)
         else:
             self.edit.setPlaceholderText(self._placeholder)

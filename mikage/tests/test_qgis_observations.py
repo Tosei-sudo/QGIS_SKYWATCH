@@ -1104,9 +1104,11 @@ def test_edits_the_classification_as_a_tree(plugin, tmp_path):
     editor.apply()
     editor.select(["航空機", "補助艦"])
     assert editor._spec_inputs["全長"].placeholderText() == "40 m（航空機）"
-    editor.members_input.setPlainText("一号\n二号")
-    editor.apply()
+    editor.add_members(["航空機", "補助艦"], ["一号", "二号"])
     assert dock.book.taxonomy()[[t.path for t in dock.book.taxonomy()].index(["航空機", "補助艦"])].members == ["一号", "二号"]
+    assert editor.member == "一号" and editor.member_form.isVisible() and not editor.form.isVisible()
+    editor.select(["航空機", "補助艦"])
+    assert editor.members_line.text() == "一号・二号" and editor.members_label.text() == "既知の個体（2）"
     # A photo from a file, kept in the local GeoPackage.
     from qgis.PyQt.QtGui import QColor, QImage
 
@@ -1131,7 +1133,7 @@ def test_edits_the_classification_as_a_tree(plugin, tmp_path):
     editor.fields_box.setChecked(True)
     editor._add_field()
     editor.save_fields()
-    assert dock.book.spec_fields[-1].name == "項目12" and dock.status.text() == "諸元の項目 12 件を設定"
+    assert dock.book.spec_fields[-1].name == "項目16" and dock.status.text() == "諸元の項目 16 件を設定"
     # 「更新」: the classification as someone else saved it since.
     dock.book.taxonomy_store.save([Taxon(["船舶"]), Taxon(["船舶", "新型"])])
     editor.select(["車両"])

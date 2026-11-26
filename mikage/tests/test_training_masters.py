@@ -69,7 +69,9 @@ def test_only_the_masters_named_and_those_the_production_has():
     value, taken = masters.with_production(practice(), production(), ["places"], "/etc/mikage/config.json", OUT)
     assert taken == ["places"]
     assert value["satelliteCatalogs"][0]["url"].startswith(REST) and "taxonomyTable" in value["observationStores"][0]
-    assert value["observationStores"][0]["taxonomyTable"].startswith(REST)
+    # The sample's classification and its table of known individuals, on the practice server.
+    table = value["observationStores"][0]["taxonomyTable"]
+    assert table["url"].startswith(REST) and table["members"].startswith(REST)
     # A production without them: the sample's.
     value, taken = masters.with_production(practice(), {"imageCatalogs": []}, list(MASTERS), "/etc/mikage/config.json", OUT)
     assert taken == [] and value == practice()

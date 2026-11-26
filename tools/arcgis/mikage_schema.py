@@ -569,6 +569,16 @@ TABLES = (
         F("ITEM_ID", "項目ID", "TEXT", 255, "item"),
         F("LABEL", "項目名", "TEXT", 255, "label"),
     )),
+    Table("TBL_TAXONOMY_MEMBER", "分類の既知の個体", None, writable=True, setting="observationStores[].taxonomyTable.members", fields=(
+        F("MEMBER_ID", "個体ID", "TEXT", 64, "id"),
+        F("CLASS_PATH", "分類", "TEXT", 1000, "path"),
+        F("MEMBER_NAME", "個体名", "TEXT", 255, "name"),
+        F("ALIASES", "別名", "TEXT", 1000, "aliases"),
+        F("SPECS", "諸元", "TEXT", 16000, "specs"),
+        F("PHOTOS", "参考写真", "TEXT", 8000, "photos"),
+        F("NOTE", "備考", "TEXT", 4000, "note"),
+        F("SORT_ORDER", "並び順", "LONG", None, "order"),
+    )),
 )
 
 #: 属性インデックス（テーブル → 属性）。ID で引く・紐付ける属性と、日時の範囲で引く属性（2026-11-18: 200 人規模の点検で
@@ -605,6 +615,7 @@ INDEXES = {
     "TBL_IMAGE_CORRECTION": ("IMAGE_ID",),
     "TBL_AREA_CATEGORY": ("CATEGORY_ID",),
     "TBL_REQUEST_AREA_CHANGE": ("REQ_ID", "NAMED_AREA_ID"),
+    "TBL_TAXONOMY_MEMBER": ("CLASS_PATH", "MEMBER_NAME"),
 }
 
 TABLES = tuple(t._replace(indexes=INDEXES.get(t.name, ())) for t in TABLES)
@@ -679,7 +690,9 @@ def plugin_config(urls: dict) -> dict:
         store = {"url": urls["TBL_OBSERVATION"]}
         if has("TBL_OBSERVATION_AREA"):
             store["areas"] = urls["TBL_OBSERVATION_AREA"]
-        if has("TBL_TAXONOMY"):
+        if has("TBL_TAXONOMY", "TBL_TAXONOMY_MEMBER"):
+            store["taxonomyTable"] = {"url": urls["TBL_TAXONOMY"], "members": urls["TBL_TAXONOMY_MEMBER"]}
+        elif has("TBL_TAXONOMY"):
             store["taxonomyTable"] = urls["TBL_TAXONOMY"]
         config["observationStores"] = [store]
     alerts = {key: urls[t] for key, t in (("rules", "TBL_ALERT_RULE"), ("geofences", "TBL_ALERT_GEOFENCE"),

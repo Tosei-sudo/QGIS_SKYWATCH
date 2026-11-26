@@ -10,6 +10,12 @@ known individuals, its specifications (諸元; the fields are the user's,
 under 「諸元の項目」) and reference photos (files kept in the local
 GeoPackage, or URLs).
 
+Known individuals (既知の個体) are rows of the tree under their class (◆):
+chosen, their own form is beside it — name, class, other names (別名),
+their own specifications (the class's show faintly until they say
+otherwise), photos and a note (2026-11-27). Renamed with F2, dragged to
+another class or place, deleted in two presses like a class.
+
 Every change goes through the 観測記録 dock's book, so renaming, moving or
 deleting a class rewrites the kinds of the records under it, and is kept
 where that store keeps its classification.
@@ -22,17 +28,18 @@ import mimetypes
 import os
 from typing import Callable, Optional
 
-from qgis.PyQt.QtCore import QByteArray, QTimer, Qt, QUrl
-from qgis.PyQt.QtGui import QDesktopServices, QPixmap
+from qgis.PyQt.QtCore import QByteArray, QPointF, QTimer, Qt, QUrl
+from qgis.PyQt.QtGui import QBrush, QColor, QDesktopServices, QIcon, QPainter, QPixmap, QPolygonF
 from qgis.PyQt.QtWidgets import (
-    QAbstractItemView, QComboBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMenu,
+    QAbstractItemView, QComboBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QMenu,
     QPlainTextEdit, QPushButton, QScrollArea, QSizePolicy, QSplitter, QTableWidget, QToolButton, QTreeWidget, QTreeWidgetItem,
     QVBoxLayout, QWidget,
 )
 
 from ..core.obs.api import LOCAL_LABEL, LocalPhotoStore, is_local_photo, photo_url
 from ..core.obs.api import (
-    SpecField, Taxon, activities_at, children_of, find, kind_of, level_name, name_label_of, path_of, photos_at, spec_text, specs_at, within,
+    ALIAS_FIELD, SpecField, Taxon, activities_at, children_of, find, kind_of, level_name, member_names, member_photos_at, member_specs_at,
+    name_label_of, path_of, photos_at, same_name, spec_text, specs_at, within,
 )
 from ..qgis_io.context import PluginContext
 from . import shortcuts
@@ -41,7 +48,27 @@ from .flow_layout import FlowLayout
 
 KIND_ROLE = Qt.ItemDataRole.UserRole
 ADDING_ROLE = Qt.ItemDataRole.UserRole + 1
+#: A known individual's row: its name (KIND_ROLE is its class's kind).
+MEMBER_ROLE = Qt.ItemDataRole.UserRole + 2
 FIELD_TYPES = [("text", "文字"), ("number", "数値"), ("list", "複数（読点区切り）"), ("url", "URL")]
+FIELD_USES = [("both", "分類・個体"), ("class", "分類だけ"), ("member", "個体だけ")]
+#: How known individuals' rows look apart from classes.
+MEMBER_COLOR = "#0f766e"
+#: A class with more known individuals than this is folded when first shown.
+MEMBERS_UNFOLDED = 50
+
+
+def member_icon() -> QIcon:
+    """The ◆ before a known individual's row."""
+    pix = QPixmap(14, 14)
+    pix.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setBrush(QBrush(QColor(MEMBER_COLOR)))
+    p.setPen(Qt.PenStyle.NoPen)
+    p.drawPolygon(QPolygonF([QPointF(7, 1), QPointF(13, 7), QPointF(7, 13), QPointF(1, 7)]))
+    p.end()
+    return QIcon(pix)
 
 
 def _split(text: str) -> list[str]:
@@ -51,9 +78,10 @@ def _split(text: str) -> list[str]:
 
 
 class ClassTree(QTreeWidget):
-    """The tree; a drop calls `dropped(kind dragged, kind of the row, 'before' | 'after' | 'inside' | 'root')` instead of moving rows itself."""
+    """The tree; a drop calls `dropped(kind dragged, kind of the row, 'before' | 'after' | 'inside' | 'root', individual
+    dragged or None, individual of the row or None)` instead of moving rows itself."""
 
-    def __init__(self, dropped: Callable[[str, Optional[str], str], None], parent: Optional[QWidget] = None):
+    def __init__(self, dropped: Callable[..., None], parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._dropped = dropped
         self.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
@@ -75,11 +103,12 @@ class ClassTree(QTreeWidget):
         if source is None:
             return
         kind = source.data(0, KIND_ROLE)
+        member = source.data(0, MEMBER_ROLE)
         if target is None or where == QAbstractItemView.DropIndicatorPosition.OnViewport:
-            self._dropped(kind, None, "root")
+            self._dropped(kind, None, "root", member, None)
             return
         zone = {QAbstractItemView.DropIndicatorPosition.AboveItem: "before", QAbstractItemView.DropIndicatorPosition.BelowItem: "after"}.get(where, "inside")
-        self._dropped(kind, target.data(0, KIND_ROLE), zone)
+        self._dropped(kind, target.data(0, KIND_ROLE), zone, member, target.data(0, MEMBER_ROLE))
 
 
 class TaxonomyDock(PluginDock):
@@ -90,7 +119,13 @@ class TaxonomyDock(PluginDock):
         self.iface = iface
         self.obs = observations
         self.selected: Optional[str] = None
+        #: The chosen known individual (of the class `selected`), else None.
+        self.member: Optional[str] = None
         self.folded: set[str] = set()
+        #: The classes with many individuals folded once already (unfolded since by the person, they stay so).
+        self._many_seen: set[str] = set()
+        self._member_spec_inputs: dict[str, QLineEdit] = {}
+        self._member_armed: Optional[tuple[str, str]] = None
         self._rendering = False
         self._armed: Optional[str] = None
         self._fields_draft: Optional[list[SpecField]] = None
@@ -164,14 +199,22 @@ class TaxonomyDock(PluginDock):
         self.label_input = QLineEdit()
         self.label_input.setPlaceholderText("艦名・機番")
         self.label_input.setToolTip(tr("最下位の個体（実名）の呼び方"))
-        self.members_input = QPlainTextEdit()
-        self.members_input.setToolTip(tr("この分類の既知の個体（実名）。記録時にモノ欄へ入力で分類も自動入力"))
-        self.members_input.setFixedHeight(70)
+        members = QWidget()
+        ml = QHBoxLayout(members)
+        ml.setContentsMargins(0, 0, 0, 0)
+        self.members_line = QLabel()
+        self.members_line.setWordWrap(True)
+        self.members_line.setToolTip(tr("この分類の既知の個体（実名）。記録時にモノ欄へ名前か別名を入力で分類も自動入力。"
+                                        "別名・諸元はツリーで個体を選んで編集"))
+        ml.addWidget(self.members_line, 1)
+        self.add_members_button = self._button(tr("＋ 個体を追加…"), tr("既知の個体を追加（1 行に 1 つ、読点区切りも可）"), self.ask_members)
+        ml.addWidget(self.add_members_button)
         f.addRow(tr("名前"), self.name_input)
         f.addRow(tr("上位"), self.parent_select)
         f.addRow(tr("この枝の階層名"), self.levels_input)
         f.addRow(tr("個体名の呼称"), self.label_input)
-        f.addRow(tr("既知の個体（1 行に 1 つ、読点区切りも可）"), self.members_input)
+        self.members_label = QLabel(tr("既知の個体"))
+        f.addRow(self.members_label, members)
         self.activities_input = QLineEdit()
         self.activities_input.setToolTip(tr("この分類以下で選べる活動、読点区切り（大分類に設定すれば大分類ごとに切り替え）。空なら上位の分類、なければ既定の活動"))
         f.addRow(tr("活動"), self.activities_input)
@@ -205,6 +248,8 @@ class TaxonomyDock(PluginDock):
         for edit in (self.name_input, self.levels_input, self.label_input, self.activities_input):
             edit.returnPressed.connect(self.apply)
         self.detail.addWidget(self.form)
+        self._build_member_form()
+        self.detail.addWidget(self.member_form)
         self.detail.addStretch(1)
         scroll.setWidget(detail)
         split.addWidget(scroll)
@@ -219,8 +264,10 @@ class TaxonomyDock(PluginDock):
         self.fields_box.setCheckable(True)
         self.fields_box.setChecked(False)
         fl = QVBoxLayout(self.fields_box)
-        self.fields_table = QTableWidget(0, 4)
-        self.fields_table.setHorizontalHeaderLabels([tr("項目"), tr("種類"), tr("単位"), ""])
+        self.fields_table = QTableWidget(0, 6)
+        self.fields_table.setHorizontalHeaderLabels([tr("項目"), tr("種類"), tr("単位"), tr("使う所"), tr("大分類"), ""])
+        self.fields_table.horizontalHeaderItem(3).setToolTip(tr("分類・個体のどちらの欄に出すか"))
+        self.fields_table.horizontalHeaderItem(4).setToolTip(tr("この大分類の分類・個体だけに出す（読点区切り。空: すべて）"))
         self.fields_table.verticalHeader().hide()
         self.fields_table.horizontalHeader().setStretchLastSection(True)
         fl.addWidget(self.fields_table)
@@ -271,6 +318,60 @@ class TaxonomyDock(PluginDock):
         b.setMenu(menu)
         return b
 
+    def _build_member_form(self) -> None:
+        """The chosen known individual's form: name, class, other names, its own specifications, photos and note."""
+        tr = self.tr
+        self.member_form = QGroupBox()
+        f = QFormLayout(self.member_form)
+        self.member_note = QLabel()
+        self.member_note.setWordWrap(True)
+        self.member_note.setStyleSheet("color: palette(placeholder-text);")
+        f.addRow(self.member_note)
+        self.member_name_input = QLineEdit()
+        self.member_name_input.setToolTip(tr("正式な名前（記録のモノの名前に入る）。変えると、古い名前を使った記録があれば古い名前を別名に残す"))
+        f.addRow(tr("名前"), self.member_name_input)
+        self.member_class_select = QComboBox()
+        self.member_class_select.setToolTip(tr("この個体の分類（変えると移動。記録の種別はそのまま）"))
+        f.addRow(tr("分類"), self.member_class_select)
+        self.member_alias_input = QLineEdit()
+        self.member_alias_input.setPlaceholderText(tr("艦番号・英名・旧名など"))
+        self.member_alias_input.setToolTip(tr("ほかの名前（読点区切り）。観測記録のモノ欄にこの名前で入れても、この個体として分かる"))
+        f.addRow(tr("別名（読点区切り）"), self.member_alias_input)
+        self.member_specs_box = QGroupBox(tr("諸元（空欄は分類の値）"))
+        self.member_specs_form = QFormLayout(self.member_specs_box)
+        f.addRow(self.member_specs_box)
+        self.member_photos_box = QGroupBox(tr("参考写真"))
+        pl = QVBoxLayout(self.member_photos_box)
+        self.member_photo_list = QWidget()
+        self.member_photo_layout = FlowLayout(self.member_photo_list)
+        pl.addWidget(self.member_photo_list)
+        row = QHBoxLayout()
+        self.member_photo_url = QLineEdit()
+        self.member_photo_url.setPlaceholderText(tr("画像の URL（共有向け）"))
+        self.member_photo_url.returnPressed.connect(self._add_photo_url)
+        row.addWidget(self.member_photo_url, 1)
+        row.addWidget(self._button(tr("URL 追加"), "", self._add_photo_url))
+        row.addWidget(self._button(tr("ファイル追加"), tr("このコンピューターの画像（ローカルの GeoPackage のみに保存）"), self._add_photo_files))
+        pl.addLayout(row)
+        self.member_photo_note = QLabel()
+        self.member_photo_note.setWordWrap(True)
+        pl.addWidget(self.member_photo_note)
+        f.addRow(self.member_photos_box)
+        self.member_note_input = QPlainTextEdit()
+        self.member_note_input.setFixedHeight(52)
+        self.member_note_input.setToolTip(tr("この個体の備考（識別のメモなど）"))
+        f.addRow(tr("備考"), self.member_note_input)
+        actions = QHBoxLayout()
+        actions.addWidget(self._button(tr("変更"), "", self.apply_member))
+        actions.addWidget(self._button(tr("個体を追加…"), tr("この個体の分類に既知の個体を追加"), self.ask_members))
+        self.member_delete_button = self._button(tr("削除"), "", self._delete_key)
+        actions.addWidget(self.member_delete_button)
+        actions.addStretch(1)
+        f.addRow(actions)
+        for edit in (self.member_name_input, self.member_alias_input):
+            edit.returnPressed.connect(self.apply_member)
+        self.member_form.hide()
+
     # ---- what changes ----------------------------------------------------
 
     def _say(self, message: str) -> None:
@@ -280,9 +381,12 @@ class TaxonomyDock(PluginDock):
         if self.isVisible() and self.tree.state() != QAbstractItemView.State.EditingState:
             self.render()
 
-    def select(self, path: Optional[list]) -> None:
-        """Chooses a class (None: none)."""
+    def select(self, path: Optional[list], member: Optional[str] = None) -> None:
+        """Chooses a class (None: none), or a known individual of it."""
         self.selected = kind_of(path) if path else None
+        self.member = member if path else None
+        if path and member:
+            self.folded.discard(kind_of(path))
         self.render()
         item = self.tree.currentItem()
         if item is not None:
@@ -295,12 +399,39 @@ class TaxonomyDock(PluginDock):
             self._say(self.tr("自分の下位には移動できない"))
             return
         self.selected = kind_of([*parent, path[-1]])
+        self.member = None
         self.obs.do(self.tr("分類の移動"), lambda b: b.update_class(path, parent=parent, before=before))
 
-    def _dropped(self, kind: str, target: Optional[str], zone: str) -> None:
+    def move_member(self, path: list[str], name: str, dst: list[str], before: Optional[str] = None) -> None:
+        """Moves a known individual to a class (or another place in its own), before one of its individuals (None: last)."""
+        self.selected, self.member = kind_of(dst), name
+        self.folded.discard(kind_of(dst))
+        self.obs.do(self.tr("個体の移動"), lambda b: b.move_member(path, name, dst, before))
+
+    def _dropped(self, kind: str, target: Optional[str], zone: str, member: Optional[str] = None,
+                 target_member: Optional[str] = None) -> None:
         if self.book is None or not kind:
             return
         path = path_of(kind)
+        if member:
+            # An individual: onto a class, into it (last); before or after another individual, there.
+            if not target:
+                return
+            to = path_of(target)
+            if not target_member or zone == "inside":
+                self.move_member(path, member, to)
+                return
+            if zone == "before":
+                self.move_member(path, member, to, target_member)
+                return
+            t = find(self.book.taxonomy(), to)
+            others = [m for m in ((t.members if t else None) or []) if not (kind_of(to) == kind and m == member)]
+            i = others.index(target_member) if target_member in others else len(others)
+            self.move_member(path, member, to, others[i + 1] if i + 1 < len(others) else None)
+            return
+        if target_member:
+            self._say(self.tr("分類は個体の下には置けない"))
+            return
         if zone == "root":
             self.move(path, [], None)
             return
@@ -323,8 +454,17 @@ class TaxonomyDock(PluginDock):
         self.move(path, parent, list(nxt.path) if nxt else None)
 
     def reorder(self, by: int) -> None:
-        """Alt+↑↓: the chosen class one place up or down among its siblings."""
+        """Alt+↑↓: the chosen class one place up or down among its siblings (a known individual, among its class's)."""
         if self.book is None or not self.selected:
+            return
+        if self.member:
+            path = path_of(self.selected)
+            names = list((self._taxon().members if self._taxon() else None) or [])
+            i = names.index(self.member) if self.member in names else -1
+            if by < 0 and i > 0:
+                self.move_member(path, self.member, path, names[i - 1])
+            elif by > 0 and 0 <= i < len(names) - 1:
+                self.move_member(path, self.member, path, names[i + 2] if i + 2 < len(names) else None)
             return
         current = path_of(self.selected)
         parent = current[:-1]
@@ -376,6 +516,14 @@ class TaxonomyDock(PluginDock):
             return
         kind = item.data(0, KIND_ROLE)
         path = path_of(kind)
+        member = item.data(0, MEMBER_ROLE)
+        if member:
+            if text and text != member:
+                self.selected, self.member = kind, text
+                self.obs.do(self.tr("個体の変更"), lambda b: b.update_member(path, member, new_name=text))
+            else:
+                self.render()
+            return
         if text and text != path[-1]:
             self.selected = kind_of([*path[:-1], text])
             self.obs.do(self.tr("分類の変更"), lambda b: b.update_class(path, name=text))
@@ -397,12 +545,53 @@ class TaxonomyDock(PluginDock):
         return walk(self.tree.invisibleRootItem())
 
     def _add_below(self) -> None:
-        if self.selected:
+        if self.member:
+            self.ask_members()
+        elif self.selected:
             self.start_add(self.selected)
 
+    def ask_members(self) -> None:
+        """「＋ 個体を追加…」: names typed (one a line, or 読点区切り) added to the chosen class."""
+        t = self._taxon()
+        if t is None:
+            return
+        label = name_label_of(self.book.taxonomy(), list(t.path)) or self.tr("個体名")
+        text, ok = QInputDialog.getMultiLineText(self, self.tr("個体の追加"),
+                                                 self.tr("「{k}」に追加する{l}（1 行に 1 つ、読点区切りも可）").format(k=kind_of(t.path), l=label))
+        if ok:
+            self.add_members(list(t.path), _split(text))
+
+    def add_members(self, path: list[str], names: list[str]) -> None:
+        """Adds known individuals to a class; the first one added is chosen."""
+        if not names:
+            return
+        self.selected = kind_of(path)
+        self.folded.discard(self.selected)
+
+        def after(added) -> None:
+            if added:
+                self.member = added[0]
+                self.render()
+
+        self.obs.do(self.tr("個体の追加"), lambda b: b.add_members(path, names), after)
+
     def _delete_key(self) -> None:
-        """Two presses delete a class and its branch (the records under it keep the class above)."""
+        """Two presses delete a class and its branch (the records under it keep the class above), or a known individual."""
         if self.book is None or not self.selected:
+            return
+        if self.member:
+            key = (self.selected, self.member)
+            if self._member_armed != key:
+                self._member_armed = key
+                count = sum(1 for o in self.book.living() if o.object_name == self.member)
+                self.member_delete_button.setText(self.tr("削除?"))
+                self._say(self.tr("もう一度で個体「{m}」を削除（その名前の記録 {n} 件はそのまま）").format(m=self.member, n=count))
+                QTimer.singleShot(4000, self._disarm)
+                return
+            self._member_armed = None
+            path, name = path_of(self.selected), self.member
+            self.member = None
+            self.obs.do(self.tr("個体の削除"), lambda b: b.remove_member(path, name))
             return
         path = path_of(self.selected)
         if self._armed != self.selected:
@@ -422,7 +611,9 @@ class TaxonomyDock(PluginDock):
 
     def _disarm(self) -> None:
         self._armed = None
+        self._member_armed = None
         self.delete_button.setText(self.tr("削除"))
+        self.member_delete_button.setText(self.tr("削除"))
 
     def _filter_obs(self) -> None:
         """「この画像で絞り込み」: 観測記録's list limited to this class and below."""
@@ -439,16 +630,49 @@ class TaxonomyDock(PluginDock):
         name = self.name_input.text().strip() or path[-1]
         parent = path_of(self.parent_select.currentData() or "")
         specs = {k: e.text().strip() for k, e in self._spec_inputs.items() if e.text().strip()}
-        own = {"levels": _split(self.levels_input.text()), "name_label": self.label_input.text().strip(),
-               "members": _split(self.members_input.toPlainText()), "specs": specs,
+        own = {"levels": _split(self.levels_input.text()), "name_label": self.label_input.text().strip(), "specs": specs,
                "activities": _split(self.activities_input.text())}
         self.selected = kind_of([*parent, name])
         self.obs.do(self.tr("分類の変更"), lambda b: b.update_class(path, name=name, parent=parent, **own))
+
+    def apply_member(self) -> None:
+        """「変更」 of a known individual: its name, class, other names, specifications and note."""
+        t = self._taxon()
+        if self.book is None or t is None or not self.member or self.member not in (t.members or []):
+            return
+        path, name = list(t.path), self.member
+        new_name = self.member_name_input.text().strip() or name
+        dst = path_of(self.member_class_select.currentData() or kind_of(path))
+        kept = self.book.members_kept
+        specs = None
+        note = None
+        if kept:
+            specs = {k: e.text().strip() for k, e in self._member_spec_inputs.items() if e.text().strip()}
+            aliases = _split(self.member_alias_input.text())
+            if aliases:
+                specs[ALIAS_FIELD] = "、".join(dict.fromkeys(aliases))
+            note = self.member_note_input.toPlainText()
+        self.selected, self.member = kind_of(path), new_name
+
+        def done(to) -> None:
+            if to and kind_of(dst) != kind_of(path):
+                self.move_member(path, to, dst)
+
+        self.obs.do(self.tr("個体の変更"), lambda b: b.update_member(path, name, new_name=new_name, specs=specs, note=note), done)
 
     # ---- photos ------------------------------------------------------------
 
     def _photos(self) -> LocalPhotoStore:
         return LocalPhotoStore(self.context.gpkg())
+
+    def _own_photos(self) -> Optional[list[str]]:
+        """The chosen class's (or known individual's) own photos; None when nothing is chosen."""
+        t = self._taxon()
+        if t is None:
+            return None
+        if self.member:
+            return list(t.member(self.member).photos or [])
+        return list(t.photos or [])
 
     def _save_photos(self, photos: list[str], done: str) -> None:
         path = path_of(self.selected or "")
@@ -459,22 +683,27 @@ class TaxonomyDock(PluginDock):
             if to:
                 self._say(done)
 
-        self.obs.do(self.tr("参考写真の保存"), lambda b: b.update_class(path, photos=photos), after)
+        name = self.member
+        if name:
+            self.obs.do(self.tr("参考写真の保存"), lambda b: b.update_member(path, name, photos=photos), after)
+        else:
+            self.obs.do(self.tr("参考写真の保存"), lambda b: b.update_class(path, photos=photos), after)
 
     def _add_photo_url(self) -> None:
-        value = self.photo_url.text().strip()
-        t = self._taxon()
-        if t is None:
+        edit = self.member_photo_url if self.member else self.photo_url
+        value = edit.text().strip()
+        own = self._own_photos()
+        if own is None:
             return
         if not value.lower().startswith(("http://", "https://")):
             self._say(self.tr("写真の URL は http(s):// で指定"))
             return
-        self.photo_url.clear()
-        self._save_photos([*(t.photos or []), value], self.tr("参考写真を追加"))
+        edit.clear()
+        self._save_photos([*own, value], self.tr("参考写真を追加"))
 
     def add_photo_files(self, paths: list[str]) -> None:
-        t = self._taxon()
-        if t is None:
+        own = self._own_photos()
+        if own is None:
             return
         refs = []
         for p in paths:
@@ -484,7 +713,7 @@ class TaxonomyDock(PluginDock):
             with open(p, "rb") as f:
                 refs.append(self._photos().add(f.read(), os.path.basename(p), mime))
         if refs:
-            self._save_photos([*(t.photos or []), *refs], self.tr("参考写真 {n} 枚を追加").format(n=len(refs)))
+            self._save_photos([*own, *refs], self.tr("参考写真 {n} 枚を追加").format(n=len(refs)))
 
     def _add_photo_files(self) -> None:
         paths, _ = QFileDialog.getOpenFileNames(self, self.tr("参考写真の追加"), "", self.tr("画像 (*.png *.jpg *.jpeg *.gif *.webp *.bmp)"))
@@ -492,10 +721,10 @@ class TaxonomyDock(PluginDock):
             self.add_photo_files(paths)
 
     def _remove_photo(self, ref: str) -> None:
-        t = self._taxon()
-        if t is None:
+        own = self._own_photos()
+        if own is None:
             return
-        self._save_photos([r for r in (t.photos or []) if r != ref], self.tr("参考写真を削除"))
+        self._save_photos([r for r in own if r != ref], self.tr("参考写真を削除"))
         self._photos().remove(ref)
 
     def _pixmap(self, ref: str) -> Optional[QPixmap]:
@@ -567,7 +796,7 @@ class TaxonomyDock(PluginDock):
         if self.book is None:
             return
         if self._fields_draft is None:
-            self._fields_draft = [SpecField(f.name, f.type, f.unit) for f in self.book.spec_fields]
+            self._fields_draft = [SpecField(f.name, f.type, f.unit, f.use, list(f.roots) if f.roots else None) for f in self.book.spec_fields]
         draft = self._fields_draft
         t = self.fields_table
         t.setRowCount(0)
@@ -582,6 +811,14 @@ class TaxonomyDock(PluginDock):
             kind.currentIndexChanged.connect(lambda _i, f=f, kind=kind: setattr(f, "type", kind.currentData()))
             unit = QLineEdit(f.unit or "")
             unit.editingFinished.connect(lambda f=f, unit=unit: setattr(f, "unit", unit.text().strip() or None))
+            use = QComboBox()
+            for v, label in FIELD_USES:
+                use.addItem(label, v)
+            use.setCurrentIndex(max(0, use.findData(f.use)))
+            use.currentIndexChanged.connect(lambda _i, f=f, use=use: setattr(f, "use", use.currentData()))
+            roots = QLineEdit("、".join(f.roots or []))
+            roots.setPlaceholderText(self.tr("すべて"))
+            roots.editingFinished.connect(lambda f=f, roots=roots: setattr(f, "roots", _split(roots.text()) or None))
             tools = QWidget()
             tl = QHBoxLayout(tools)
             tl.setContentsMargins(0, 0, 0, 0)
@@ -592,17 +829,19 @@ class TaxonomyDock(PluginDock):
                 b.setToolTip(tip)
                 b.clicked.connect(lambda _on=False, run=run: run())
                 tl.addWidget(b)
-            for c, w in enumerate((name, kind, unit, tools)):
+            for c, w in enumerate((name, kind, unit, use, roots, tools)):
                 t.setCellWidget(i, c, w)
 
     def _read_fields(self) -> None:
         """What is typed but not yet left (no editingFinished)."""
         for i, f in enumerate(self._fields_draft or []):
-            name, unit = self.fields_table.cellWidget(i, 0), self.fields_table.cellWidget(i, 2)
+            name, unit, roots = self.fields_table.cellWidget(i, 0), self.fields_table.cellWidget(i, 2), self.fields_table.cellWidget(i, 4)
             if isinstance(name, QLineEdit):
                 f.name = name.text().strip() or f.name
             if isinstance(unit, QLineEdit):
                 f.unit = unit.text().strip() or None
+            if isinstance(roots, QLineEdit):
+                f.roots = _split(roots.text()) or None
 
     def _move_field(self, i: int, by: int) -> None:
         self._read_fields()
@@ -675,8 +914,9 @@ class TaxonomyDock(PluginDock):
         if self._rendering or current is None:
             return
         kind = current.data(0, KIND_ROLE)
-        if kind and kind != self.selected:
-            self.selected = kind
+        member = current.data(0, MEMBER_ROLE) or None
+        if kind and (kind != self.selected or member != self.member):
+            self.selected, self.member = kind, member
             self._render_detail()
 
     def render(self) -> None:
@@ -697,14 +937,31 @@ class TaxonomyDock(PluginDock):
             taxa = book.taxonomy()
             if self.selected and find(taxa, path_of(self.selected)) is None:
                 self.selected = None
+            here = find(taxa, path_of(self.selected)) if self.selected else None
+            if self.member and (here is None or self.member not in (here.members or [])):
+                self.member = None
             self.note.setText(self.tr("保存先: {s}・{n} 分類").format(s=book.taxonomy_store.label, n=len(taxa))
                               + (self.tr("（モノと記録の数は取得した分だけ: 開いた画像とそのまわり）") if book.scoped else ""))
             flows = book.flows()
             records = book.living()
             q = self.query.text().strip().lower()
-            matches = [t for t in taxa if any(q in v.lower() for v in [t.path[-1], *(t.members or []), *((t.specs or {}).values())])] if q else taxa
+            qn = same_name(q)
+
+            def member_hit(t: Taxon, m: str) -> bool:
+                said = t.member(m)
+                words = [m, *member_names(t, m, book.spec_fields), *((said.specs or {}).values()), said.note or ""]
+                return any(q in w.lower() or (qn and qn in same_name(w)) for w in words)
+
+            hits = {kind_of(t.path): [m for m in t.members or [] if member_hit(t, m)] for t in taxa} if q else {}
+            matches = [t for t in taxa if any(q in v.lower() for v in [t.path[-1], *((t.specs or {}).values())]) or hits.get(kind_of(t.path))] if q else taxa
             shown = {kind_of(t.path) for t in taxa if any(within(kind_of(m.path), t.path) for m in matches)} if q else None
             current = None
+            icon = member_icon()
+            teal = QBrush(QColor(MEMBER_COLOR))
+            named: dict[str, int] = {}
+            for o in records:
+                if o.object_name:
+                    named[o.object_name] = named.get(o.object_name, 0) + 1
 
             def walk(parent_item, parent: list[str]) -> None:
                 nonlocal current
@@ -718,6 +975,11 @@ class TaxonomyDock(PluginDock):
                     counts = f"モノ {things}・記録 {count}" if things or count else ""
                     if t.members:
                         counts += f"{'・' if counts else ''}個体 {len(t.members)}"
+                        if len(t.members) > MEMBERS_UNFOLDED and kind not in self._many_seen:
+                            # Many individuals: folded when first shown (unfolded by the person, it stays so).
+                            self._many_seen.add(kind)
+                            if not (kind == self.selected and self.member):
+                                self.folded.add(kind)
                     item = QTreeWidgetItem([t.path[depth], level_name(taxa, t.path, depth), counts])
                     item.setData(0, KIND_ROLE, kind)
                     item.setToolTip(0, f"{kind}（ダブルクリック・F2 で名前の変更）")
@@ -730,9 +992,36 @@ class TaxonomyDock(PluginDock):
                         self.tree.addTopLevelItem(item)
                     else:
                         parent_item.addChild(item)
-                    if kind == self.selected:
+                    if kind == self.selected and not self.member:
                         current = item
                     walk(item, list(t.path))
+                    label = name_label_of(taxa, list(t.path))
+                    # Searching: all of a class found by its own name or specifications, else those found.
+                    own_hit = q and any(q in v.lower() for v in [t.path[-1], *((t.specs or {}).values())])
+                    for m in t.members or []:
+                        if q and not own_hit and m not in hits.get(kind, []):
+                            continue
+                        said = t.member(m)
+                        n = named.get(m, 0)
+                        row = QTreeWidgetItem([m, f"{label}（個体）" if label else "個体", f"記録 {n}" if n else ""])
+                        row.setIcon(0, icon)
+                        row.setForeground(0, teal)
+                        row.setForeground(1, teal)
+                        row.setData(0, KIND_ROLE, kind)
+                        row.setData(0, MEMBER_ROLE, m)
+                        others = member_names(t, m, book.spec_fields)
+                        tip = f"{kind} の個体「{m}」" + (f"（別名: {'、'.join(others)}）" if others else "")
+                        if said.note:
+                            tip += f"\n{said.note}"
+                        row.setToolTip(0, plain_tip(tip + "\nダブルクリック・F2 で名前の変更、ドラッグで別の分類へ"))
+                        row.setFlags((row.flags() | Qt.ItemFlag.ItemIsEditable | Qt.ItemFlag.ItemIsDragEnabled) & ~Qt.ItemFlag.ItemIsDropEnabled)
+                        if q and m in hits.get(kind, []):
+                            font = row.font(0)
+                            font.setBold(True)
+                            row.setFont(0, font)
+                        item.addChild(row)
+                        if kind == self.selected and m == self.member:
+                            current = row
                     item.setExpanded(bool(q) or kind not in self.folded)
 
             walk(None, [])
@@ -751,11 +1040,18 @@ class TaxonomyDock(PluginDock):
     def _render_detail(self) -> None:
         book = self.book
         t = self._taxon()
-        self.form.setVisible(t is not None)
+        if t is not None and self.member and self.member not in (t.members or []):
+            self.member = None
+        self.form.setVisible(t is not None and not self.member)
+        self.member_form.setVisible(t is not None and bool(self.member))
         if book is None:
             return
+        if t is not None and self.member:
+            self.hint.hide()
+            self._render_member(t, self.member)
+            return
         if t is None:
-            self.hint.setText(self.tr("分類の選択で詳細を表示（モノ {n}）。ドラッグで移動（行の間で前後、行の上で下位）、Alt+↑↓ で並べ替え、F2 で名前の変更、Insert で下位分類の追加").format(n=len(book.flows())))
+            self.hint.setText(self.tr("分類・個体（◆）の選択で詳細を表示（モノ {n}）。ドラッグで移動（行の間で前後、行の上で下位）、Alt+↑↓ で並べ替え、F2 で名前の変更、Insert で下位分類の追加").format(n=len(book.flows())))
             self.hint.show()
             return
         self.hint.hide()
@@ -775,7 +1071,10 @@ class TaxonomyDock(PluginDock):
         self.name_input.setText(path[-1])
         self.levels_input.setText("、".join(t.levels or []))
         self.label_input.setText(t.name_label or "")
-        self.members_input.setPlainText("\n".join(t.members or []))
+        members = t.members or []
+        self.members_label.setText(self.tr("既知の個体（{n}）").format(n=len(members)) if members else self.tr("既知の個体"))
+        shown = "・".join(members[:12]) + (self.tr(" ほか {n}").format(n=len(members) - 12) if len(members) > 12 else "")
+        self.members_line.setText(shown or self.tr("なし（{l}を登録すると、記録のモノ欄で選べる）").format(l=label or self.tr("個体名")))
         self.activities_input.setText("、".join(t.activities or []))
         above, at = activities_at(taxa, path[:-1])
         self.activities_input.setPlaceholderText(f"{'、'.join(above)}（{at[-1]}）" if above else "、".join(book.vocabulary.activities) + "（既定）")
@@ -789,8 +1088,8 @@ class TaxonomyDock(PluginDock):
         while self.specs_form.rowCount():
             self.specs_form.removeRow(0)
         inherited = specs_at(taxa, path)
-        fields = list(book.spec_fields)
-        extra = [k for k in (t.specs or {}) if not any(f.name == k for f in fields)]
+        fields = [f for f in book.spec_fields if f.offered(path, False) or f.name in (t.specs or {})]
+        extra = [k for k in (t.specs or {}) if not any(f.name == k for f in book.spec_fields)]
         self._spec_inputs = {}
         for f in [*fields, *(SpecField(k, "text") for k in extra)]:
             box = QLineEdit((t.specs or {}).get(f.name, ""))
@@ -823,3 +1122,65 @@ class TaxonomyDock(PluginDock):
         else:
             note = "クリックで拡大"
         self.photo_note.setText(note)
+
+    def _render_member(self, t: Taxon, name: str) -> None:
+        """The chosen known individual's form: its own values, the class's faintly where it says nothing."""
+        book = self.book
+        taxa = book.taxonomy()
+        path = list(t.path)
+        said = t.member(name)
+        kept = book.members_kept
+        if self._member_armed != (self.selected, name):
+            self._member_armed = None
+            self.member_delete_button.setText(self.tr("削除"))
+        label = name_label_of(taxa, path)
+        self.member_form.setTitle(f"{kind_of(path)} ▸ {name}（{label or self.tr('個体')}）")
+        note = self.tr("分類「{c}」の個体。記録のモノ欄にこの名前か別名を入れると、この個体・分類で記録").format(c=path[-1])
+        if not kept:
+            note += self.tr("。保存先（{s}）に個体の表がないので、別名・諸元・写真・備考は保存できない（設定ファイルの taxonomyTable.members）").format(
+                s=book.taxonomy_store.label)
+        self.member_note.setText(note)
+        self.member_name_input.setText(name)
+        self.member_class_select.clear()
+        for x in taxa:
+            self.member_class_select.addItem(kind_of(x.path), kind_of(x.path))
+        self.member_class_select.setCurrentIndex(max(0, self.member_class_select.findData(kind_of(path))))
+        own = said.specs or {}
+        self.member_alias_input.setText(own.get(ALIAS_FIELD, ""))
+        while self.member_specs_form.rowCount():
+            self.member_specs_form.removeRow(0)
+        inherited = member_specs_at(taxa, path, name)
+        fields = [f for f in book.spec_fields if f.name != ALIAS_FIELD and (f.offered(path, True) or f.name in own)]
+        extra = [k for k in own if k != ALIAS_FIELD and not any(f.name == k for f in book.spec_fields)]
+        self._member_spec_inputs = {}
+        for f in [*fields, *(SpecField(k, "text") for k in extra)]:
+            box = QLineEdit(own.get(f.name, ""))
+            above = inherited.get(f.name)
+            if above and kind_of(above[1]) != kind_of([*path, name]):
+                box.setPlaceholderText(f"{spec_text(f, above[0])}（{above[1][-1]}）")
+                box.setToolTip(f"分類「{kind_of(above[1])}」の値。入力でこの個体だけ上書き")
+            elif f.type == "list":
+                box.setPlaceholderText("読点区切り")
+            box.returnPressed.connect(self.apply_member)
+            box.setEnabled(kept)
+            self.member_specs_form.addRow(f"{f.name}（{f.unit}）" if f.unit else f.name, box)
+            self._member_spec_inputs[f.name] = box
+        if not self._member_spec_inputs:
+            self.member_specs_form.addRow(QLabel(self.tr("項目なし（下の「諸元の項目」で追加）")))
+        for w in (self.member_alias_input, self.member_note_input, self.member_photos_box):
+            w.setEnabled(kept)
+        self.member_note_input.setPlainText(said.note or "")
+        self.member_photo_layout.clear()
+        photos, source = member_photos_at(taxa, path, name)
+        mine = kind_of(source) == kind_of([*path, name])
+        for n, ref in enumerate(photos):
+            title = f"{kind_of(source) if not mine else name} の参考写真 {n + 1}{'（ローカルのみ）' if is_local_photo(ref) else ''}"
+            self.member_photo_layout.addWidget(self._photo_widget(ref, title, mine))
+        if photos and not mine:
+            self.member_photo_note.setText(self.tr("この個体の写真なし。分類「{c}」の写真を表示（追加でこの個体のものに）").format(c=source[-1]))
+        elif not photos:
+            self.member_photo_note.setText(self.tr("写真なし（クリックで拡大）"))
+        elif book.taxonomy_store.label != LOCAL_LABEL and any(is_local_photo(r) for r in photos):
+            self.member_photo_note.setText(self.tr("ファイルの写真はこの QGIS のみ（共有には URL）"))
+        else:
+            self.member_photo_note.setText(self.tr("クリックで拡大"))

@@ -5,7 +5,9 @@
 A table (a CSV or Excel file, or a layer's attribute table) with one row per
 class, or per individual: the levels in columns from the left (大分類, then
 below), and optionally an individual's name, specifications (諸元), the
-activities, reference photos and what an individual is called.
+activities, reference photos and what an individual is called; on a row
+naming one individual, its other names (個体の別名) and specifications
+(個体の諸元: 番号…).
 
 1. `guess_uses`: what each column is, by its name (the classification's own
    level names, 中分類・小分類・分類1・第 2 階層・LEVEL1…, 個体名 and the
@@ -25,8 +27,9 @@ activities, reference photos and what an individual is called.
    (its name kept). Renaming and moving are not done here (the editor does
    them, with the records under the class).
 4. `taxonomy_table` / `taxonomy_csv`: the classification written the same
-   way (one row per class, no blank on the left), to edit in a spreadsheet
-   and take in again.
+   way (one row per class, no blank on the left; when individuals have
+   specifications of their own, a row for each of them below its class), to
+   edit in a spreadsheet and take in again.
 """
 from __future__ import annotations
 
@@ -40,11 +43,13 @@ from dataclasses import dataclass, field
 from typing import Any, Iterable, Optional, Sequence
 
 from ..util import is_number, js_string
-from .taxonomy import SpecField, Taxon, kind_of, normalize, segment_name, within
+from .taxonomy import ALIAS_FIELD, Member, SpecField, Taxon, kind_of, normalize, segment_name, within
 
 #: What a column is.
 LEVEL, LEVEL_NAMES, MEMBERS, NAME_LABEL, ACTIVITIES, PHOTOS, SPEC, NEW_SPEC, SKIP = (
     "level", "levels", "members", "nameLabel", "activities", "photos", "spec", "newSpec", "skip")
+#: An individual's specification (別名 among them; `arg` the field) and a new one (the column's name), on a row naming one.
+MEMBER_SPEC, NEW_MEMBER_SPEC = "memberSpec", "newMemberSpec"
 #: 追加・更新 / 置き換え.
 ADD, REPLACE = "add", "replace"
 #: What happens to a class.
@@ -59,11 +64,13 @@ MIN_LEVELS = 6
 _LEVEL_NAMES = {"大分類", "中分類", "小分類", "細分類", "細目", "分類", "種別", "種類", "級", "型式", "形式", "型", "用途", "車種", "機種", "艦種",
                 "船種", "クラス"}
 _LEVEL_PATTERN = re.compile(r"^(第\s*\d+\s*階層|階層\s*\d+|(分類|種別|level|lv|class|category|kind|tier)\s*[_-]?\s*\d+)$", re.IGNORECASE)
-_MEMBER_NAMES = {"個体", "個体名", "既知の個体", "members", "member", "individual", "individuals", "艦名", "船名", "機番", "機体番号", "艦番号"}
+_MEMBER_NAMES = {"個体", "個体名", "個体の名前", "個体の名称", "既知の個体", "members", "member", "individual", "individuals", "艦名", "船名", "機番", "機体番号", "艦番号"}
 _NAME_LABEL_NAMES = {"個体名の呼称", "name_label", "namelabel", "呼称"}
 _LEVEL_NAMES_NAMES = {"階層名", "この枝の階層名", "levels", "level_names"}
 _ACTIVITY_NAMES = {"活動", "activities", "activity"}
 _PHOTO_NAMES = {"参考写真", "写真", "写真url", "参考写真url", "photo", "photos", "photo_url", "image_url"}
+#: An individual's column: 個体の別名, 個体の諸元: 番号, 個体の番号.
+_MEMBER_COLUMN = re.compile(r"^個体の\s*(?:諸元\s*[:：]\s*)?(.+)$")
 #: A unit written after a column's name: 全長（m）, 全長(m), 全長[m].
 _UNIT = re.compile(r"\s*[（(\[［]\s*([^）)\]］]*)\s*[）)\]］]\s*$")
 _LIST = re.compile(r"[,、\n\r]+")
@@ -84,6 +91,10 @@ class Use:
             return f"諸元: {self.arg}"
         if self.kind == NEW_SPEC:
             return "諸元に追加（列の名前で）"
+        if self.kind == MEMBER_SPEC:
+            return "個体の別名" if self.arg == ALIAS_FIELD else f"個体の諸元: {self.arg}"
+        if self.kind == NEW_MEMBER_SPEC:
+            return "個体の諸元に追加（列の名前で）"
         return {LEVEL_NAMES: "階層名（この枝）", MEMBERS: "既知の個体", NAME_LABEL: "個体名の呼称", ACTIVITIES: "活動", PHOTOS: "参考写真（URL）", SKIP: "使わない"}[self.kind]
 
 
@@ -93,15 +104,17 @@ SKIPPED = Use(SKIP)
 def use_choices(columns: int, spec_fields: Sequence[SpecField]) -> list[Use]:
     """The uses a column can have, in the order offered."""
     levels = [Use(LEVEL, n) for n in range(1, max(MIN_LEVELS, columns) + 1)]
-    return [*levels, Use(LEVEL_NAMES), Use(MEMBERS), Use(NAME_LABEL), Use(ACTIVITIES), Use(PHOTOS), *(Use(SPEC, f.name) for f in spec_fields), Use(NEW_SPEC),
-            SKIPPED]
+    member = [Use(MEMBER_SPEC, ALIAS_FIELD), *(Use(MEMBER_SPEC, f.name) for f in spec_fields if f.use != "class" and f.name != ALIAS_FIELD)]
+    return [*levels, Use(LEVEL_NAMES), Use(MEMBERS), Use(NAME_LABEL), Use(ACTIVITIES), Use(PHOTOS),
+            *(Use(SPEC, f.name) for f in spec_fields if f.use != "member"), Use(NEW_SPEC), *member, Use(NEW_MEMBER_SPEC), SKIPPED]
 
 
 def parse_use(text: Any, spec_fields: Sequence[SpecField] = ()) -> Use:
     """
     A column's use as a script writes it: as the dialog shows it (階層 1,
-    既知の個体, 諸元: 全長, 使わない…) or short (level1, members, spec:全長,
-    newSpec, skip; None too). ValueError when it is none of them.
+    既知の個体, 諸元: 全長, 個体の別名, 個体の諸元: 番号, 使わない…) or short
+    (level1, members, spec:全長, newSpec, memberAliases, memberSpec:番号,
+    newMemberSpec, skip; None too). ValueError when it is none of them.
     """
     if isinstance(text, Use):
         return text
@@ -119,14 +132,23 @@ def parse_use(text: Any, spec_fields: Sequence[SpecField] = ()) -> Use:
         if norm(name) not in known:
             raise ValueError(f"諸元の項目「{name}」なし（新しい項目は「諸元に追加」）")
         return Use(SPEC, known[norm(name)])
+    m = re.match(r"^(?:個体の諸元|memberspec|member_spec)\s*[:：]\s*(.+)$", unicodedata.normalize("NFKC", raw), re.IGNORECASE)
+    if m or word in ("個体の別名", "memberaliases", "member_aliases"):
+        name = m.group(1).strip() if m else ALIAS_FIELD
+        known = {norm(f.name): f.name for f in spec_fields}
+        known[norm(ALIAS_FIELD)] = ALIAS_FIELD
+        if norm(name) not in known:
+            raise ValueError(f"個体の諸元の項目「{name}」なし（新しい項目は「個体の諸元に追加」）")
+        return Use(MEMBER_SPEC, known[norm(name)])
     short = {"levels": LEVEL_NAMES, "members": MEMBERS, "namelabel": NAME_LABEL, "name_label": NAME_LABEL, "activities": ACTIVITIES,
-             "photos": PHOTOS, "newspec": NEW_SPEC, "new_spec": NEW_SPEC, "skip": SKIP, "": SKIP}
+             "photos": PHOTOS, "newspec": NEW_SPEC, "new_spec": NEW_SPEC, "newmemberspec": NEW_MEMBER_SPEC, "new_member_spec": NEW_MEMBER_SPEC,
+             "skip": SKIP, "": SKIP}
     if word in short:
         return Use(short[word])
-    for kind in (LEVEL_NAMES, MEMBERS, NAME_LABEL, ACTIVITIES, PHOTOS, NEW_SPEC, SKIP):
+    for kind in (LEVEL_NAMES, MEMBERS, NAME_LABEL, ACTIVITIES, PHOTOS, NEW_SPEC, NEW_MEMBER_SPEC, SKIP):
         if word in (norm(Use(kind).label), norm(column_name(Use(kind).label)[0])):
             return Use(kind)
-    raise ValueError(f"列の使い方「{raw}」が不明（階層 1・既知の個体・諸元: 全長・使わない など）")
+    raise ValueError(f"列の使い方「{raw}」が不明（階層 1・既知の個体・諸元: 全長・個体の別名・使わない など）")
 
 
 def norm(name: str) -> str:
@@ -142,6 +164,22 @@ def column_name(column: str) -> tuple[str, Optional[str]]:
     return column.strip(), None
 
 
+def member_column_name(column: str) -> tuple[str, Optional[str]]:
+    """An individual's column's specification and unit (個体の諸元: 全長（m） → 全長, m; 個体の別名 → 別名)."""
+    name, unit = column_name(column)
+    m = _MEMBER_COLUMN.match(unicodedata.normalize("NFKC", name).strip())
+    return (m.group(1).strip() if m else name), unit
+
+
+def _resolved(u: Use, column: str) -> Use:
+    """A use as the rows hold it: a new specification by its column's name."""
+    if u.kind == NEW_SPEC:
+        return Use(NEW_SPEC, column_name(column)[0])
+    if u.kind == NEW_MEMBER_SPEC:
+        return Use(NEW_MEMBER_SPEC, member_column_name(column)[0])
+    return u
+
+
 def guess_uses(columns: Sequence[str], taxonomy: Sequence[Taxon] = (), spec_fields: Sequence[SpecField] = ()) -> list[Use]:
     """What each column is, by its name; the levels numbered from the left. Without any level found, the columns on the left are."""
     levels = {norm(n) for n in _LEVEL_NAMES}
@@ -150,7 +188,10 @@ def guess_uses(columns: Sequence[str], taxonomy: Sequence[Taxon] = (), spec_fiel
         levels.update(norm(n) for n in (t.levels or []) if n)
         if t.name_label:
             labels.add(norm(t.name_label))
-    specs = {norm(f.name): f.name for f in spec_fields}
+    specs = {norm(f.name): f.name for f in spec_fields if f.use != "member"}
+    member_specs = {norm(f.name): f.name for f in spec_fields if f.use != "class"}
+    member_specs[norm(ALIAS_FIELD)] = ALIAS_FIELD
+    only_member = {norm(f.name): f.name for f in spec_fields if f.use == "member"}
     out: list[Use] = []
     level = 0
     taken: set[Use] = set()
@@ -161,7 +202,13 @@ def guess_uses(columns: Sequence[str], taxonomy: Sequence[Taxon] = (), spec_fiel
         use = SKIPPED
         # 級・型式: the names of a level in several branches, as the table written here joins them.
         parts = [norm(x) for x in re.split(r"[・/／]", name) if x.strip()]
-        if key in levels or bare in levels or _LEVEL_PATTERN.match(key) or (len(parts) > 1 and all(x in levels for x in parts)):
+        own = _MEMBER_COLUMN.match(unicodedata.normalize("NFKC", name).strip())
+        if own and norm(name) not in {norm(n) for n in _MEMBER_NAMES}:
+            field_name = member_specs.get(norm(own.group(1)))
+            use = Use(MEMBER_SPEC, field_name) if field_name else Use(NEW_MEMBER_SPEC)
+        elif bare in only_member:
+            use = Use(MEMBER_SPEC, only_member[bare])
+        elif key in levels or bare in levels or _LEVEL_PATTERN.match(key) or (len(parts) > 1 and all(x in levels for x in parts)):
             level += 1
             use = Use(LEVEL, level)
         elif bare in specs and Use(SPEC, specs[bare]) not in taken:
@@ -176,7 +223,7 @@ def guess_uses(columns: Sequence[str], taxonomy: Sequence[Taxon] = (), spec_fiel
             use = Use(ACTIVITIES)
         elif bare in {norm(n) for n in _PHOTO_NAMES}:
             use = Use(PHOTOS)
-        if use in taken and use.kind not in (LEVEL, SKIP):
+        if use in taken and use.kind not in (LEVEL, SKIP, NEW_SPEC, NEW_MEMBER_SPEC):
             use = SKIPPED
         taken.add(use)
         out.append(use)
@@ -196,9 +243,11 @@ def check_uses(uses: Sequence[Use]) -> Optional[str]:
         return "階層の列なし。大分類の列に「階層 1」を選択"
     if levels != list(range(1, len(levels) + 1)):
         return "階層の列は 1 から順に、重ならないように選択"
-    others = [u for u in uses if u.kind not in (LEVEL, SKIP, NEW_SPEC)]
+    others = [u for u in uses if u.kind not in (LEVEL, SKIP, NEW_SPEC, NEW_MEMBER_SPEC)]
     if len(others) != len(set(others)):
         return "同じ項目を 2 つの列で選択中。1 つの列だけを選択"
+    if any(u.kind in (MEMBER_SPEC, NEW_MEMBER_SPEC) for u in uses) and Use(MEMBERS) not in uses:
+        return "個体の別名・諸元の列には、個体の名前の列（既知の個体）も選択"
     return None
 
 
@@ -235,7 +284,7 @@ def read_rows(rows: Iterable[TableRow], columns: Sequence[str], uses: Sequence[U
     above: list[str] = []
     for row in rows:
         cells = [segment_name(cell_text(row.values.get(columns[i]))) for i in level_cols]
-        values = {u if u.kind != NEW_SPEC else Use(NEW_SPEC, column_name(columns[i])[0]): cell_text(row.values.get(columns[i])) for i, u in others}
+        values = {_resolved(u, columns[i]): cell_text(row.values.get(columns[i])) for i, u in others}
         if not any(cells) and not any(values.values()):
             continue
         first = next((k for k, c in enumerate(cells) if c), None)
@@ -412,20 +461,21 @@ def plan_import(existing: Sequence[Taxon], spec_fields: Sequence[SpecField], row
         own_rows.setdefault(_key(actual), []).append(r)
 
     # The items the table has columns for, in the columns' order.
-    columns_used = list(dict.fromkeys(u if u.kind != NEW_SPEC else Use(NEW_SPEC, column_name(columns[i])[0]) for i, u in enumerate(uses)))
+    columns_used = list(dict.fromkeys(_resolved(u, columns[i]) for i, u in enumerate(uses)))
     fields = list(spec_fields)
-    known_fields = {f.name for f in fields}
+    known_fields = {f.name for f in fields} | {ALIAS_FIELD}
     added_fields: list[SpecField] = []
     for i, u in enumerate(uses):
-        if u.kind != NEW_SPEC:
+        if u.kind not in (NEW_SPEC, NEW_MEMBER_SPEC):
             continue
-        name, unit = column_name(columns[i])
+        name, unit = (column_name if u.kind == NEW_SPEC else member_column_name)(columns[i])
         if name and name not in known_fields:
-            values = [r.values.get(Use(NEW_SPEC, name), "") for r in rows if r.path is not None]
+            values = [r.values.get(Use(u.kind, name), "") for r in rows if r.path is not None]
             numeric = [v for v in values if v]
             kind = "number" if numeric and all(is_number(_number(v)) for v in numeric) else "text"
-            added_fields.append(SpecField(name, kind, unit))
+            added_fields.append(SpecField(name, kind, unit, use="both" if u.kind == NEW_SPEC else "member"))
             known_fields.add(name)
+    member_uses = [u for u in columns_used if u.kind in (MEMBER_SPEC, NEW_MEMBER_SPEC) and u.arg]
     units = {f.name: f.unit for f in [*fields, *added_fields]}
 
     def spec_text(name: str, value: str) -> str:
@@ -439,8 +489,25 @@ def plan_import(existing: Sequence[Taxon], spec_fields: Sequence[SpecField], row
         members: list[str] = []
         photos: list[str] = []
         single: dict[Use, tuple[str, int]] = {}
+        # An individual's values: from the rows naming it alone (the first written; a different one noted).
+        own: dict[str, dict[Use, tuple[str, int]]] = {}
         for r in rs:
+            named = _split(r.values.get(Use(MEMBERS), ""))
+            written = {u: v for u, v in r.values.items() if u.kind in (MEMBER_SPEC, NEW_MEMBER_SPEC) and u.arg}
+            if len(named) == 1:
+                mine = own.setdefault(named[0], {})
+                for u, v in written.items():
+                    had = mine.get(u)
+                    if had is None or not had[0]:
+                        mine[u] = (v, r.number)
+                    elif v and had[0] != v:
+                        c.notes.append(f"行 {r.number} の{named[0]}の{_use_word(u)}「{v}」は使わない（行 {had[1]} の「{had[0]}」）")
+            elif any(written.values()):
+                why = "個体が 2 つ以上。1 行に 1 個体で" if named else "既知の個体が空欄"
+                c.notes.append(f"行 {r.number} の個体の別名・諸元は使わない（{why}）")
             for u, v in r.values.items():
+                if u.kind in (MEMBER_SPEC, NEW_MEMBER_SPEC):
+                    continue
                 if u.kind == MEMBERS:
                     members.extend(m for m in _split(v) if m not in members)
                 elif u.kind == PHOTOS:
@@ -494,6 +561,29 @@ def plan_import(existing: Sequence[Taxon], spec_fields: Sequence[SpecField], row
             else:
                 t.specs = specs or None
                 changes.extend(spec_changes)
+        for name, values in own.items() if member_uses else ():
+            if name not in (t.members or []):
+                continue
+            m = t.member(name)
+            mine = dict(m.specs or {})
+            said = []
+            for u in member_uses:
+                value = values.get(u, ("", 0))[0]
+                old = mine.get(u.arg, "")
+                if value and value != old:
+                    mine[u.arg] = value
+                    said.append(f"{name}の{u.arg} {spec_text(u.arg, old)} → {spec_text(u.arg, value)}" if old else
+                                f"{name}の{u.arg} {spec_text(u.arg, value)}")
+                elif replace and not value and old:
+                    del mine[u.arg]
+                    said.append(f"{name}の{u.arg}を消す")
+            if not said:
+                continue
+            if len(json.dumps(mine, ensure_ascii=False, separators=(",", ":"))) > MAX_SPECS:
+                c.notes.append(f"{name}の諸元が長すぎて保存できないため取り込まない（{MAX_SPECS} 文字まで）")
+                continue
+            t.member_info = {**(t.member_info or {}), name: Member(name, mine or None, m.photos, m.note, m.id)}
+            changes.extend(said)
         for use, attr, word in ((Use(LEVEL_NAMES), "levels", "階層名"), (Use(ACTIVITIES), "activities", "活動"),
                                 (Use(NAME_LABEL), "name_label", "個体名の呼称")):
             if use not in columns_used:
@@ -599,7 +689,8 @@ def _number(text: str) -> Any:
 
 
 def _use_word(u: Use) -> str:
-    return {SPEC: f"{u.arg}", NEW_SPEC: f"{u.arg}", LEVEL_NAMES: "階層名", ACTIVITIES: "活動", NAME_LABEL: "個体名の呼称"}.get(u.kind, "値")
+    return {SPEC: f"{u.arg}", NEW_SPEC: f"{u.arg}", MEMBER_SPEC: f"{u.arg}", NEW_MEMBER_SPEC: f"{u.arg}", LEVEL_NAMES: "階層名", ACTIVITIES: "活動",
+            NAME_LABEL: "個体名の呼称"}.get(u.kind, "値")
 
 
 # ---------------------------------------------------------------------------
@@ -626,25 +717,41 @@ def export_level_names(taxa: Sequence[Taxon], depth: int) -> list[str]:
 
 
 def taxonomy_table(taxa: Sequence[Taxon], spec_fields: Sequence[SpecField]) -> tuple[list[str], list[list[str]]]:
-    """The classification as a table: one row per class (every level written), its own settings beside."""
+    """
+    The classification as a table: one row per class (every level written), its own settings beside. When
+    individuals have specifications of their own (別名 among them), each individual is a row of its own below its
+    class (its class's levels, its name, 個体の別名 and 個体の諸元: x; the class's columns blank).
+    """
     items = normalize(taxa)
     depth = max([1, *(len(t.path) for t in items)])
-    specs = [f.name for f in spec_fields]
+    specs = [f.name for f in spec_fields if f.use != "member"]
     for t in items:
         for name in (t.specs or {}):
             if name not in specs:
                 specs.append(name)
+    had = {k for t in items for n in t.members or [] for k in (t.member(n).specs or {})}
+    own = [n for n in [ALIAS_FIELD, *(f.name for f in spec_fields)] if n in had]
+    own.extend(sorted(had - set(own)))
+    own = list(dict.fromkeys(own))
     units = {f.name: f.unit for f in spec_fields}
-    head = [*export_level_names(items, depth), "階層名", "個体名の呼称", "既知の個体", "活動", "参考写真",
-            *(f"{n}（{units[n]}）" if units.get(n) else n for n in specs)]
+
+    def head_of(n: str, prefix: str = "") -> str:
+        return f"{prefix}{n}（{units[n]}）" if units.get(n) else f"{prefix}{n}"
+
+    head = [*export_level_names(items, depth), "階層名", "個体名の呼称", "既知の個体", "活動", "参考写真", *(head_of(n) for n in specs),
+            *("個体の別名" if n == ALIAS_FIELD else head_of(n, "個体の諸元: ") for n in own)]
     rows = []
     for t in items:
+        levels = [t.path[d] if d < len(t.path) else "" for d in range(depth)]
         rows.append([
-            *(t.path[d] if d < len(t.path) else "" for d in range(depth)), "、".join(t.levels or []), t.name_label or "",
-            "、".join(t.members or []),
+            *levels, "、".join(t.levels or []), t.name_label or "",
+            "" if own and t.members else "、".join(t.members or []),
             "、".join(t.activities or []), "\n".join(p for p in (t.photos or []) if not p.startswith("local:")),
-            *((t.specs or {}).get(n, "") for n in specs),
+            *((t.specs or {}).get(n, "") for n in specs), *("" for _ in own),
         ])
+        for name in (t.members or []) if own else ():
+            mine = t.member(name).specs or {}
+            rows.append([*levels, "", "", name, "", "", *("" for _ in specs), *(mine.get(n, "") for n in own)])
     return head, rows
 
 
@@ -670,5 +777,5 @@ __all__ = [
     "NEW_SPEC", "SKIP", "STATUS_LABELS", "Use", "SKIPPED", "TableRow", "RowClass", "ClassResult", "ImportPlan", "use_choices", "guess_uses",
     "check_uses", "read_rows", "plan_import", "taxonomy_table", "taxonomy_csv", "taxonomy_csv_name", "norm",
     "column_name", "cell_text", "level_names_of", "generic_level_name", "ImportRequest", "plan_request", "backup_text", "backup_name", "parse_use",
-    "export_level_names",
+    "export_level_names", "MEMBER_SPEC", "NEW_MEMBER_SPEC", "member_column_name",
 ]

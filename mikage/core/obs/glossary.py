@@ -15,6 +15,10 @@ text before the cursor, not the whole field: the longest end that starts a
 word (or its reading, or another spelling of it) is the part being typed, and
 the word chosen takes its place. Other spellings found in the text are
 pointed out with the word to write instead; saving is never stopped.
+
+The classification's known individuals and their other names (別名) are
+offered too (`member_terms`, tsudo 2026-11-27), for their 大分類; they are
+only offered, never pointed out as another spelling.
 """
 from __future__ import annotations
 
@@ -105,6 +109,8 @@ class Term:
     kinds: tuple[str, ...] = ()
     description: str = ""
     order: Optional[float] = None
+    #: Whether it is written as the glossary says (another width or case pointed out); False: only offered.
+    fixes: bool = True
 
     def for_kind(self, root: str) -> bool:
         """Whether the word is offered while recording a thing of the 大分類 `root` ("" when none is chosen)."""
@@ -161,14 +167,14 @@ class Glossary:
                 continue
             old = merged.get(text)
             if old is None:
-                merged[text] = Term(text, tuple(v for v in t.variants if v != text), t.readings, t.kinds, t.description, t.order)
+                merged[text] = Term(text, tuple(v for v in t.variants if v != text), t.readings, t.kinds, t.description, t.order, t.fixes)
                 continue
             # The same word on two rows (for two 大分類, say): one word, every spelling, reading and 大分類 of both.
             merged[text] = Term(
                 text, tuple(dict.fromkeys(v for v in (*old.variants, *t.variants) if v != text)),
                 tuple(dict.fromkeys((*old.readings, *t.readings))),
                 () if not old.kinds or not t.kinds else tuple(dict.fromkeys((*old.kinds, *t.kinds))),
-                old.description or t.description, old.order if old.order is not None else t.order)
+                old.description or t.description, old.order if old.order is not None else t.order, old.fixes or t.fixes)
         self.terms: tuple[Term, ...] = tuple(merged.values())
         keys: list[_Key] = []
         for i, t in enumerate(self.terms):
@@ -190,6 +196,10 @@ class Glossary:
 
     def __hash__(self) -> int:
         return hash(self.terms)
+
+    def with_terms(self, extra: Sequence[Term]) -> "Glossary":
+        """The glossary with more words after its own (a word it has keeps its own description)."""
+        return Glossary([*self.terms, *extra]) if extra else self
 
     def words(self, root: str = "") -> list[str]:
         """The words offered for the 大分類 `root`, in the glossary's order."""
@@ -282,6 +292,8 @@ class Glossary:
         words = [(i, j) for t in self.terms for i, j in spans(t.text)]
         found: list[tuple[int, int, str]] = []
         for t in self.terms:
+            if not t.fixes:
+                continue
             for v in t.variants:
                 if v in self._words and any(x.text == v and x.for_kind(root) for x in self.terms):
                     continue
@@ -312,6 +324,23 @@ class Glossary:
 
 
 NO_GLOSSARY = Glossary()
+
+
+def member_terms(taxa: Sequence[Any]) -> tuple[Term, ...]:
+    """The classification's known individuals and their other names as words offered (never pointed out), each for
+    its 大分類: 「かが　いずも型の艦名」, 「DDH-184　かがの別名（いずも型）」."""
+    from .taxonomy import name_label_of
+
+    out: list[Term] = []
+    for t in taxa:
+        if not t.members:
+            continue
+        root, cls = (t.path[0],), t.path[-1]
+        label = name_label_of(taxa, t.path) or "個体"
+        for name in t.members:
+            out.append(Term(name, kinds=root, description=f"{cls}の{label}", fixes=False))
+            out += [Term(a, kinds=root, description=f"{name}の別名（{cls}）", fixes=False) for a in t.member(name).aliases() if a != name]
+    return tuple(out)
 
 
 def term_of(attributes: dict, fields: dict) -> Optional[Term]:

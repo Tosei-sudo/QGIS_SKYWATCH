@@ -81,6 +81,7 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | [`TBL_IMAGE_REVIEW`](#tbl_image_review画像の評価) | ポリゴン | 書き込み | 画像の評価（画像 × 地名ごとに 1 行。判読に使えるか・雲量・理由。2026-11-24 に追加） | `imageReviews` |
 | [`TBL_REFERENCE_INFO`](#tbl_reference_info参考情報) | ポイント | 書き込み（削除は作成者か管理者） | 出典つきの参考情報（発表・報道・通報など。場所と日時と出典・確からしさ。2026-11-24 に追加） | `referenceInfo.layer` |
 | [`TBL_REFERENCE_LINK`](#tbl_reference_link参考情報の紐付け) | なし | 書き込み | 参考情報とイベント・モノ・観測記録の紐付け（同じ組は 1 行） | `referenceInfo.links` |
+| [`TBL_TAXONOMY_MEMBER`](#tbl_taxonomy_member分類の既知の個体) | なし | 書き込み | 分類体系の既知の個体の別名・個体の諸元・参考写真・備考（1 個体 1 行。2026-11-27 に追加） | `observationStores[].taxonomyTable.members` |
 
 使う機能のテーブルだけあればよい（例えば観測記録だけなら `TBL_OBSERVATION`）。「読み」のテーブルはほかのシステムが作るものでもよく、属性名が違えば `fields` で合わせる。表の「必須」は、その属性がないとプラグインがそのテーブルを使わない（理由を出す）もの。ほかの属性は、なければその値を読み書きしない。
 
@@ -153,6 +154,8 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | `TBL_REFERENCE_INFO` | `NAMED_AREA_ID` | 地名ごとの参考情報（画像に写る地名の参考情報） |
 | `TBL_REFERENCE_LINK` | `INFO_ID` | 参考情報の紐付け |
 | `TBL_REFERENCE_LINK` | `ITEM_ID` | イベント・モノ・記録の参考情報 |
+| `TBL_TAXONOMY_MEMBER` | `CLASS_PATH` | 分類ごとの個体（ダッシュボード・SQL） |
+| `TBL_TAXONOMY_MEMBER` | `MEMBER_NAME` | 個体の名前で引く（ほかの人が同じ個体を足していないかの確認） |
 
 ほかに:
 
@@ -386,7 +389,7 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | `PATH` | 分類 | `String(1000)` | 分類のパス（`船舶 > 貨物船`）。**必須** | `path` |
 | `LEVELS` | 階層名 | `String(1000)` | 階層の名前（`大分類,種別,級`。大分類の行） | `levels` |
 | `NAME_LABEL` | 名前の見出し | `String(255)` | モノの名前の見出し（船名・機番） | `nameLabel` |
-| `MEMBERS` | 個体 | `String(8000)` | その分類のモノの名前（カンマ区切り） | `members` |
+| `MEMBERS` | 個体 | `String(8000)` | その分類の既知の個体の名前（カンマ区切り）。別名・個体の諸元は [`TBL_TAXONOMY_MEMBER`](#tbl_taxonomy_member分類の既知の個体) | `members` |
 | `SPECS` | 諸元 | `String(16000)` | 諸元（JSON） | `specs` |
 | `PHOTOS` | 参考写真 | `String(8000)` | 参考写真（JSON） | `photos` |
 | `ACTIVITIES` | 活動 | `String(2000)` | その大分類の活動（カンマ区切り） | `activities` |
@@ -895,6 +898,25 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | `ITEM_ID` | 項目ID | `String(255)` | イベント ID・モノ ID（観測記録の `OBJECT_ID`）・記録 ID。**必須** | `item` |
 | `LABEL` | 項目名 | `String(255)` | 一覧に出す名前（紐付けたときの名前） | `label` |
 
+### `TBL_TAXONOMY_MEMBER`（分類の既知の個体）
+
+分類体系の既知の個体（艦名・機番など）が自分で持つもの: 別名・個体の諸元・参考写真・備考（1 個体 1 行、形状なし。2026-11-27 に追加）。「分類体系の編集」でツリーの個体（◆）を選んで編集する。`observationStores[].taxonomyTable.members`（URL か `{ "url", "fields" }`、既定は下の名前。`taxonomyTable` は `{ "url": …, "members": … }` の形で書く）。なければ個体は名前だけ（`TBL_TAXONOMY` の `MEMBERS`）で、個体の画面の別名・諸元は編集できない。
+
+- `MEMBER_ID` は名前を変えても、別の分類へ移しても変わらない。行はプラグインが足す・直す・消す（分類の保存と一緒に、変えた行だけ）
+- `TBL_TAXONOMY` の `MEMBERS` にも名前を書き続ける（前の版のプラグインやダッシュボードはそちらを読む）。この表にだけある行は、その分類の個体の最後に並ぶ。`MEMBERS` にだけある名前は、別名・諸元のない個体
+- 別名は `ALIASES` にカンマ区切りで（SQL やダッシュボードで引けるよう、ほかの諸元と分けて持つ）。分類がなくなった行は読まない（次に保存したときに消す）
+
+| 属性名 | エイリアス | 型 | 中身 | 役割 |
+| --- | --- | --- | --- | --- |
+| `MEMBER_ID` | 個体ID | `String(64)` | 個体の ID（UUID）。**必須** | `id` |
+| `CLASS_PATH` | 分類 | `String(1000)` | 個体の分類のパス（`TBL_TAXONOMY` の `PATH`）。**必須** | `path` |
+| `MEMBER_NAME` | 個体名 | `String(255)` | 個体の名前（`MEMBERS` の名前と同じ）。**必須** | `name` |
+| `ALIASES` | 別名 | `String(1000)` | 別名（カンマ区切り。`DDH-184,Kaga`） | `aliases` |
+| `SPECS` | 諸元 | `String(16000)` | 個体の諸元（JSON。別名のほか。書いていない項目は分類の値） | `specs` |
+| `PHOTOS` | 参考写真 | `String(8000)` | 個体の参考写真（URL を改行区切り） | `photos` |
+| `NOTE` | 備考 | `String(4000)` | 備考 | `note` |
+| `SORT_ORDER` | 並び順 | `Integer` | 分類の中での並び順 | `order` |
+
 ### 上の表の名前で作ったときの設定
 
 既定の属性名のある項目（撮像計画・撮像依頼・観測記録・通報・分担・画像の評価・引き継ぎ・イベント・参考情報・関心地域・地点・担当・衛星の障害情報・備考の単語集・判読の練習・画像の幾何補正）は URL だけ書けばよい。既定のない項目は `fields` に属性名を書く。URL はサービスに合わせる。
@@ -934,7 +956,9 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
   "observationStores": [
     { "url": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/6",                         // TBL_OBSERVATION
       "areas": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/7",                       // TBL_OBSERVATION_AREA
-      "taxonomyTable": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/8" }              // TBL_TAXONOMY
+      "taxonomyTable": {
+        "url": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/8",                       // TBL_TAXONOMY
+        "members": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/38" } }               // TBL_TAXONOMY_MEMBER
   ],
   "alertReports": {
     "rules": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/9",                         // TBL_ALERT_RULE
