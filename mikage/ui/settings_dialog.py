@@ -25,7 +25,7 @@ from qgis.PyQt.QtWidgets import (
 
 from ..core import sign_in
 from ..core.obs.api import place_cache
-from ..qgis_io import overviews_io, raster_speed, settings
+from ..qgis_io import local_copy_io, overviews_io, raster_speed, settings
 from ..qgis_io.context import PluginContext
 from . import last_inputs
 from .fit import fit_text
@@ -128,15 +128,25 @@ class SettingsDialog(QDialog):
         form.addWidget(self.raster, 6, 1)
         form.addWidget(self.raster_more, 6, 2)
         self._show_raster()
+        # 手元にコピーして見る (`localCopy`, qgis_io/local_copy_io.py): where the copies are, how many, and room made.
+        self.copies = QLabel()
+        self.copies.setWordWrap(True)
+        self.clear_copies = QPushButton(self.tr("使っていないコピーを消去"))
+        self.clear_copies.setToolTip(self.tr("共有フォルダの大きな画像を手元にコピーしたもののうち、開いていないものを消す（次に開くとき、またコピーする）"))
+        self.clear_copies.clicked.connect(self._clear_copies)
+        form.addWidget(QLabel(self.tr("手元のコピー")), 7, 0)
+        form.addWidget(self.copies, 7, 1)
+        form.addWidget(self.clear_copies, 7, 2)
+        self._show_copies()
         # Moved here from 画像カタログ (tsudo, 2026-11-19: its button became 「フォルダを開く」).
         self.folders = QLabel()
         self.folders.setWordWrap(True)
         self.clear_folders = QPushButton(self.tr("対応を消去"))
         self.clear_folders.setToolTip(self.tr("画像のフォルダの読み替えで、この PC で選んだフォルダを消去（次に画像を開くとき、フォルダを選び直す）"))
         self.clear_folders.clicked.connect(self._clear_folders)
-        form.addWidget(QLabel(self.tr("画像のフォルダの対応")), 7, 0)
-        form.addWidget(self.folders, 7, 1)
-        form.addWidget(self.clear_folders, 7, 2)
+        form.addWidget(QLabel(self.tr("画像のフォルダの対応")), 8, 0)
+        form.addWidget(self.folders, 8, 1)
+        form.addWidget(self.clear_folders, 8, 2)
         self._show_folders()
         # 設定ファイルの signIn (qgis_io/sign_in_io.py): each portal's way of signing in, and who is signed in.
         self.sign_in = QLabel()
@@ -145,9 +155,9 @@ class SettingsDialog(QDialog):
         self.sign_in_again = QPushButton(self.tr("確認し直す"))
         self.sign_in_again.setToolTip(self.tr("統合 Windows 認証のポータルに、サインインを確かめ直す（トークンを取り直す）"))
         self.sign_in_again.clicked.connect(self._check_sign_in)
-        form.addWidget(QLabel(self.tr("サインイン")), 8, 0)
-        form.addWidget(self.sign_in, 8, 1)
-        form.addWidget(self.sign_in_again, 8, 2)
+        form.addWidget(QLabel(self.tr("サインイン")), 9, 0)
+        form.addWidget(self.sign_in, 9, 1)
+        form.addWidget(self.sign_in_again, 9, 2)
         context.sign_in.changed.connect(self._show_sign_in)
         self._show_sign_in()
 
@@ -225,6 +235,23 @@ class SettingsDialog(QDialog):
             text += self.tr("。次回起動時に消去")
         self.cache.setText(temp + "\n" + self.tr("キャッシュ ") + text if temp else text)
         self.clear_cache.setEnabled(n > 0 and not settings.overview_cache_to_clear())
+
+    def _show_copies(self) -> None:
+        options = local_copy_io.current
+        if not options.enabled:
+            self.copies.setText(self.tr("使わない（設定ファイルの localCopy が false）"))
+            self.clear_copies.setEnabled(False)
+            return
+        folder = local_copy_io.base_folder(options)
+        n, size = local_copy_io.size_of(folder)
+        when = self.tr("QGIS を閉じると消去") if options.location == "temp" else self.tr("次回も使う")
+        self.copies.setText(self.tr("{folder}（{n} 件、{gb:.1f} GB。上限 {top:g} GB、{when}）").format(
+            folder=folder, n=n, gb=size / 1024 ** 3, top=options.max_gb, when=when))
+        self.clear_copies.setEnabled(n > 0)
+
+    def _clear_copies(self) -> None:
+        local_copy_io.clear_unused()
+        self._show_copies()
 
     def _clear_cache(self) -> None:
         overviews_io.clear_cache_next_start()

@@ -155,6 +155,7 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "pathMappings",
   "overviews",
   "rasterSpeed",
+  "localCopy",
   "complexImages",
   "satelliteCatalogs",
   "sensorCatalogs",
@@ -1713,12 +1714,14 @@ const SPEC = [
         T("pattern", "先に試すパス（正規表現）", { ph: "^//[^/]+/(?:[^/]+/)*([^/]+)$", help: "Python の re、大文字小文字は区別なし。区切りは \\ も / として合わせる", showIf: (it) => !it.prefix && !it.url }),
         T("to", "読み替え先", { ph: "D:/$1", help: "$1・${name} がグループ、$$ が $。そこになければ元のパスで開く", showIf: (it) => !it.prefix && !it.url }),
         B("overviewsBeside", "ピラミッドは読み替え先の画像の隣に置く", { help: "既定 false。true: ここで見つかった画像の .ovr は、ピラミッドの置き場所が temp・cache でも画像の隣（書き込めるとき）。共有フォルダなら、だれかが一度作ればほかの人は作らずに使う", showIf: (it) => !it.prefix && !it.url }),
+        B("localCopy", "手元にコピーして見る", { help: "未指定: localCopy のとおり（ネットワーク上のフォルダの大きな画像だけコピー）。true: ここで見つかった大きな画像はどこにあっても手元の PC にコピーしてから表示。false: コピーしない", showIf: (it) => !it.prefix && !it.url }),
       ], { title: (it) => it.prefix || (it.pattern && `${it.pattern} → ${it.to || "?"}`), check: (it, at, p) => {
         const rewrite = it.pattern !== undefined || it.to !== undefined;
         if (rewrite && (it.prefix !== undefined || it.url !== undefined)) p.push(`${at}: prefix（・url）か pattern・to のどちらか`);
         else if (rewrite && !(it.pattern && it.to)) p.push(`${at}: pattern と to が必要`);
         else if (!rewrite && !it.prefix) p.push(`${at}: prefix（パスの先頭）か pattern・to が必要`);
         if (!rewrite && it.overviewsBeside !== undefined) p.push(`${at}: overviewsBeside は pattern・to の読み替えにだけ書ける`);
+        if (!rewrite && it.localCopy !== undefined) p.push(`${at}: localCopy は pattern・to の読み替えにだけ書ける`);
       } }) },
     { key: "overviews", label: "ピラミッド（.ovr）の自動作成", doc: "ピラミッドovrの自動作成overviews", help: "ピラミッドのない画像を開いたとき裏で .ovr を作る（既定は作る・auto・all）。",
       field: O("overviews", "ピラミッド", [
@@ -1736,6 +1739,14 @@ const SPEC = [
         TJ("gdalCacheMB", "GDAL のブロックキャッシュ（MB）", { ph: "auto", help: "auto（既定）= RAM の 10 %（最大 2048 MB。GDAL の既定 5 % より小さくはしない）。数（MB。RAM の半分まで）か false（変えない）" }),
         B("qgisSettings", "QGIS のオプションを直す", { help: "既定 true。false で QGIS のオプションは変えない" }),
       ], { allowFalse: "何も変えない（false）" }) },
+    { key: "localCopy", label: "手元にコピーして見る", doc: "手元にコピーして見るlocalcopy", help: "共有フォルダ（\\\\server\\… やネットワークドライブ）の大きな画像を開いたら、裏で手元の PC に丸ごとコピーし、終わったら手元から表示する（ピラミッドも手元のコピーから作り、書ければ共有フォルダの画像の隣にも置く）。書かなければ 300 MB 以上の画像を一時フォルダにコピー（QGIS を閉じたら消す）。",
+      field: O("localCopy", "手元のコピー", [
+        B("enabled", "使う", { help: "既定 true" }),
+        N("minMB", "コピーする最小の大きさ（MB）", { min: 0, ph: "300", help: "これより小さい画像は共有フォルダから読む。0 ですべて" }),
+        S("location", "置き場所", [["temp", "temp（一時フォルダ。QGIS を閉じたら消す）"], ["cache", "cache（残して次回も使う）"]], { ph: "temp" }),
+        T("folder", "フォルダ", { ph: "%TEMP%\\MIKAGE\\copies", help: "空なら temp は %TEMP%\\MIKAGE\\copies、cache は %LOCALAPPDATA%\\MIKAGE\\copies。環境変数を書ける" }),
+        N("maxGB", "上限（GB）", { min: 1, ph: "30", help: "コピーの合計の上限。超えるときは開いていないものを古い順に消す。PC の空きは 5 %（2 GB 以上）残す" }),
+      ], { allowFalse: "コピーしない（false）" }) },
     { key: "complexImages", label: "複素 SAR 画像（SICD）の表示", doc: "複素-sar-画像sicdの表示compleximages", help: "SICD の I・Q バンドや複素数の画素の画像を振幅で表示する（既定は dB）。",
       field: S("complexImages", "表示", [["dB", "dB（20·log10 振幅）"], ["amplitude", "amplitude（振幅 √(I²+Q²)）"]], { ph: "dB", falseLabel: "false（QGIS のまま I・Q を表示）" }) },
     { key: "imageRules", label: "画像ごとの補正", doc: "画像補正", help: "ファイル名に合う画像に補正・バンド・no data を当てる。",
@@ -2136,6 +2147,7 @@ const DOC_FILES = {
   "データ分析": "docs/features/analysis.md",
   "パスの読み替えpathmappings": "docs/features/images.md",
   "ピラミッドovrの自動作成overviews": "docs/features/images.md",
+  "手元にコピーして見るlocalcopy": "docs/features/images.md",
   "一覧のビュー列並べ替え絞り込みの保存": "docs/features/screen.md",
   "作成者更新者の記録edittracking": "docs/admin/operations.md",
   "個人の関心地域地点interests": "docs/features/images.md",
