@@ -12,7 +12,8 @@ what each prefix stands for on this computer.
 Entries with `pattern` and `to` instead of `prefix` (PathRewrite) are tried
 before all that: a path matching `pattern` is rewritten to `to`
 (`//nas/…/ID` → `D:/ID`), and the rewritten place is opened when it is
-there; otherwise the path goes on as written.
+there; otherwise the path goes on as written. With `overviewsBeside` the
+images found there get their .ovr beside them (qgis_io/overviews_io).
 
 GDAL reads the .ovr, .RPB / _RPC.TXT and .IMD beside an image by itself.
 """
@@ -50,6 +51,10 @@ class PathRewrite:
     to: str
     #: Its name in messages.
     label: str
+    #: `overviewsBeside`: the images found where it takes a path get their pyramids (.ovr) beside them when that
+    #: folder can be written, whatever `overviews.location` says, so whoever opens them there uses the same .ovr
+    #: (a shared folder; tsudo, 2026-11-26). Images elsewhere follow `location`.
+    overviews_beside: bool = False
 
 
 #: `$1`, `${1}`, `${name}` and `$$` in a rewrite's `to`; any other `$` or `\\` is as written (Windows paths).
@@ -58,6 +63,10 @@ _REF = re.compile(r"\$(?:(\d+)|\{(\w+)\}|(\$))")
 
 def _rewrite_of(value: dict, at: str, problems: list[str]) -> Optional[PathRewrite]:
     pattern, to, label = value.get("pattern"), value.get("to"), value.get("label")
+    beside = value.get("overviewsBeside", False)
+    if not isinstance(beside, bool):
+        problems.append(f"{at} の overviewsBeside は true か false で指定")
+        return None
     if "prefix" in value or "url" in value:
         problems.append(f"{at} は prefix（・url）か pattern・to のどちらかで指定")
         return None
@@ -79,7 +88,7 @@ def _rewrite_of(value: dict, at: str, problems: list[str]) -> Optional[PathRewri
         if not (int(key) <= regex.groups if key.isdigit() else key in regex.groupindex):
             problems.append(f"{at} の to の ${key} は pattern にないグループ")
             return None
-    return PathRewrite(pattern, to.strip(), label if isinstance(label, str) and label else to.strip())
+    return PathRewrite(pattern, to.strip(), label if isinstance(label, str) and label else to.strip(), beside)
 
 
 def path_mapping_of(value: Any, problems: list[str], index: int) -> Optional[PathMapping | PathRewrite]:
@@ -90,6 +99,8 @@ def path_mapping_of(value: Any, problems: list[str], index: int) -> Optional[Pat
         return None
     if "pattern" in value or "to" in value:
         return _rewrite_of(value, at, problems)
+    if "overviewsBeside" in value:
+        problems.append(f"{at} の overviewsBeside は pattern・to の読み替えにだけ書ける")
     prefix, label, url = value.get("prefix"), value.get("label"), value.get("url")
     if not isinstance(prefix, str) or not path_parts(prefix):
         problems.append(f"{at} に prefix（パスの先頭）なし")

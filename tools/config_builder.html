@@ -1683,11 +1683,13 @@ const SPEC = [
         T("url", "同じフォルダの URL", { help: "なければ各自が PC のフォルダを選ぶ", showIf: (it) => !it.pattern && !it.to }),
         T("pattern", "先に試すパス（正規表現）", { ph: "^//[^/]+/(?:[^/]+/)*([^/]+)$", help: "Python の re、大文字小文字は区別なし。区切りは \\ も / として合わせる", showIf: (it) => !it.prefix && !it.url }),
         T("to", "読み替え先", { ph: "D:/$1", help: "$1・${name} がグループ、$$ が $。そこになければ元のパスで開く", showIf: (it) => !it.prefix && !it.url }),
+        B("overviewsBeside", "ピラミッドは読み替え先の画像の隣に置く", { help: "既定 false。true: ここで見つかった画像の .ovr は、ピラミッドの置き場所が temp・cache でも画像の隣（書き込めるとき）。共有フォルダなら、だれかが一度作ればほかの人は作らずに使う", showIf: (it) => !it.prefix && !it.url }),
       ], { title: (it) => it.prefix || (it.pattern && `${it.pattern} → ${it.to || "?"}`), check: (it, at, p) => {
         const rewrite = it.pattern !== undefined || it.to !== undefined;
         if (rewrite && (it.prefix !== undefined || it.url !== undefined)) p.push(`${at}: prefix（・url）か pattern・to のどちらか`);
         else if (rewrite && !(it.pattern && it.to)) p.push(`${at}: pattern と to が必要`);
         else if (!rewrite && !it.prefix) p.push(`${at}: prefix（パスの先頭）か pattern・to が必要`);
+        if (!rewrite && it.overviewsBeside !== undefined) p.push(`${at}: overviewsBeside は pattern・to の読み替えにだけ書ける`);
       } }) },
     { key: "overviews", label: "ピラミッド（.ovr）の自動作成", doc: "ピラミッドovrの自動作成overviews", help: "ピラミッドのない画像を開いたとき裏で .ovr を作る（既定は作る・auto・all）。",
       field: O("overviews", "ピラミッド", [

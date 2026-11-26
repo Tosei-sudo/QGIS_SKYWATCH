@@ -1149,6 +1149,50 @@ def test_a_rewritten_path_is_opened_when_it_is_there_and_the_path_as_written_oth
         where("\\\\nas\\images\\SCENE_Z")
 
 
+def test_a_rewrite_with_overviews_beside_marks_where_it_found_the_images(tmp_path):
+    """`overviewsBeside` (tsudo 2026-11-26): the images a rewrite found get their .ovr beside them; others do not."""
+    from mikage.core.catalog import catalog_of
+    from mikage.core.catalog.paths import path_mappings_of
+    from mikage.core.catalog.search import record_of
+    from mikage.qgis_io import overviews_io
+    from mikage.qgis_io.catalog_io import locate_record
+
+    shared, plain, nas = tmp_path / "shared", tmp_path / "plain", tmp_path / "nas"
+    for rel in ("shared/S1/PAN/a.tif", "shared/s2.tif", "plain/P1.tif", "nas/S9.tif"):
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        geotiff(tmp_path / rel)
+    problems = []
+    mappings = path_mappings_of([
+        {"pattern": "^//nas/img/(S[^/]*)$", "to": shared.as_posix() + "/$1", "overviewsBeside": True},
+        {"pattern": "^//nas/img/(P[^/]*)$", "to": plain.as_posix() + "/$1"},
+        {"prefix": "\\\\nas\\img", "label": "NAS"},
+    ], problems)
+    assert not problems
+    QgsSettings().remove("mikage")
+    settings.set_path_folder("\\\\nas\\img", str(nas))
+    catalog = catalog_of({"url": IMAGES, "fields": {"id": "IMG_ID", "source": "PATH"}}, problems, 0)
+
+    def where(path):
+        record = record_of({"attributes": {"IMG_ID": "R", "PATH": path}}, catalog.fields)
+        return locate_record(record, catalog, mappings, lambda mapping: pytest.fail("no folder to choose"))
+
+    overviews_io._beside.clear()
+    try:
+        assert not overviews_io.beside_wanted(str(shared / "S1" / "PAN" / "a.tif"))
+        # A folder record: the images below it; a file: itself.
+        assert where("\\\\nas\\img\\S1").files == ["PAN/a.tif"]
+        assert overviews_io.beside_wanted(str(shared / "S1" / "PAN" / "a.tif"))
+        assert where("\\\\nas\\img\\s2.tif").place == (shared / "s2.tif").as_posix()
+        assert overviews_io.beside_wanted(str(shared / "s2.tif"))
+        # Not the folder's neighbours, nor what a rewrite without it found, nor the path as written.
+        assert not overviews_io.beside_wanted(str(shared / "s2.tif.bak")) and not overviews_io.beside_wanted(str(shared / "S10"))
+        assert where("\\\\nas\\img\\P1.tif").place == (plain / "P1.tif").as_posix()
+        assert where("\\\\nas\\img\\S9.tif").place == str(nas / "S9.tif")
+        assert not overviews_io.beside_wanted(str(plain / "P1.tif")) and not overviews_io.beside_wanted(str(nas / "S9.tif"))
+    finally:
+        overviews_io._beside.clear()
+
+
 def test_open_folders_shows_the_folder_of_the_chosen_images_the_rewritten_one_first(plugin, tmp_path, monkeypatch):
     """
     「フォルダを開く」 (tsudo 2026-11-19, instead of 「フォルダの対応を消去」): the

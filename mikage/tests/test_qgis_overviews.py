@@ -724,3 +724,52 @@ def test_put_beside_by_someone_else_meanwhile(tmp_path, no_cache, monkeypatch):
         assert not [n for n in os.listdir(tmp_path) if n.endswith(".part")]
     finally:
         QgsProject.instance().removeAllMapLayers()
+
+
+
+@pytest.mark.parametrize("location", ["temp", "cache"])
+def test_rewrite_images_beside_whatever_the_location(location, tmp_path):
+    """
+    `pathMappings` `overviewsBeside` (tsudo 2026-11-26): an image a rewrite
+    found (a shared folder) gets its .ovr beside it with `location` "temp"
+    or "cache" too, so whoever opens it there uses it; GDAL takes it before
+    the .ovr the cache folder's .aux.xml names. Other images, and those of a
+    folder that cannot be written, follow `location`.
+    """
+    shared, elsewhere = tmp_path / "shared", tmp_path / "elsewhere"
+    shared.mkdir()
+    elsewhere.mkdir()
+    path, other = image(shared / "img.tif"), image(elsewhere / "other.tif")
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    kind = "o.TEMPORARY" if location == "temp" else "o.CACHED"
+    out = in_fresh_gdal(cache, f"options = OverviewOptions(location={location!r}, temp_folder={str(tmp_path / 'temp')!r})\n"
+                               "o.current = options\n"
+                               f"o.place_beside({str(shared)!r})\n"
+                               # Opened before in this location: its .aux.xml in the cache, naming an .ovr gone since.
+                               f"o.before_open({path!r})\n"
+                               f"o.point_to_overviews({path!r}, {str(tmp_path / 'gone.ovr')!r})\n"
+                               f"r = o.build_external({path!r}, options)\n"
+                               f"again = o.build_external({path!r}, options).kind\n"
+                               f"r2 = o.build_external({other!r}, options)\n"
+                               f"print(json.dumps([r.kind, count({path!r}), again, r2.kind == {kind}, count({other!r})]))")
+    assert out == [BUILT, 4, HAS_OVERVIEWS, True, 4]
+    assert sorted(os.listdir(shared)) == ["img.tif", "img.tif.ovr"]
+    assert sorted(os.listdir(elsewhere)) == ["other.tif"]
+    # Anyone else opening it there (no .aux.xml of theirs) uses it.
+    assert overview_count(path) == 4
+
+
+def test_rewrite_images_in_a_folder_that_cannot_be_written_follow_the_location(tmp_path):
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    path = image(shared / "img.tif")
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    out = in_fresh_gdal(cache, f"options = OverviewOptions(location='temp', temp_folder={str(tmp_path / 'temp')!r})\n"
+                               f"o.place_beside({str(shared)!r})\n"
+                               "o.writable_folder = lambda folder: False\n"
+                               f"r = o.build_external({path!r}, options)\n"
+                               f"print(json.dumps([r.kind, count({path!r})]))")
+    assert out == [overviews_io.TEMPORARY, 4]
+    assert sorted(os.listdir(shared)) == ["img.tif"]
