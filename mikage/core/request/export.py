@@ -80,7 +80,7 @@ from ..plan.api import R
 from ..time_zone import format_time  # noqa: F401 (now of the shared base: read from here too)
 from .daily import TAKEN, Candidate
 from .link_id import link_id, link_ids
-from .model import bbox_of, center_of, day_bounds, polygons_of, rotated_box
+from .model import bbox_of, center_of, clock_text, day_bounds, polygons_of, rotated_box
 from .systems import Column, ExportSystem, PriorityRule
 
 #: The sources a column or property can take.
@@ -89,7 +89,7 @@ SOURCES = (
     "priority", "priorityRaw", "priorityBase", "boost", "kind", "series", "satellites", "modes", "seriesSatellites",
     "seriesSatelliteIds", "satellite", "satelliteId", "mode", "sensor",
     "offNadirMin", "offNadirMax", "incidenceMin", "incidenceMax", "lookSide", "orbitDir", "resolution", "timeOfDay",
-    "cloudMax", "cloudForecast", "weatherFlag", "scenes", "geometry", "centerLat", "centerLon",
+    "timeFrom", "timeTo", "cloudMax", "cloudForecast", "weatherFlag", "scenes", "geometry", "centerLat", "centerLon",
     "bboxWest", "bboxSouth", "bboxEast", "bboxNorth", "requester", "group", "note", "system", "runDate", "day", "count", "warnings",
     "part", "parts",
     "passTime", "passOffNadir", "passIncidence", "passDirection", "passLookSide", "mergedIds", "mergedNames", "mergedCount",
@@ -293,6 +293,7 @@ def raw_value(c: Optional[Candidate], source: str, ctx: Context, geometry: str =
         "offNadirMin": req.off_nadir_min, "offNadirMax": req.off_nadir_max,
         "incidenceMin": req.incidence_min, "incidenceMax": req.incidence_max,
         "lookSide": req.look_side, "orbitDir": req.orbit_dir, "resolution": req.resolution, "timeOfDay": req.time_of_day,
+        "timeFrom": clock_text(req.window[0]) if req.window else None, "timeTo": clock_text(req.window[1]) if req.window else None,
         "cloudMax": req.cloud_no_go, "cloudForecast": None if c.forecast is None else int(math.floor(c.forecast + 0.5)),
         "weatherFlag": c.weather_flag or "", "scenes": c.scenes,
         "centerLat": _round(mid[1], digits) if mid else None, "centerLon": _round(mid[0], digits) if mid else None,

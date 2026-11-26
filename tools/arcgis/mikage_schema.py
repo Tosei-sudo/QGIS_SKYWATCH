@@ -124,6 +124,8 @@ TABLES = (
         F("ORBIT_DIR", "軌道方向", "TEXT", 16, "orbitDir"),
         F("RESOLUTION_MAX", "分解能", "DOUBLE", None, "resolution"),
         F("TIME_OF_DAY", "時間帯", "TEXT", 16, "timeOfDay"),
+        F("TIME_FROM", "時刻（から）", "TEXT", 5, "timeFrom"),
+        F("TIME_TO", "時刻（まで）", "TEXT", 5, "timeTo"),
         F("CLOUD_NO_GO", "実施しない雲量", "LONG", None, "cloudNoGo"),
         F("TIMES_MIN", "1日の回数下限", "LONG", None, "timesMin"),
         F("TIMES_MAX", "1日の回数上限", "LONG", None, "timesMax"),
