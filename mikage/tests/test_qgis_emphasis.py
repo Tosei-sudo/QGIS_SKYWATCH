@@ -16,7 +16,8 @@ from mikage.ui.emphasis import LIGHT, STRONG, emphasize, level_of  # noqa: E402
 
 #: The docks' much used buttons (tsudo 2026-11-26): 強調 every time, 少し強調 often.
 EXPECTED = {
-    "SatObsImageCatalog": {STRONG: {"検索", "開く"}, LIGHT: {"範囲を描く", "ファイルなしで記録"}},
+    # 「ファイルなしで記録」 is shown instead of 「開く」 (a catalog of images without files): never both.
+    "SatObsImageCatalog": {STRONG: {"検索", "開く", "ファイルなしで記録"}, LIGHT: {"範囲を描く"}},
     "SatObsObservations": {STRONG: {"クリック記録", "記録（Enter）"}, LIGHT: {"◀", "▶", "消失", "不可", "すべて継続", "確認範囲"}},
     "SatObsImagingPlan": {STRONG: {"計算"}, LIGHT: {"地図で指定", "レイヤーとして追加"}},
     "SatObsRequests": {STRONG: {"新規…"}, LIGHT: set()},
@@ -56,8 +57,8 @@ def marked(widget) -> dict:
 @pytest.mark.parametrize("name", sorted(EXPECTED))
 def test_each_dock_colours_its_much_used_buttons(plugin, name):
     assert marked(plugin.docks[name]) == EXPECTED[name]
-    # One or two a dock: more would no longer stand out.
-    assert 1 <= len(EXPECTED[name][STRONG]) <= 2
+    # One or two a dock shown at once: more would no longer stand out.
+    assert 1 <= len(EXPECTED[name][STRONG] - {"ファイルなしで記録"}) <= 2
 
 
 def test_no_other_dock_is_coloured(plugin):

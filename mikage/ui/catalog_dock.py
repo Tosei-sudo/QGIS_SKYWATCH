@@ -380,9 +380,10 @@ class CatalogDock(
                 button.clicked.connect(slot)
             buttons.addWidget(button)
             self.buttons[key] = button
-        # The much used (ui/emphasis.py): 「開く」 every time, 「ファイルなしで記録」 often.
+        # The much used (ui/emphasis.py): 「開く」 every time; 「ファイルなしで記録」 is shown instead of it
+        # in a catalog of images without files (`imageFiles: false`), so it is pressed every time there.
         emphasize(self.buttons["open"])
-        emphasize(self.buttons["record"], LIGHT)
+        emphasize(self.buttons["record"])
         # 「フットプリント」: how the listed images are drawn on the map (filled ones hid the images opened under them).
         self.footprint_box = QComboBox()
         for text, style in ((self.tr("塗りつぶし"), "fill"), (self.tr("枠だけ"), "outline"), (self.tr("非表示"), "hidden")):
