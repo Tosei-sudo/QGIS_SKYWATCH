@@ -139,16 +139,46 @@ def test_layer_information_is_kept_across_clients():
     for _ in range(3):
         assert len(EsriClient(fake, layers=infos).query_all(URL)) == 3
     assert info_asks() == 1
-    # Fields may have been added: asked again.
+    # Fields may have been added: asked again, unless asked in the last minute (2026-11-27).
+    EsriClient(fake, layers=infos).layer(URL, refresh=True)
+    assert info_asks() == 1
+    now[0] += 61
     EsriClient(fake, layers=infos).layer(URL, refresh=True)
     assert info_asks() == 2
+    # Now: whatever is kept.
+    EsriClient(fake, layers=infos).layer(URL, now=True)
+    assert info_asks() == 3
     now[0] += 601
     EsriClient(fake, layers=infos).query_all(URL)
-    assert info_asks() == 3
+    assert info_asks() == 4
     infos.clear()
     EsriClient(fake, layers=infos).query_all(URL)
-    assert info_asks() == 4
+    assert info_asks() == 5
     # Without: each client asks (as before).
     EsriClient(fake).query_all(URL)
     EsriClient(fake).query_all(URL)
-    assert info_asks() == 6
+    assert info_asks() == 7
+
+
+def test_a_field_just_added_or_a_refused_request_asks_the_layer_again():
+    from mikage.core.esri import LayerInfos
+
+    fake, layer = server(1)
+    infos = LayerInfos()
+
+    def info_asks():
+        return sum(1 for url, _form in fake.asked if url == URL)
+
+    client = EsriClient(fake, layers=infos)
+    client.layer(URL)
+    # An administrator adds a field: a store needing it asks again at once (not after a minute).
+    layer.types["MEMO"] = "esriFieldTypeString"
+    assert "MEMO" in client.layer_with(URL, None, ("MEMO",)).field_types
+    assert info_asks() == 2
+    assert client.layer_with(URL, None, ("MEMO",)) and info_asks() == 2
+    # A request the server refuses (a field gone): the layer is asked again next time.
+    fake.fail_next = {"error": {"code": 400, "message": "Unable to complete operation.", "details": ["Invalid field: NO_SUCH_FIELD"]}}
+    with pytest.raises(EsriError):
+        client.query_all(URL, where="NO_SUCH_FIELD = 1")
+    client.layer(URL)
+    assert info_asks() == 3

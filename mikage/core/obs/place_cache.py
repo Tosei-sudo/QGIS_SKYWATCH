@@ -406,7 +406,8 @@ class PlaceCache:
     # ---- the server -------------------------------------------------------------------------
 
     def _check_layer(self, client: EsriClient, layer: _Layer, token: Optional[str], now: float) -> None:
-        info = client.layer(layer.url, token, refresh=True)
+        # Its last edit time as the server says it now (not a minute old: core/esri.py LayerInfos).
+        info = client.layer(layer.url, token, now=True)
         editing = info.raw.get("editingInfo") if isinstance(info.raw.get("editingInfo"), dict) else {}
         stamp = _number(editing.get("dataLastEditDate"))
         if stamp is None:

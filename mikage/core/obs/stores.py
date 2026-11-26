@@ -18,6 +18,7 @@ from typing import Any, Iterable, Optional, Protocol, Sequence
 
 from ..esri import DELETE_BATCH, ConflictError, EsriClient, EsriError, TooManyError, fit_value, point_geometry, quote, ring_geometry
 from ..gpkg import AREAS, OBSERVATIONS, PHOTOS, TAXONOMY, GeoPackage, datetime_ms, datetime_text, encode_point, encode_polygon
+from ..together import read_together
 from ..util import is_number, js_string, ms_of
 from .areas import AreaStoreConfig, CheckedArea
 from .flows import now_ms, time_key
@@ -359,7 +360,7 @@ class _EsriLayer:
 
     def ready(self) -> tuple[dict[str, str], str]:
         if self._types is None:
-            info = self.client.layer(self.url, self.token, refresh=True)
+            info = self.client.layer_with(self.url, self.token, self.required)
             types = info.field_types
             for name in self.required:
                 if name not in types:
@@ -529,19 +530,28 @@ class EsriObservationStore:
         base = [f"({self.config.where})"] if self.config.where else []
         living = [f"{f['deleted']} IS NULL"] if f["deleted"] in types else []
         timed = f["imageTime"] if f["imageTime"] in types else None
-        out = self.find(RecordQuery(image_ids=tuple(dict.fromkeys(i for i, _, _ in images if i)))) if images else []
-        spans: dict[str, list[float]] = {}
+        # The images' own records and those near each image before and after its time: read at once (core/together.py).
+        reads = [lambda: self.find(RecordQuery(image_ids=tuple(dict.fromkeys(i for i, _, _ in images if i)))) if images else []]
+        sides: list[list[int]] = []
         for _, box, t in images:
-            if not box:
-                continue
-            near: list[Observation] = []
+            mine = []
             for op, order, count in (("<=", "DESC", before), (">", "ASC", after)):
-                if op == ">" and (t is None or not timed or count <= 0):
+                if not box or (op == ">" and (t is None or not timed or count <= 0)):
                     continue
                 when = [time_condition(timed, types.get(timed), op, t)] if timed and t is not None else []
                 where = " AND ".join([*base, *living, *when]) or "1=1"
                 order_by = {"orderByFields": f"{timed} {order}"} if timed else {}
-                near += self._read(where, {**envelope(box), **order_by}, limit=count, cut=True)
+                mine.append(len(reads))
+                reads.append(lambda where=where, box=box, order_by=order_by, count=count:
+                             self._read(where, {**envelope(box), **order_by}, limit=count, cut=True))
+            sides.append(mine)
+        answers = read_together(*reads)
+        out = answers[0]
+        spans: dict[str, list[float]] = {}
+        for (_, box, t), mine in zip(images, sides):
+            if not box:
+                continue
+            near: list[Observation] = [o for i in mine for o in answers[i]]
             times = [time_key(o) for o in near]
             low = min([*times, *([t] if t is not None else [])], default=None)
             high = max([*times, *([t] if t is not None else [])], default=None)

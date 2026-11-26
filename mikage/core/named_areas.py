@@ -416,7 +416,8 @@ def layer_stamp(client: EsriClient, settings: NamedAreaSettings, token: Optional
     """When the named area layer says its data last changed (ms; None when it does not say)."""
     from .analysis_cache import stamp_of
 
-    info = client.layer(settings.areas.url, token, refresh=True)
+    # As the server says it now (not a minute old: core/esri.py LayerInfos).
+    info = client.layer(settings.areas.url, token, now=True)
     return stamp_of(info.raw)
 
 
