@@ -9,8 +9,8 @@ button), also with no image chosen.
   image (its records, per 大分類, when recorded on last): the images one
   worked on.
 - Filters: 記録者 (oneself by default: the 「記録者」 name or the user name,
-  core/obs/mine.py; everyone; or one name), 期間 (30 日 by default; 今日・
-  7 日・90 日・期間指定), 大分類, a text, 「ほかの人が変えた記録のみ」 and
+  core/obs/mine.py; everyone; or one name), 期間 (7 日 by default; 今日・
+  30 日・90 日・期間指定), 大分類, a text, 「ほかの人が変えた記録のみ」 and
   「削除済みも表示」.
 - Marks: 通報済み and 送信待ち as in the dock; a record of one's own someone
   else changed afterwards has its own colour (and that person under 更新者).
@@ -51,7 +51,7 @@ from .list_views import column_menus
 REPORTED_ROW = "#fde68a"
 WAITING_ROW = "#dbeafe"
 OTHERS_ROW = "#ede9fe"
-#: The periods offered (days; 0: today; None: 期間指定), in this order, 30 日 chosen first.
+#: The periods offered (days; 0: today; None: 期間指定), in this order, DEFAULT_DAYS (7 日) chosen first.
 PERIOD_CHOICES = [(0, "今日"), (7, "7 日"), (30, "30 日"), (90, "90 日"), (None, "期間指定…")]
 #: 記録者: oneself, everyone (else a name).
 ME, EVERYONE = "\x00me", "\x00all"
