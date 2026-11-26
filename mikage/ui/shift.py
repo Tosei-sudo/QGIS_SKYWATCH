@@ -12,6 +12,10 @@ under it (nested groups and hidden ones too, not background maps) moves by
 the same ground distance at once (tsudo 2026-11-18: 「グループ画像レイヤーを
 選んでるときは全部同じ変化量でずらせるように」), each from its own move so
 far; 「位置ずらしの解除」 puts them all back.
+
+An image drawn by クイックパンシャープン moves with its pan (and a pan with
+the image it sharpens) by the same, so the picture moves as one and its
+detail stays on it (tsudo 2026-11-27).
 """
 from __future__ import annotations
 
@@ -27,7 +31,7 @@ from qgis.gui import QgsMapCanvas, QgsMapCanvasItem, QgsMapTool
 from qgis.PyQt.QtCore import QObject, QPointF, QRectF, Qt
 from qgis.PyQt.QtGui import QColor, QImage, QPen
 
-from ..qgis_io import map_tools
+from ..qgis_io import map_tools, quick_pan
 from ..qgis_io.enhance_group import group_rasters
 from ..qgis_io.shift_io import can_shift, get_shift, set_shift
 from ..qgis_io.tasks import error_text
@@ -168,6 +172,22 @@ class LayerShift(QObject):
         layer = self.layer()
         return [layer] if layer is not None else []
 
+    @staticmethod
+    def moved_together(targets: list) -> list:
+        """
+        `targets` and the images that move with them: the other image of a
+        クイックパンシャープン (the pan of a sharpened image, the image a pan
+        sharpens), so the pan's detail stays on the picture as it moves.
+        """
+        out = list(targets)
+        ids = {layer.id() for layer in out}
+        for layer in targets:
+            other = quick_pan.partner(layer)
+            if other is not None and other.id() not in ids and can_shift(other):
+                out.append(other)
+                ids.add(other.id())
+        return out
+
     # On and off.
 
     def set_active(self, active: bool) -> None:
@@ -208,12 +228,12 @@ class LayerShift(QObject):
         targets = self.targets()
         if not targets:
             return
-        if self.group() is None:
+        # The images as the map shows them (hidden ones move too, unseen: a group's, a クイックパンシャープン's pan).
+        moved = {layer.id() for layer in self.moved_together(targets)}
+        drawn = [layer for layer in self.canvas.layers() if layer.id() in moved]
+        if not drawn and self.group() is None:
+            # One hidden image chosen: its copy all the same.
             drawn = targets
-        else:
-            # A group's images as the map shows them (its hidden ones move too, unseen).
-            moved = {layer.id() for layer in targets}
-            drawn = [layer for layer in self.canvas.layers() if layer.id() in moved]
         settings = QgsMapSettings(self.canvas.mapSettings())
         settings.setLayers(drawn)
         settings.setBackgroundColor(QColor(0, 0, 0, 0))
@@ -236,7 +256,7 @@ class LayerShift(QObject):
         Moves the image (a chosen group's images, each by the same) by dx, dy
         in the map's CRS, turned into each image's own CRS where it lies.
         """
-        targets = self.targets()
+        targets = self.moved_together(self.targets())
         if not targets:
             return
         map_crs = self.canvas.mapSettings().destinationCrs()
@@ -268,7 +288,7 @@ class LayerShift(QObject):
 
     @staticmethod
     def _delta(map_crs, layer_crs, centre: QgsPointXY, dx: float, dy: float) -> Optional[tuple]:
-        """dx, dy of the map at `centre` in the layer's CRS, or None (no transform there)."""
+        """dx, dy of the map (or any CRS) at `centre` in the layer's CRS, or None (no transform there)."""
         try:
             to = QgsCoordinateTransform(map_crs, layer_crs, QgsProject.instance())
             a = to.transform(centre)
@@ -287,8 +307,23 @@ class LayerShift(QObject):
         return True
 
     def set_shift(self, layer, dx: float, dy: float) -> None:
-        """Moves the image to dx, dy (its CRS's units) from where its file puts it."""
-        if self._move(layer, dx, dy):
+        """
+        Moves the image to dx, dy (its CRS's units) from where its file puts
+        it; an image that moves with it (`moved_together`) by as much.
+        """
+        x0, y0 = get_shift(layer)
+        moves = [(layer, dx, dy)]
+        centre = layer.extent().center()
+        for other in self.moved_together([layer])[1:]:
+            delta = self._delta(layer.crs(), other.crs(), centre, dx - x0, dy - y0)
+            if delta is None:
+                self.iface.messageBar().pushWarning(self.tr("位置ずらし"), self.tr("{name} は地図の座標系に変換できないので、動かさない").format(
+                    name=other.name()))
+                continue
+            x, y = get_shift(other)
+            moves.append((other, x + delta[0], y + delta[1]))
+        moved = [self._move(target, x, y) for target, x, y in moves]
+        if moved[0]:
             self.show_shift()
 
     def set_shift_metres(self, layer, east: float, north: float) -> None:
@@ -301,7 +336,7 @@ class LayerShift(QObject):
         targets = self.targets()
         if not targets:
             return
-        moved = [layer for layer in targets if get_shift(layer) != (0.0, 0.0)]
+        moved = [layer for layer in self.moved_together(targets) if get_shift(layer) != (0.0, 0.0)]
         if not moved:
             self.say(self.tr("{name} はずらしなし").format(name=self.target_name(targets)))
             return
