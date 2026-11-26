@@ -237,9 +237,9 @@ def test_the_day_and_the_schedule_filter_by_group(plugin):
     schedule = p.api.schedule
     schedule.show()
     # (Shown as a tab beside the plan-file dock: read as a click on its tab would.)
-    wait_for(lambda: schedule.task is None)
+    wait_for(lambda: not schedule.busy)
     schedule.reload(refresh=True)
-    assert wait_for(lambda: schedule._loaded and schedule.task is None and len(schedule.rows) == 3), schedule.status.text()
+    assert wait_for(lambda: schedule._loaded and not schedule.busy and len(schedule.rows) == 3), schedule.status.text()
     assert schedule.group_of(next(r for r in schedule.rows if r.name == "大阪湾")) == "第2班"
     schedule.group_filter.choose("第2班")
     assert names(schedule) == ["大阪湾"]

@@ -179,9 +179,9 @@ def test_the_request_lists_show_the_note_once_the_column_is_ticked(plugin):  # n
                     {"rings": TOKYO, "spatialReference": {"wkid": 4326}})
     schedule = p.api.schedule
     schedule.show()
-    wait_for(lambda: schedule.task is None)
+    wait_for(lambda: not schedule.busy)
     schedule.reload(refresh=True)
-    assert wait_for(lambda: schedule._loaded and schedule.task is None and len(schedule.rows) == 3), schedule.status.text()
+    assert wait_for(lambda: schedule._loaded and not schedule.busy and len(schedule.rows) == 3), schedule.status.text()
     settle()
     heads = [schedule.model.horizontalHeaderItem(c).text() for c in range(schedule.model.columnCount())]
     assert "理由・メモ" not in heads and heads[-2:] == ["理由", MEMO]

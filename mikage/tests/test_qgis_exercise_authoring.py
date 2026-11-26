@@ -201,7 +201,9 @@ def test_an_exercise_is_offered_or_put_aside_and_deleted_from_the_list(instructo
     assert manager.active_button.text() == "練習の一覧に出す"
     manager.active_button.click()
     assert wait_for(lambda: layers["exercises"].rows[0]["attributes"]["ACTIVE"] == 1, 10000)
-    assert manager.table.item(0, 6).text() == "出す" and manager.active_button.text() == "作りかけに変更"
+    # (the list read again after the write: shown once it is read, a moment later under load)
+    assert wait_for(lambda: manager.table.item(0, 6).text() == "出す", 10000)
+    assert manager.active_button.text() == "作りかけに変更"
     # A copy to make another from: a new id, not written until saved, 作りかけ.
     editor = authoring.copy("組織:EX-1")
     assert editor.title_edit.text() == "港の船（コピー）" and not editor.active.isChecked() and len(editor.answers) == 1
@@ -219,7 +221,7 @@ def test_an_exercise_is_offered_or_put_aside_and_deleted_from_the_list(instructo
     monkeypatch.setattr(exercise_authoring, "ask_no", lambda *a, **k: True)
     manager.delete_button.click()
     assert wait_for(lambda: layers["exercises"].rows == [] and layers["answers"].rows == [], 10000)
-    assert manager.table.rowCount() == 0
+    assert wait_for(lambda: manager.table.rowCount() == 0, 10000)
     manager.close()
     assert wait_for(lambda: training.authoring is None, 5000)
 

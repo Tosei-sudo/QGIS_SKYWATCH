@@ -68,7 +68,8 @@ def test_dialog_lists_changes_state_and_hands_over(plugin):
     next(a for a in p.actions if a.objectName() == "SatObsAssignments").trigger()
     dialog = dock._handover
     assert dialog.isVisible() and dialog.tabs.currentIndex() == 0
-    assert wait_for(lambda: dialog.table.rowCount() == 1)
+    # (the whole list read: not only the image shown's row, read first)
+    assert wait_for(lambda: dialog.table.rowCount() == 1 and len(dock.assignment_bar.items) == 2)
     assert dialog.table.item(0, 2).text() == "田中" and dialog.table.item(0, 4).text() == "記録 1 件（船舶 1）"
     dialog.done_check.setChecked(True)
     assert dialog.table.rowCount() == 2

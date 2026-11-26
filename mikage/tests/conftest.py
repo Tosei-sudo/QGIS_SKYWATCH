@@ -218,3 +218,53 @@ def no_shape_receiver(monkeypatch):
     except ImportError:  # no QGIS
         return
     monkeypatch.setattr(shape_receiver.ShapeReceiver, "LISTEN", False)
+
+
+def _let_go_of_keys_and_buttons() -> None:
+    """Ctrl, Shift… and mouse buttons Qt Test left held for the process: let go of (see `no_keys_held`)."""
+    widgets = sys.modules.get("qgis.PyQt.QtWidgets")
+    if widgets is None or widgets.QApplication.instance() is None:
+        return
+    from qgis.PyQt.QtCore import Qt
+    from qgis.PyQt.QtTest import QTest
+
+    app = widgets.QApplication
+    held, pressed = app.keyboardModifiers(), app.mouseButtons()
+    if held == Qt.KeyboardModifier.NoModifier and pressed == Qt.MouseButton.NoButton:
+        return
+    nobody = widgets.QWidget()
+    if held != Qt.KeyboardModifier.NoModifier:
+        # A release with no modifier: QApplication keeps the modifiers of the last such event.
+        QTest.keyRelease(nobody, Qt.Key.Key_Shift, Qt.KeyboardModifier.NoModifier)
+    for button in (Qt.MouseButton.LeftButton, Qt.MouseButton.RightButton, Qt.MouseButton.MiddleButton):
+        if pressed & button:
+            QTest.mouseRelease(nobody, button, Qt.KeyboardModifier.NoModifier)
+    nobody.deleteLater()
+
+
+@pytest.fixture(autouse=True)
+def no_keys_held():
+    """
+    No key nor mouse button held at a test's start: QApplication keeps the
+    modifiers of the last key or mouse event Qt Test sent, and its Ctrl+F or
+    Ctrl+click ends with Ctrl still held (the release of Ctrl carries Ctrl).
+    A later test in the same process then had Ctrl held: a row chosen by the
+    code (QTableView.selectRow) was added to the rows chosen instead of
+    replacing them (test_qgis_interests failed in every `-n auto` run, after
+    test_qgis_help in the same worker; it passed alone).
+    """
+    _let_go_of_keys_and_buttons()
+    yield
+    _let_go_of_keys_and_buttons()
+
+
+def pytest_unconfigure(config):
+    """
+    The plugin's GDAL datasets closed before Python's exit (QGIS and GDAL are
+    gone by then: one closed after them crashed the process, "corrupted size
+    vs. prev_size" or "double free", after every test had passed; the plugin's
+    unload does the same in QGIS).
+    """
+    pixel_place = sys.modules.get("mikage.qgis_io.pixel_place")
+    if pixel_place is not None:
+        pixel_place.forget()

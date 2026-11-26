@@ -554,7 +554,7 @@ def request_course(p) -> Course:
           "カレンダーで見たい日をクリックします。計画のある日は太字で出ます（緑の太字は計画に入ったものがある日、青の太字は採否がまだ分からないものだけの日）。"
           "練習では、「撮像計画を計算して出し、採否を入れる」のコースで書き出した日に計画が入ります。",
           target=lambda: schedule.calendar, reveal=reveal(schedule, "撮像予定"),
-          begin=lambda: schedule.day, done=lambda day: bool(schedule.day) and schedule.day != day and schedule.task is None,
+          begin=lambda: schedule.day, done=lambda day: bool(schedule.day) and schedule.day != day and not schedule.busy,
           demo=lambda: schedule.set_day(tomorrow)),
         S("5-3", "自分のグループの依頼だけにする",
           "一覧の上のグループの欄の ▼ を押して、<b>自分のグループ</b> にチェックを入れます。",
@@ -784,7 +784,7 @@ def plan_course(p) -> Course:
         return {(r.key, r.part, r.system): (r.adoption, r.adoption_reason) for r in schedule.rows}
 
     def answered_by_hand(before) -> bool:
-        if before is None or schedule.task is not None:
+        if before is None or schedule.busy:
             return False
         return any(r.adoption_source == MANUAL and before.get((r.key, r.part, r.system)) != (r.adoption, r.adoption_reason)
                    for r in schedule.rows)
@@ -824,16 +824,17 @@ def plan_course(p) -> Course:
         S("4-1", "撮像予定で対象日を開く",
           "ツールバーの <b>撮像予定</b> を押します。カレンダーで対象日を選びます。書き出したばかりの依頼は、一覧で「不明」です。",
           target=lambda: schedule.calendar if shown(schedule) else p.button("撮像予定"),
-          done=lambda _b: shown(schedule) and schedule.day == plan_day().isoformat() and schedule.task is None, demo=open_day),
+          done=lambda _b: shown(schedule) and schedule.day == plan_day().isoformat() and not schedule.busy, demo=open_day),
         S("4-2", "返ってきた採否を取り込む", answer_text,
           skip=no_answer, target=lambda: question_yes() or schedule.import_button, reveal=reveal(schedule, "撮像予定"),
-          begin=answer_files, done=lambda count: count is not None and schedule.task is None and answered() > count,
-          demo=import_answer, ok="ファイルにあった依頼が「採用」になります。ファイルになかった依頼は「不明」のままです"),
+          # (「やって見せる」 waits for the dock: one asked while it reads would do nothing)
+          begin=answer_files, done=lambda count: count is not None and not schedule.busy and answered() > count,
+          ready=lambda: not schedule.busy, demo=import_answer, ok="ファイルにあった依頼が「採用」になります。ファイルになかった依頼は「不明」のままです"),
         S("5-1", "電話などで聞いた採否を入れる",
           "「不明」のままの行を選びます。必要なら <b>理由</b> を書き、<b>不採用</b> か <b>採用</b> を押します。"
           "間違えたときは、行を選んで <b>不明に戻す</b> を押します。",
           target=lambda: [schedule.table, schedule.reason, schedule.reject_button], reveal=reveal(schedule, "撮像予定"),
-          begin=snapshot, done=answered_by_hand, demo=by_hand, ok="行の状態が変わり、理由が 理由 の列に入ります"),
+          begin=snapshot, done=answered_by_hand, ready=lambda: not schedule.busy, demo=by_hand, ok="行の状態が変わり、理由が 理由 の列に入ります"),
     ], setup=setup)
 
 

@@ -205,6 +205,13 @@ def use_everything(plugin, iface, folder) -> None:
 @pytest.fixture
 def day(tmp_path, monkeypatch):
     """Python errors in Qt's slots and threads collected; QGIS's Processing stood in for; asked questions answered."""
+    from mikage.ui import map_orient
+
+    # A map orienter an earlier test in this process left held (a dock of its own never unloaded) answers the
+    # project's signals: let go, so what answers QGIS after this test's unload is this plugin's alone.
+    for orienter in list(map_orient._SHARED.values()):
+        for user in list(orienter.users):
+            map_orient._let_go(orienter, user)
     QgsProject.instance().removeAllMapLayers()
     QgsSettings().remove("mikage")
     settings.set_config_source(os.path.join(HERE, "data", "viewer-config.jsonc"))

@@ -1137,6 +1137,8 @@ class OverviewQueue:
         if self._task is not None:
             self._task.cancel()
         self._task, self._current = None, None
+        # The message bar of the QGIS window it was given (gone with a plugin reloaded, or a test's window).
+        self.message_bar = None
 
     def _next(self) -> None:
         if self._task is not None or not self._waiting:
