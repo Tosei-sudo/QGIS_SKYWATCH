@@ -59,6 +59,9 @@ def share(tmp_path, monkeypatch):
     overviews_io.current = OverviewOptions()
     local_copy_io._copies.clear()
     local_copy_io._places.clear()
+    # (an earlier test's window, deleted, was told the copy's end: 「結果の表示先が閉じられていた」 and nothing else)
+    local_copy_io.queue.cancel_all()
+    overviews_io.queue.cancel_all()
     yield folder
     QgsProject.instance().removeAllMapLayers()
     local_copy_io.queue.cancel_all()
