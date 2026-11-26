@@ -256,7 +256,7 @@ def _observation_function(name: str):
 OBSERVATION_FUNCTIONS = [
     "observations", "observed_things", "observation_images", "observe_image", "add_observation", "update_observation",
     "rename_observed_thing", "delete_observations", "clear_observations", "observation_candidates", "confidences", "checked_areas", "add_checked_area",
-    "delete_checked_areas", "observation_report",
+    "delete_checked_areas", "observation_report", "known_individuals", "set_individual",
 ]
 for _name in OBSERVATION_FUNCTIONS:
     setattr(PluginApi, _name, _observation_function(_name))

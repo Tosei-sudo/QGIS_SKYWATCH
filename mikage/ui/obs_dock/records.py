@@ -11,7 +11,8 @@ from qgis.core import QgsRectangle
 from qgis.PyQt.QtWidgets import QMessageBox, QWidget
 
 from ...core.obs.api import (
-    CheckedArea, ObservationBook, CarryOver, ObjectFlow, is_mine, Observation, class_by_name, find, kind_of, path_of, within,
+    CheckedArea, ObservationBook, CarryOver, ObjectFlow, is_mine, Observation, class_by_name, find, kind_of, member_names, path_of,
+    within,
 )
 from ...qgis_io.geometry import from_wgs84
 
@@ -183,6 +184,37 @@ class RecordsPart:
             self.rekind_levels.clear()
             return
         self.rekind_levels.render(self._once("taxonomy", self.book.taxonomy), self.rekind_input.text(), keep=True)
+        self._render_flow_member()
+
+    def _render_flow_member(self) -> None:
+        """「このモノの詳細 ▸ 既知の個体」: when the thing's name is a known individual's (or one of its other names), its
+        class, other names and own specifications on a line."""
+        flow = self._chosen_flow()
+        hit = self.book.find_member(flow.name) if self.book is not None and flow is not None and flow.name else None
+        labels = self.flow_member.parentWidget().layout().labelForField(self.flow_member) if self.flow_member.parentWidget() else None
+        for w in (self.flow_member, labels):
+            if w is not None:
+                w.setVisible(hit is not None and self.flow_more.isChecked())
+        self._flow_member = hit
+        if hit is None:
+            return
+        taxa = self._once("taxonomy", self.book.taxonomy)
+        t = find(taxa, hit.path)
+        said = t.member(hit.name) if t is not None else None
+        others = member_names(t, hit.name, self.book.spec_fields) if t is not None else []
+        parts = [f"{hit.name}（{kind_of(hit.path)}）"]
+        if others:
+            parts.append(self.tr("別名 {a}").format(a="、".join(others)))
+        parts.extend(f"{k} {v}" for k, v in ((said.specs if said else None) or {}).items() if k != "別名" and v)
+        if said is not None and said.note:
+            parts.append(said.note)
+        self.flow_member_label.setText("・".join(parts))
+        self.flow_member_button.setVisible(self.edit_taxonomy is not None and self.allows("分類体系の編集"))
+
+    def _open_flow_member(self) -> None:
+        hit = getattr(self, "_flow_member", None)
+        if hit is not None and self.edit_taxonomy is not None:
+            self.edit_taxonomy(list(hit.path), hit.name)
 
     def _rekind_chosen(self, path: list) -> None:
         """A level's button pressed: the kind in the field (nothing saved until 「名前・種別の変更」)."""

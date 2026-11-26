@@ -427,6 +427,16 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
    "activities": "ACTIVITIES",
    "order": "SORT_ORDER"
   },
+  "taxonomyMembers": {
+   "id": "MEMBER_ID",
+   "path": "CLASS_PATH",
+   "name": "MEMBER_NAME",
+   "aliases": "ALIASES",
+   "specs": "SPECS",
+   "photos": "PHOTOS",
+   "note": "NOTE",
+   "order": "SORT_ORDER"
+  },
   "movingFeeds": [
    "id",
    "time",
@@ -1854,7 +1864,7 @@ const SPEC = [
         L("kinds", "種別"), L("activities", "活動"),
         J("confidences", "確度", { ph: '["確実", { "label": "推定", "color": "#f59e0b", "en": "Probable" }]', help: "文字列か { label, color, note, en, ほかのキー }。en は英語の名前（通報の confidence.en）、ほかのキー（code など）は通報の confidence.code など" }), J("taxonomy", "分類の木（taxonomy）"),
         TJ("areas", "確認範囲のレイヤー", { ph: "URL か { \"url\", \"fields\", \"softDelete\" }" }),
-        TJ("taxonomyTable", "共有の分類テーブル", { ph: "URL か { \"url\", \"fields\" }", help: "役割: " + Object.keys(K.roles.taxonomyTable).join("・") }),
+        TJ("taxonomyTable", "共有の分類テーブル", { ph: "URL か { \"url\", \"fields\", \"members\" }", help: "役割: " + Object.keys(K.roles.taxonomyTable).join("・") + "。members は既知の個体の別名・諸元の表（TBL_TAXONOMY_MEMBER。URL か { url, fields }。役割: " + Object.entries(K.roles.taxonomyMembers).map(([k, v]) => `${k}（${v}）`).join("・") + "）" }),
         TZ, STZ]) },
     { key: "localObservations", label: "ローカルの観測記録", doc: "観測記録", help: "false でローカルの GeoPackage を保存先にしない（observationStores だけ）。",
       field: B("localObservations", "ローカルを使う", { help: "既定 true" }) },
@@ -1871,7 +1881,7 @@ const SPEC = [
         J("taxonomy", "分類の木", { ph: '[{ "name": "船舶", "activities": ["停泊", "航行"], "children": ["護衛艦", "貨物船"] }]' }),
         L("kinds", "種別（taxonomy がないとき）"), L("activities", "既定の活動"),
         J("confidences", "確度", { ph: '["確実", "推定", { "label": "要確認", "color": "#dc2626", "en": "To be confirmed" }]', help: "文字列か { label, color, note, en, ほかのキー }。en は英語の名前（通報の confidence.en）、ほかのキー（code など）は通報の confidence.code など。既定の確定・推定・不明は Confirmed・Probable・Unknown" }),
-        J("specFields", "諸元の項目", { ph: '["全長", { "name": "幅", "type": "number", "unit": "m" }]' }),
+        J("specFields", "諸元の項目", { ph: '["全長", { "name": "幅", "type": "number", "unit": "m" }, { "name": "番号", "use": "member" }]', help: "名前か { name, type, unit, use, roots }。use は both（分類と個体、既定）・class（分類だけ）・member（個体だけ）、roots はその項目を出す大分類の一覧" }),
         N("matchRadius", "同一候補の半径（m）"),
         L("unseenReasons", "不可の理由", { help: "雲などで判読できないとき（不可）の理由の候補（観測記録の「不可」・不可範囲）。既定は 雲・霞・影・画像の欠け・その他" }),
       ]) },

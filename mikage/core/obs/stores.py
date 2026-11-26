@@ -24,7 +24,8 @@ from .flows import now_ms, time_key
 from .model import Observation, ObservationStoreConfig, kept_quantity
 from .scope import RecordQuery, envelope, merged, time_condition
 from .taxonomy import (
-    FIELDS_ROW, SpecField, Taxon, TaxonomyTableConfig, kind_of, normalize, path_of, spec_fields_of, specs_of, taxa_from_json,
+    ALIAS_FIELD, FIELDS_ROW, Member, SpecField, Taxon, TaxonomyTableConfig, kind_of, members_of, new_member_id, normalize, path_of,
+    segment_name, spec_fields_of, specs_of, split_list, taxa_from_json,
 )
 
 #: The label of the local stores (the viewer's 「このブラウザ」).
@@ -59,6 +60,8 @@ class AreaStore(Protocol):
 
 class TaxonomyStore(Protocol):
     label: str
+    #: Whether what known individuals say of themselves (別名・諸元・参考写真・備考) is kept (else their names only).
+    keeps_members: bool
 
     def load(self) -> Optional[list[Taxon]]:
         """The classification kept, or None when none is kept yet (the configured one applies)."""
@@ -253,6 +256,7 @@ class LocalTaxonomyStore:
     """A classification in the local GeoPackage (`taxonomy`), one per observation store."""
 
     label = LOCAL_LABEL
+    keeps_members = True
 
     def __init__(self, gpkg: GeoPackage, name: str):
         self.gpkg = gpkg
@@ -897,9 +901,9 @@ class EsriAreaStore:
         return []
 
 
-#: The local table's attribute names (the default role names).
+#: The local table's attribute names (the default role names; the individuals' details as JSON in MEMBER_INFO).
 DEFAULT_LOCAL_FIELDS = {"path": "PATH", "levels": "LEVELS", "nameLabel": "NAME_LABEL", "members": "MEMBERS", "specs": "SPECS",
-                        "photos": "PHOTOS", "activities": "ACTIVITIES", "order": "SORT_ORDER"}
+                        "photos": "PHOTOS", "activities": "ACTIVITIES", "order": "SORT_ORDER", "memberInfo": "MEMBER_INFO"}
 
 
 def _list(text: Any) -> list[str]:
@@ -926,24 +930,65 @@ def _order_of(v: Any) -> Optional[float]:
     return None
 
 
+def _lines(v: Any) -> list[str]:
+    return [p for p in re.split(r"\s*\n\s*", _text(v)) if p]
+
+
 def _taxon_of_row(a: dict[str, Any], f: dict[str, str]) -> Taxon:
-    photos = [p for p in re.split(r"\s*\n\s*", _text(a.get(f["photos"]))) if p]
+    members = _list(a.get(f["members"])) or None
+    info = None
+    if f.get("memberInfo"):
+        # {name: {specs, photos, note, id}}: the details of the individuals that have some.
+        details = _json_of(a.get(f["memberInfo"]), lambda v: v if isinstance(v, dict) else None) or {}
+        _, info = members_of([{**v, "name": k} for k, v in details.items() if isinstance(v, dict)])
     return Taxon(
         path=path_of(_text(a.get(f["path"]))),
         levels=_list(a.get(f["levels"])) or None,
         name_label=_text(a.get(f["nameLabel"])).strip() or None,
-        members=_list(a.get(f["members"])) or None,
+        members=members,
         specs=_json_of(a.get(f["specs"]), specs_of),
-        photos=photos or None,
+        photos=_lines(a.get(f["photos"])) or None,
         activities=_list(a.get(f["activities"])) or None,
+        member_info=info,
     )
 
 
 def _row_of_taxon(t: Taxon, i: int, f: dict[str, str]) -> dict[str, Any]:
-    return {
+    out = {
         f["path"]: kind_of(t.path), f["levels"]: ",".join(t.levels or []), f["nameLabel"]: t.name_label or "",
         f["members"]: ",".join(t.members or []), f["specs"]: json.dumps(t.specs, ensure_ascii=False, separators=(",", ":")) if t.specs else "",
         f["photos"]: "\n".join(t.photos or []), f["activities"]: ",".join(t.activities or []), f["order"]: i,
+    }
+    if f.get("memberInfo"):
+        details = {}
+        for m in t.members or []:
+            j = t.member(m).to_json(True)
+            if isinstance(j, dict):
+                j.pop("name", None)
+                details[m] = j
+        out[f["memberInfo"]] = json.dumps(details, ensure_ascii=False, separators=(",", ":")) if details else ""
+    return out
+
+
+def _member_of_row(a: dict[str, Any], f: dict[str, str], member_id: str, name: str) -> Member:
+    """An individual as its row in a table of individuals says (ALIASES back into its 別名)."""
+    specs = dict(_json_of(a.get(f["specs"]), specs_of) or {}) if f.get("specs") else {}
+    aliases = split_list(_text(a.get(f["aliases"]))) if f.get("aliases") else []
+    if aliases:
+        specs[ALIAS_FIELD] = "、".join(aliases)
+    photos = _lines(a.get(f["photos"])) if f.get("photos") else []
+    note = _text(a.get(f["note"])).strip() if f.get("note") else ""
+    return Member(name, specs or None, photos or None, note or None, member_id)
+
+
+def _row_of_member(path: list[str], m: Member, i: int, f: dict[str, str]) -> dict[str, Any]:
+    """An individual's row in a table of individuals (its 別名 in ALIASES, comma separated; the rest of its specs as JSON)."""
+    specs = dict(specs_of(m.specs) or {})
+    aliases = split_list(specs.pop(ALIAS_FIELD, ""))
+    return {
+        f["id"]: m.id, f["path"]: kind_of(path), f["name"]: m.name, f["aliases"]: ",".join(aliases),
+        f["specs"]: json.dumps(specs, ensure_ascii=False, separators=(",", ":")) if specs else "",
+        f["photos"]: "\n".join(m.photos or []), f["note"]: (m.note or "").strip(), f["order"]: i,
     }
 
 
@@ -962,6 +1007,17 @@ class EsriTaxonomyStore:
         self._fields_row: tuple[Optional[int], Optional[list[SpecField]]] = (None, None)
         self._loaded = False
         self._layer = _EsriLayer(client, config.url, token, "分類のテーブル", [config.fields["path"]])
+        m = config.members
+        self._members = _EsriLayer(client, m.url, token, "個体のテーブル", [m.fields["id"], m.fields["path"], m.fields["name"]]) if m else None
+        #: The table of individuals: each row's object id and attributes as read (or last saved here) by MEMBER_ID, and
+        #: the id of each individual by (its class's kind, its name).
+        self.member_oids: dict[str, int] = {}
+        self.member_rows: dict[str, dict[str, Any]] = {}
+        self.member_ids: dict[tuple[str, str], str] = {}
+
+    @property
+    def keeps_members(self) -> bool:
+        return self._members is not None
 
     def load(self) -> Optional[list[Taxon]]:
         _, oid = self._layer.ready()
@@ -988,7 +1044,50 @@ class EsriTaxonomyStore:
         if not rows:
             return None
         rows.sort(key=lambda r: r[1])
-        return normalize(t for t, _ in rows)
+        taxa = normalize(t for t, _ in rows)
+        return self._load_members(taxa) if self._members is not None else taxa
+
+    def _load_members(self, taxa: list[Taxon]) -> list[Taxon]:
+        """The classification with what the table of individuals says: each individual's details and id; one it has
+        and MEMBERS has not (added there by this version, removed by an older one) comes after the class's others."""
+        mc = self.config.members
+        _, oid = self._members.ready()
+        f = mc.fields
+        self.member_oids.clear()
+        self.member_rows.clear()
+        self.member_ids.clear()
+        found: list[tuple[str, str, Member, float]] = []
+        for feature in self.client.query_all(mc.url, "1=1", self.token, geometry=False, limit=100_000):
+            a = feature.get("attributes") or {}
+            member_id = _text(a.get(f["id"])).strip()
+            path = path_of(_text(a.get(f["path"])))
+            name = segment_name(_text(a.get(f["name"])))
+            if not member_id or not path or not name or not is_number(a.get(oid)) or member_id in self.member_oids:
+                continue
+            self.member_oids[member_id] = int(a[oid])
+            self.member_rows[member_id] = {k: (_order_of(v) if k == f["order"] else _text(v)) for k, v in a.items() if k != oid}
+            key = (kind_of(path), name)
+            # The same individual twice (added by two people at once): the first is kept, the other deleted at the next save.
+            if key in self.member_ids:
+                continue
+            self.member_ids[key] = member_id
+            order = _order_of(a.get(f["order"]))
+            found.append((key[0], name, _member_of_row(a, f, member_id, name), order if order is not None else 1e12))
+        by_kind = {kind_of(t.path): t for t in taxa}
+        for kind, name, member, _ in sorted(found, key=lambda r: r[3]):
+            t = by_kind.get(kind)
+            if t is None:
+                continue  # A class no longer there: its individuals' rows go with the next save.
+            if name not in (t.members or []):
+                t.members = [*(t.members or []), name]
+            t.member_info = {**(t.member_info or {}), name: member}
+        # Those with no row yet (MEMBERS only) get their id now: a rename before their first save keeps it.
+        for t in taxa:
+            for name in t.members or []:
+                if not t.member(name).id:
+                    member_id = self.member_ids.setdefault((kind_of(t.path), name), new_member_id())
+                    t.member_info = {**(t.member_info or {}), name: Member(name, id=member_id)}
+        return taxa
 
     def save(self, taxa: list[Taxon]) -> None:
         types, oid = self._layer.ready()
@@ -1020,11 +1119,20 @@ class EsriTaxonomyStore:
         adds = [(t, i) for i, t in enumerate(everything) if kind_of(t.path) not in self.oids]
         # Only the rows changed here: what someone else changed in the others is kept (#74).
         updates = [(t, i) for i, t in enumerate(everything) if kind_of(t.path) in self.oids and not unchanged(t, i)]
-        if not (adds or updates or deletes):
-            return
+        failed: list[str] = []
+        if adds or updates or deletes:
+            self._apply_classes(adds, updates, deletes, attributes_of, failed)
+        if self._members is not None:
+            self._save_members(everything, failed)
+        if failed:
+            raise EsriError(f"分類 {len(failed)} 件をサーバーが受け付けない", code="E305", detail=failed[0])
+
+    def _apply_classes(self, adds, updates, deletes, attributes_of, failed: list[str]) -> None:
+        f = self.config.fields
+        _, oid = self._layer.ready()
         result = self.client.apply_edits(self.config.url, [attributes_of(t, i) for t, i in adds],
                                          [attributes_of(t, i) for t, i in updates], deletes, token=self.token)
-        failed = []
+
         def remember(t: Taxon, i: int) -> None:
             self.rows[kind_of(t.path)] = {k: (_order_of(v) if k == f["order"] else _text(v))
                                           for k, v in attributes_of(t, i)["attributes"].items() if k != oid}
@@ -1049,13 +1157,85 @@ class EsriTaxonomyStore:
             if i in gone:
                 del self.oids[k]
                 self.rows.pop(k, None)
-        if failed:
-            raise EsriError(f"分類 {len(failed)} 件をサーバーが受け付けない", code="E305", detail=failed[0])
+
+    def _save_members(self, taxa: list[Taxon], failed: list[str]) -> None:
+        """The table of individuals as the classification says: rows added, changed and deleted (only those changed
+        here are sent; an individual someone else just added is found and changed, not added twice)."""
+        mc = self.config.members
+        types, oid = self._members.ready()
+        f = mc.fields
+        wanted: dict[str, dict[str, Any]] = {}
+        for t in taxa:
+            kind = kind_of(t.path)
+            for i, name in enumerate(t.members or []):
+                m = t.member(name)
+                member_id = m.id or self.member_ids.get((kind, name)) or new_member_id()
+                if member_id in wanted:  # The same id twice (a copied class): the second is another individual.
+                    member_id = new_member_id()
+                self.member_ids[(kind, name)] = member_id
+                row = _row_of_member(t.path, Member(name, m.specs, m.photos, m.note, member_id), i, f)
+                wanted[member_id] = {k: v for k, v in row.items() if k in types}
+        new = [k for k in wanted if k not in self.member_oids]
+        if new:
+            names = [wanted[k][f["name"]] for k in new]
+            have = self.client.find(mc.url, f["name"], names, self.token, out_fields="*")
+            for k in new:
+                a = have.get(wanted[k][f["name"]])
+                other = _text((a or {}).get(f["id"])).strip()
+                if (a and is_number(a.get(oid)) and other and other not in self.member_oids and other not in wanted
+                        and _text(a.get(f["path"])) == wanted[k][f["path"]]):
+                    row = wanted.pop(k)
+                    row[f["id"]] = other
+                    wanted[other] = row
+                    self.member_oids[other] = int(a[oid])
+                    self.member_rows[other] = {x: (_order_of(v) if x == f["order"] else _text(v)) for x, v in a.items() if x != oid}
+                    self.member_ids[(row[f["path"]], row[f["name"]])] = other
+
+        def same(member_id: str) -> bool:
+            seen = self.member_rows.get(member_id) or {}
+            return all((_order_of(v) if k == f["order"] else _text(v)) == seen.get(k, None if k == f["order"] else "")
+                       for k, v in wanted[member_id].items())
+
+        adds = [k for k in wanted if k not in self.member_oids]
+        updates = [k for k in wanted if k in self.member_oids and not same(k)]
+        deletes = [i for k, i in self.member_oids.items() if k not in wanted]
+        if not (adds or updates or deletes):
+            return
+        result = self.client.apply_edits(mc.url, [{"attributes": wanted[k]} for k in adds],
+                                         [{"attributes": {**wanted[k], oid: self.member_oids[k]}} for k in updates], deletes, token=self.token)
+        for k, r in zip(adds, result.add_results):
+            if r.get("success") and is_number(r.get("objectId")):
+                self.member_oids[k] = int(r["objectId"])
+                self.member_rows[k] = dict(wanted[k])
+            else:
+                failed.append((r.get("error") or {}).get("description") or "個体の追加失敗")
+        for k, r in zip(updates, result.update_results):
+            if r.get("success"):
+                self.member_rows[k] = dict(wanted[k])
+            else:
+                failed.append((r.get("error") or {}).get("description") or "個体の更新失敗")
+        undeleted = {int(r["objectId"]) for r in result.delete_results if not r.get("success") and is_number(r.get("objectId"))}
+        if undeleted:
+            failed.append("個体の削除失敗")
+        for k, i in list(self.member_oids.items()):
+            if i in deletes and i not in undeleted:
+                del self.member_oids[k]
+                self.member_rows.pop(k, None)
+        for key in [key for key, k in self.member_ids.items() if k not in self.member_oids and k not in wanted]:
+            del self.member_ids[key]
 
     def lacks(self, role: str) -> Optional[str]:
         """The attribute of a role the table does not have (its classes' values for it are not saved), else None."""
         types, _ = self._layer.ready()
         name = self.config.fields.get(role)
+        return name if name and name not in types else None
+
+    def lacks_member(self, role: str) -> Optional[str]:
+        """The attribute of a role the table of individuals does not have (not saved), else None (also with no such table)."""
+        if self._members is None:
+            return None
+        types, _ = self._members.ready()
+        name = self.config.members.fields.get(role)
         return name if name and name not in types else None
 
     def load_fields(self) -> Optional[list[SpecField]]:

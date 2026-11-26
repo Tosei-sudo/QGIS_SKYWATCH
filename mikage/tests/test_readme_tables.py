@@ -13,7 +13,7 @@ from mikage.core.obs.areas import DEFAULT_AREA_FIELDS
 from mikage.core.obs.assignments import DEFAULT_ASSIGNMENT_FIELDS
 from mikage.core.obs.handover import DEFAULT_HANDOVER_FIELDS
 from mikage.core.obs.model import DEFAULT_OBSERVATION_FIELDS
-from mikage.core.obs.taxonomy import DEFAULT_TAXONOMY_FIELDS
+from mikage.core.obs.taxonomy import DEFAULT_MEMBER_FIELDS, DEFAULT_TAXONOMY_FIELDS
 from mikage.core.plan.outages import DEFAULT_OUTAGE_FIELDS
 from mikage.core.request.groups import DEFAULT_GROUP_FIELDS
 from mikage.core.request.store import (
@@ -33,6 +33,7 @@ DEFAULTS = {
     "TBL_OBSERVATION": DEFAULT_OBSERVATION_FIELDS,
     "TBL_OBSERVATION_AREA": DEFAULT_AREA_FIELDS,
     "TBL_TAXONOMY": DEFAULT_TAXONOMY_FIELDS,
+    "TBL_TAXONOMY_MEMBER": DEFAULT_MEMBER_FIELDS,
     "TBL_ALERT_RULE": alerts.DEFAULT_RULE_FIELDS,
     "TBL_ALERT_GEOFENCE": alerts.DEFAULT_FENCE_FIELDS,
     "TBL_NAMED_AREA": alerts.DEFAULT_PLACE_FIELDS,

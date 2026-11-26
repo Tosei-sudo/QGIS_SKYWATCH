@@ -29,7 +29,7 @@ from .image_time import parse_time
 from .model import Observation, quantity_of
 from .report import ReportOptions
 from .scope import RecordQuery
-from .taxonomy import kind_of, path_of, within
+from .taxonomy import ALIAS_FIELD as _ALIAS, Taxon as _Taxon, find as _find, find_member as _find_member, kind_of, path_of, split_list as _split_list, within
 from ..door import lazy
 
 # What the rest of the plugin imports of 観測記録 (its door, docs/architecture.md R2).
@@ -68,8 +68,9 @@ if TYPE_CHECKING:  # the door (core/door.py): each name is imported from its mod
     from .stamps import default_count, entry_of, Layout, MOST, Sample, sample_of, sample_text, StampEntry
     from .stores import is_local_photo, LocalAreaStore, LocalObservationStore, LocalPhotoStore, photo_url
     from .taxonomy import (
-        activities_at, children_of, class_by_name, find, level_name, member_index, name_label_of, nest, photos_at, spec_text,
-        SpecField, specs_at, Taxon,
+        activities_at, ALIAS_FIELD, children_of, class_by_name, find, find_member, level_name, Member, member_index, member_names,
+        member_photos_at, member_specs_at, MemberHit, name_label_of, nest, photos_at, same_name, spec_text, SpecField, specs_at,
+        Taxon,
     )
     from .alerts import (
         AlertItem, OBJECT_LAYERS, select as alert_select, write_file as alert_write_file, build_lines, history_query,
@@ -156,6 +157,14 @@ def record_out(o: Observation) -> dict[str, Any]:
         "quantity": quantity_of(o) or None,
         "updatedBy": o.updated_by or "", "createdAt": _iso(o.created_at), "updatedAt": _iso(o.updated_at), "deletedAt": _iso(o.deleted_at),
     }
+
+
+def member_out(t: "_Taxon", name: str) -> dict[str, Any]:
+    """A known individual as a script sees it: its class, name, other names, its own specifications (別名 aside)."""
+    m = t.member(name)
+    specs = {k: v for k, v in (m.specs or {}).items() if k != _ALIAS}
+    return {"kind": kind_of(t.path), "name": name, "aliases": m.aliases(), "specs": specs, "photos": list(m.photos or []),
+            "note": m.note or "", "id": m.id or ""}
 
 
 def flow_out(f: ObjectFlow) -> dict[str, Any]:
@@ -275,6 +284,65 @@ class ObservationApi:
             of_kind = self._fetch(b, RecordQuery(kinds=(kind_of(path),), living=True))
             self._run("観測記録の取得", lambda x: x.fetch_things(o.object_id for o in of_kind))
         return [flow_out(f) for f in b.flows() if not path or within(f.kind, path)]
+
+    def known_individuals(self, kind: Optional[str] = None, name: Optional[str] = None) -> list[dict[str, Any]]:
+        """
+        The classification's known individuals (既知の個体): class, name, other names (別名), their own
+        specifications, photos, note and id. `kind`: those of a class and below; `name`: the one that name (or
+        one of its other names, width and case aside) stands for.
+        """
+        taxa = self._b().taxonomy()
+        path = path_of(_str(kind, "kind") or "")
+        if name is not None:
+            hit = _find_member(taxa, _str(name, "name") or "")
+            found = [(hit.path, hit.name)] if hit else []
+        else:
+            found = [(t.path, m) for t in taxa for m in t.members or []]
+        return [member_out(_find(taxa, p), m) for p, m in found if not path or within(kind_of(p), path)]
+
+    def set_individual(self, kind: str, name: str, aliases: Any = None, specs: Optional[dict[str, Any]] = None, note: Optional[str] = None,
+                       new_name: Optional[str] = None) -> dict[str, Any]:
+        """
+        Adds a known individual to a class (when the class has no individual of that name) and sets what it
+        says: `aliases` (a list, or text with 、 between) replace its other names, `specs` are merged into its
+        own ({項目: 値}; None or "" removes one), `note` replaces its note; `new_name` renames it (when records
+        use the old name, it is kept as an other name). The individual after.
+        """
+        b = self._b()
+        path = path_of(_str(kind, "kind") or "")
+        name = (_str(name, "name") or "").strip()
+        if not name:
+            raise ValueError("name が空")
+        if specs is not None and not isinstance(specs, dict):
+            raise TypeError("specs は {項目: 値} で指定")
+        t = _find(b.taxonomy(), path)
+        if t is None:
+            raise LookupError(f"分類「{kind}」なし")
+        if name not in (t.members or []):
+            if not self._run("個体の追加", lambda x: x.add_members(path, [name])):
+                raise RuntimeError(b.status or "個体を追加できない")
+            t = _find(b.taxonomy(), path)
+            name = (t.members or [name])[-1] if name not in (t.members or []) else name
+        own = dict(t.member(name).specs or {})
+        for k, v in (specs or {}).items():
+            text = "" if v is None else str(v).strip()
+            if text:
+                own[str(k)] = text
+            else:
+                own.pop(str(k), None)
+        if aliases is not None:
+            words = _split_list(aliases) if isinstance(aliases, str) else [str(a).strip() for a in aliases if str(a).strip()]
+            if words:
+                own[_ALIAS] = "、".join(words)
+            else:
+                own.pop(_ALIAS, None)
+        changed = own if specs is not None or aliases is not None else None
+        if changed is not None or note is not None or new_name is not None:
+            done = self._run("個体の変更", lambda x: x.update_member(path, name, new_name=new_name, specs=changed, note=note))
+            if done is None:
+                raise RuntimeError(b.status or "個体を変更できない")
+            name = done
+        return member_out(_find(b.taxonomy(), path), name)
 
     def observation_images(self) -> list[dict[str, Any]]:
         b = self._b()
@@ -493,20 +561,20 @@ class ObservationApi:
 __all__ = [
     "AlertLogRepository", "AssignmentRepository", "AREA_USES", "area_use_of", "DEFAULT_COUNTRY_FIELDS", "DEFAULT_PLACE_FIELDS",
     "USE_BOTH", "USE_INTEREST", "USE_PLACE",
-    "activities_at", "AlertSettings", "ANGLES_ALL", "ANGLES_NEAR", "area_label", "area_out", "areas_at", "Assignment", "BASES",
+    "activities_at", "ALIAS_FIELD", "AlertSettings", "ANGLES_ALL", "ANGLES_NEAR", "area_label", "area_out", "areas_at", "Assignment", "BASES",
     "bearing", "box_ring", "build_mail", "Cancelled", "CarryOver", "CheckedArea", "children_of", "class_by_name", "clean",
     "csv_file_name", "default_count", "ends_of", "entry_of", "ExportContext", "ExportFilter", "ExportSettings",
-    "FENCE_SOURCES", "find", "find_similar", "flow_of", "flow_out", "flows", "FormValues", "get_distance", "Glossary",
+    "FENCE_SOURCES", "find", "find_member", "find_similar", "flow_of", "flow_out", "flows", "FormValues", "get_distance", "Glossary",
     "heading_text", "image_time", "is_local_photo", "is_mine", "items_of", "joined_image", "js_round", "KIND", "kind_of",
     "km_text", "Layout", "level_name", "ListedImage", "living", "load_geofences", "load_glossary", "load_named_areas",
     "load_satellite_choices", "LOCAL_LABEL", "local_time", "LocalAreaStore", "LocalObservationStore", "LocalPhotoStore", "LogRow",
-    "MatchCandidate", "member_index", "merged", "Moment", "MOST", "my_names", "name_label_of", "nest", "NO_CHOICES",
+    "MatchCandidate", "Member", "MemberHit", "member_index", "member_names", "member_photos_at", "member_specs_at", "merged", "Moment", "MOST", "my_names", "name_label_of", "nest", "NO_CHOICES",
     "NO_GLOSSARY", "now_ms", "ObjectFlow", "Observation", "observation_layers", "ObservationApi", "ObservationBook",
     "ObservationLayer", "observations_csv", "ObservedImage", "OfflineAreaStore", "OfflineObservationStore", "OutboxDrafts",
     "outline_of", "parse_time", "path_of", "photo_url", "photos_at", "place_cache", "PLACE_SOURCES", "points_of", "poll_log",
     "progress_of", "progress_text", "quantity_mark", "quantity_of", "read_quantity", "record_import", "record_out", "taxonomy_import", "RecordQuery", "render", "report_file_name",
     "ReportOptions", "ReportSelection", "ring_of", "same_person", "Sample", "sample_of", "sample_text",
-    "satellite_in_metadata", "SatelliteChoices", "select_records", "settings_for", "side_points", "SourceRow", "spec_text",
+    "same_name", "satellite_in_metadata", "SatelliteChoices", "select_records", "settings_for", "side_points", "SourceRow", "spec_text",
     "SpecField", "specs_at", "StampEntry", "state_text", "STATUSES", "store_sets", "StoreSet", "Suggestion", "Taxon",
     "time_key", "two_point", "UNSEEN", "unseen_label", "update", "upload_drafts", "Variant", "with_status", "within",
     "work_text",

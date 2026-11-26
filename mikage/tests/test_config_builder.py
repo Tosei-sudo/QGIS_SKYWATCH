@@ -24,7 +24,8 @@ def plugin_constants() -> dict:
     from mikage.core.catalog import config as catalog_config
     from mikage.core.enhance import pipeline
     from mikage.core.obs import export as obs_export
-    from mikage.core.obs import alerts, assignments, continuation, glossary, handover, model as obs_model, stores as obs_stores
+    from mikage.core.obs import alerts, assignments, continuation, glossary, handover, model as obs_model
+    from mikage.core.obs import taxonomy as obs_taxonomy
     from mikage.core.plan import modes, names, outages, satellites
     from mikage.core.request import export, groups as request_groups, link_id, result_file, store as request_store, systems
 
@@ -42,7 +43,8 @@ def plugin_constants() -> dict:
             "requestQuotas": dict(request_store.DEFAULT_QUOTA_FIELDS),
             "requestAreaChanges": dict(request_store.DEFAULT_AREA_CHANGE_FIELDS),
             "observationStores": dict(obs_model.DEFAULT_OBSERVATION_FIELDS),
-            "taxonomyTable": dict(obs_stores.DEFAULT_LOCAL_FIELDS),
+            "taxonomyTable": dict(obs_taxonomy.DEFAULT_TAXONOMY_FIELDS),
+            "taxonomyMembers": dict(obs_taxonomy.DEFAULT_MEMBER_FIELDS),
             "movingFeeds": list(moving.ROLES),
             "detectionOutputs": list(transfer.TRANSFER_ROLES),
             "aiResultSources": list(ai_results.RESULT_ROLES),

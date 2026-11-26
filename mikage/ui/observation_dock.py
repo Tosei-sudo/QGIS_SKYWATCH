@@ -449,7 +449,8 @@ class ObservationDock(
                                        lambda: (path_of(self.area_kind.text()) or [""])[0], self)
         f.addRow(tr("備考"), self.area_note_tidy.row())
         # 備考の単語集 (`glossary`): suggestions while typing, and the other spellings found (tsudo 2026-11-17).
-        self.area_note_assist = NoteAssist(self.area_note, self.context.glossary, lambda: (path_of(self.area_kind.text()) or [""])[0], self)
+        self.area_note_assist = NoteAssist(self.area_note, self.context.glossary, lambda: (path_of(self.area_kind.text()) or [""])[0], self,
+                                           self._note_words)
         f.addRow(self.area_note_assist.notice)
         f.addRow(self.area_note_tidy.panel)
         actions = QHBoxLayout()
@@ -473,6 +474,17 @@ class ObservationDock(
         self.object_input.textEdited.connect(lambda _t: self._object_typed())
         self.object_input.editingFinished.connect(self._object_typed)
         f.addRow(self.object_label, self.object_input)
+        # An other name of a known individual typed: said, with a button for its own name (one click, never by itself).
+        self.member_hint = QWidget()
+        hint = QHBoxLayout(self.member_hint)
+        hint.setContentsMargins(0, 0, 0, 0)
+        self.member_hint_label = plain_label(QLabel())
+        self.member_hint_label.setWordWrap(True)
+        hint.addWidget(self.member_hint_label, 1)
+        self.member_hint_button = self._button("", "", self.use_member_name)
+        hint.addWidget(self.member_hint_button)
+        self.member_hint.hide()
+        f.addRow(self.member_hint)
         self.candidates_box = QWidget()
         self.candidates_layout = FlowLayout(self.candidates_box)
         f.addRow(self.candidates_box)
@@ -539,7 +551,9 @@ class ObservationDock(
         # 項目の提案 (`textAssist.tasks.noteFields`): the fields read from the 備考, for those still empty (tsudo 2026-11-19).
         self.note_fields = NoteFields(self.note_input, self.context.text_assist, self, self)
         f.addRow(tr("備考"), self.note_tidy.row(self.note_fields.button))
-        self.note_assist = NoteAssist(self.note_input, self.context.glossary, lambda: (path_of(self.kind_input.text()) or [""])[0], self)
+        # The classification's individuals and their other names are offered too (never pointed out as other spellings).
+        self.note_assist = NoteAssist(self.note_input, self.context.glossary, lambda: (path_of(self.kind_input.text()) or [""])[0], self,
+                                      self._note_words)
         f.addRow(self.note_assist.notice)
         f.addRow(self.note_tidy.panel)
         f.addRow(self.note_fields.panel)
@@ -728,6 +742,16 @@ class ObservationDock(
         self.rekind_levels.chosen.connect(self._rekind_chosen)
         self.merge_select = QComboBox()
         more.addRow(tr("名前"), self.rename_input)
+        # A known individual's name: what the classification says of it (別名・諸元), and a way there.
+        self.flow_member = QWidget()
+        fm = QHBoxLayout(self.flow_member)
+        fm.setContentsMargins(0, 0, 0, 0)
+        self.flow_member_label = plain_label(QLabel())
+        self.flow_member_label.setWordWrap(True)
+        fm.addWidget(self.flow_member_label, 1)
+        self.flow_member_button = self._button(tr("分類体系で開く"), tr("この個体を「分類体系の編集」で開く（別名・諸元の編集）"), self._open_flow_member)
+        fm.addWidget(self.flow_member_button)
+        more.addRow(tr("既知の個体"), self.flow_member)
         more.addRow(tr("種別"), self.rekind_input)
         more.addRow(self.rekind_levels)
         more.addRow(tr("同一のモノとして統合"), self.merge_select)
@@ -1253,6 +1277,10 @@ class ObservationDock(
         else:
             self.iface.messageBar().pushWarning(self.tr("観測記録"), plain_tip(self.tr(
                 "開いている記録を {who} さんが更新。このまま「更新」しても上書きしない（Esc で閉じて開き直すと最新の内容）").format(who=who)))
+
+    def _note_words(self) -> tuple:
+        """The known individuals' names and other names for 備考's suggestions (none without a book)."""
+        return self.book.note_words() if self.book is not None else ()
 
     def reload_taxonomy(self) -> None:
         """Reads the classification again from the store (others may have changed it), and the 備考's glossary."""

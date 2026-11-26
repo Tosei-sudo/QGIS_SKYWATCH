@@ -93,15 +93,15 @@ class Observations(Feature):
         except RuntimeError:
             pass
 
-    def edit_taxonomy(self, path=None) -> None:
-        """Opens the classification editor (at a class)."""
+    def edit_taxonomy(self, path=None, member=None) -> None:
+        """Opens the classification editor (at a class, or at a known individual of it)."""
         dock = self.docks.get("SatObsTaxonomy")
         if dock is None:
             return
         dock.show()
         dock.raise_()
         if hasattr(dock, "select"):
-            dock.select(path)
+            dock.select(path, member) if member else dock.select(path)
 
     def _warm_offline_cache(self, then, failed) -> bool:
         """

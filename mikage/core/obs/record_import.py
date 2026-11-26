@@ -28,7 +28,7 @@ from .flows import flows, living, now_ms
 from .geo import get_distance
 from .image_time import parse_time
 from .model import Observation, kept_quantity, new_object_id, new_observation_id, read_quantity
-from .taxonomy import find, kind_of, name_label_of, path_of
+from .taxonomy import MemberHit, find, kind_of, member_finder, name_label_of, path_of
 
 #: The items a column can be: key → (label, names a column is guessed by (any case)).
 TARGETS: list[tuple[str, str, tuple[str, ...]]] = [
@@ -176,6 +176,12 @@ def _individual(taxonomy: Sequence[Any], name: str, kind: str) -> bool:
     return bool(name) and name not in path_of(kind) and name != "モノ" and bool(name_label_of(list(taxonomy), path_of(kind)))
 
 
+def _kind_for(finder, kind: str, name: str) -> tuple[str, Optional[MemberHit]]:
+    """A row's 種別: as written, else the class of the known individual its name (or other name) is; and that individual."""
+    hit = finder(name) if finder is not None and name else None
+    return (kind or (kind_of(hit.path) if hit else "")), hit
+
+
 def query_for(rows: Iterable[SourceRow], mapping: dict[str, str], taxonomy: Sequence[Any] = ()):
     """
     What a shared store is asked before planning (scope.RecordQuery): the
@@ -185,9 +191,11 @@ def query_for(rows: Iterable[SourceRow], mapping: dict[str, str], taxonomy: Sequ
     from .scope import RecordQuery
 
     ids, images, names = [], [], []
+    finder = member_finder(list(taxonomy)) if taxonomy else None
     for row in rows:
         record_id, image_id = _text(_get(row, mapping, "id")), _text(_get(row, mapping, "image_id"))
-        name, kind = _text(_get(row, mapping, "object")), kind_of(path_of(_text(_get(row, mapping, "kind"))))
+        name = _text(_get(row, mapping, "object"))
+        kind, _hit = _kind_for(finder, kind_of(path_of(_text(_get(row, mapping, "kind")))), name)
         if record_id:
             ids.append(record_id)
         if image_id:
@@ -203,8 +211,11 @@ def plan(rows: Iterable[SourceRow], mapping: dict[str, str], records: Sequence[O
     """
     What each row would be (nothing is saved). `records` are the records
     read (deleted ones too); `confidences` the 確度 levels (an unknown one is
-    an error); `taxonomy` the classification (a class not in it is a warning);
-    `update_existing`: a row whose 観測ID is a record changes it, else it is left.
+    an error); `taxonomy` the classification (a class not in it is a warning;
+    a row without a 種別 whose name is a known individual's, or one of its
+    other names, is of that individual's class; an other name is told, never
+    rewritten); `update_existing`: a row whose 観測ID is a record changes it,
+    else it is left.
     """
     now = now_ms()
     by_id = {o.id: o for o in records}
@@ -214,6 +225,7 @@ def plan(rows: Iterable[SourceRow], mapping: dict[str, str], records: Sequence[O
     levels = [c for c in confidences if c]
     # Only individuals are told apart by name (tsudo 2026-11-18): a name links to a thing of a class with a `nameLabel`.
     names = {f.name: f for f in flows(records) if _individual(taxonomy, f.name, f.kind)}
+    finder = member_finder(list(taxonomy)) if taxonomy else None
     made: dict[str, tuple[str, str]] = {}
     out: list[Planned] = []
     planned_new: list[Observation] = []
@@ -254,12 +266,17 @@ def plan(rows: Iterable[SourceRow], mapping: dict[str, str], records: Sequence[O
         confidence = _text(_get(row, mapping, "confidence"))
         if confidence and levels and confidence not in levels:
             problems.append(f"確度「{confidence}」なし（{'・'.join(levels)}）")
-        kind = kind_of(path_of(_text(_get(row, mapping, "kind"))))
+        name = _text(_get(row, mapping, "object"))
+        written = kind_of(path_of(_text(_get(row, mapping, "kind"))))
+        kind, hit = _kind_for(finder, written, name)
         if kind and taxonomy and find(list(taxonomy), path_of(kind)) is None:
             warnings.append(f"分類体系にない種別「{kind}」")
+        if hit and not written:
+            warnings.append(f"種別は既知の個体「{hit.name}」の分類（{kind}）")
+        if hit and hit.alias:
+            warnings.append(f"「{name}」は既知の個体「{hit.name}」の別名")
         activity = _text(_get(row, mapping, "activity")) if present else ""
         note = _text(_get(row, mapping, "note"))
-        name = _text(_get(row, mapping, "object"))
         record_id = _text(_get(row, mapping, "id"))
 
         # A record there: changed (or left as it is).
