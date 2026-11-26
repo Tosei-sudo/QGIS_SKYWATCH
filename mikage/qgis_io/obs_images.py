@@ -49,6 +49,7 @@ from qgis.core import (
 from ..core.obs.api import ObservedImage, joined_image
 from ..core.obs.api import image_time, parse_time
 from ..core.obs.api import NO_CHOICES, SatelliteChoices, clean as clean_satellite, satellite_in_metadata
+from . import raster_facts
 from .complex_sar import source_of
 from .geometry import to_wgs84
 from .plan_layer import qdatetime
@@ -158,12 +159,12 @@ def _metadata(layer: QgsRasterLayer) -> dict[str, str]:
 
 
 def gdal_metadata(layer: QgsRasterLayer, domain: str = "") -> dict[str, str]:
-    """The GDAL metadata of a domain ('' the default, 'IMD' a Maxar .IMD…), {} when not a GDAL image."""
+    """
+    The GDAL metadata of a domain ('' the default, 'IMD' a Maxar .IMD…), {}
+    when not a GDAL image. Read once per layer (raster_facts: each image
+    added was opened four or five times, 2026-11-27).
+    """
     if layer.providerType() != "gdal":
-        return {}
-    try:
-        from osgeo import gdal
-    except ImportError:
         return {}
     # The image's own file (not the VRT of an image moved by 位置ずらし).
     parts = QgsProviderRegistry.instance().decodeUri("gdal", _own_source(layer))
@@ -171,14 +172,7 @@ def gdal_metadata(layer: QgsRasterLayer, domain: str = "") -> dict[str, str]:
     if not path or re.match(r"^/vsicurl/", path):
         # Not opened again over the network: the provider's own metadata then.
         return {}
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    try:
-        dataset = gdal.Open(path)
-        return dict(dataset.GetMetadata(domain) or {}) if dataset else {}
-    except Exception:  # noqa: BLE001 (an image GDAL cannot read here says nothing)
-        return {}
-    finally:
-        gdal.PopErrorHandler()
+    return raster_facts.metadata(layer.id(), path, domain)
 
 
 def _layer_time(layer: QgsRasterLayer) -> Optional[int]:
@@ -240,6 +234,7 @@ def forget() -> None:
     """Forgets the files' metadata read (on the plugin's unload)."""
     with _metadata_lock:
         _metadata_names.clear()
+    raster_facts.forget()
 
 
 def metadata_satellite(layer: QgsMapLayer) -> str:
