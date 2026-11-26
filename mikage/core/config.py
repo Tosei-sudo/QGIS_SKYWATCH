@@ -31,6 +31,7 @@ from .geocode import GeocoderConfig, geocoder_of
 from .layer_templates import LayerTemplate, templates_of
 from .overviews import DEFAULT_OVERVIEWS, OverviewOptions, overviews_of
 from .raster_speed import DEFAULT_RASTER_SPEED, RasterSpeedOptions, raster_speed_of
+from .local_copy import DEFAULT_LOCAL_COPY, LocalCopyOptions, local_copy_of
 from .complex_images import DEFAULT_MODE as DEFAULT_COMPLEX_MODE, complex_images_of
 from .obs.alerts import AlertSettings, EsriSource, alert_settings_of, level_key_problems
 from .obs.assignments import assignment_source_of
@@ -80,6 +81,8 @@ class PluginConfig:
     overviews: OverviewOptions = DEFAULT_OVERVIEWS
     #: `rasterSpeed`: GDAL's threads and block cache in this QGIS, QGIS's slower options put right once (core/raster_speed.py).
     raster_speed: RasterSpeedOptions = DEFAULT_RASTER_SPEED
+    #: `localCopy`: large images on network folders copied to this PC in the background and read there (core/local_copy.py).
+    local_copy: LocalCopyOptions = DEFAULT_LOCAL_COPY
     #: `complexImages`: complex SAR images (SICD's I/Q bands, complex pixels) shown as "dB" or "amplitude"; None as QGIS opens them.
     complex_images: Optional[str] = DEFAULT_COMPLEX_MODE
     satellite_catalogs: list[SatelliteCatalogConfig] = field(default_factory=list)
@@ -352,6 +355,7 @@ SECTIONS = (
     Section("pathMappings", "path_mappings", path_mappings_of),
     Section("overviews", "overviews", overviews_of),
     Section("rasterSpeed", "raster_speed", raster_speed_of),
+    Section("localCopy", "local_copy", local_copy_of),
     Section("complexImages", "complex_images", complex_images_of),
     Section("satelliteKinds", "satellite_kinds", satellite_kinds_of),
     Section("satelliteCatalogs", "satellite_catalogs", satellite_catalog_of, listed=True),

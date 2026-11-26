@@ -3511,6 +3511,7 @@
   "interests",
   "layerTemplates",
   "layers",
+  "localCopy",
   "localObservations",
   "movingFeeds",
   "namedAreas",
