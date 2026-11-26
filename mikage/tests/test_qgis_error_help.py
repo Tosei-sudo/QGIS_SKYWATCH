@@ -10,7 +10,8 @@ from qgis.testing import start_app  # noqa: E402
 APP = start_app()
 
 from qgis.core import Qgis  # noqa: E402
-from qgis.PyQt.QtCore import QEvent, QPoint, QPointF, Qt  # noqa: E402
+from qgis.gui import QgsMessageBar  # noqa: E402
+from qgis.PyQt.QtCore import QCoreApplication, QEvent, QPoint, QPointF, Qt  # noqa: E402
 from qgis.PyQt.QtGui import QMouseEvent  # noqa: E402
 from qgis.PyQt.QtWidgets import QApplication, QLabel, QPushButton  # noqa: E402
 
@@ -60,7 +61,7 @@ def test_the_message_bar_and_a_status_line_open_the_help_at_the_code(plugin):
     bar = iface.messageBar()
     bar.pushMessage("観測記録", errors.tagged("記録の取得に失敗: サーバーに接続できない", "E101"), Qgis.MessageLevel.Warning, 0)
     item = bar.currentItem()
-    buttons = [b for b in item.findChildren(QPushButton) if b.objectName() == "mikageErrorHelp"]
+    buttons = [b for b in item.findChildren(QPushButton) if b.objectName() == error_help.BUTTON]
     assert len(buttons) == 1 and buttons[0].text() == "対処法"
     buttons[0].click()
     dialog = p.help_dialog
@@ -69,7 +70,7 @@ def test_the_message_bar_and_a_status_line_open_the_help_at_the_code(plugin):
     # A message without a code (or another plugin's 「[E101]」) has no button.
     bar.pushMessage("観測記録", "保存した", Qgis.MessageLevel.Success, 0)
     bar.pushMessage("他のプラグイン", "failed [E101]", Qgis.MessageLevel.Warning, 0)
-    assert not [b for b in bar.currentItem().findChildren(QPushButton) if b.objectName() == "mikageErrorHelp"]
+    assert not [b for b in bar.currentItem().findChildren(QPushButton) if b.objectName() == error_help.BUTTON]
     bar.clearWidgets()
 
     # A dock's status line: the hand and a click while its text has a code; plain text all the while.
@@ -89,6 +90,55 @@ def test_the_message_bar_and_a_status_line_open_the_help_at_the_code(plugin):
     assert error_help.shown_code("3 件") is None and error_help.shown_code("x［E999］") is None
     label.close()
     dialog.close()
+
+
+def _help_buttons(item) -> list:
+    return [b for b in item.findChildren(QPushButton) if b.objectName() == error_help.BUTTON]
+
+
+def test_a_message_back_on_top_keeps_one_button():
+    """The bar says `widgetAdded` again when a message comes back on top (the newer one closed or timed out)."""
+    bar = QgsMessageBar()
+    bar_help = error_help.BarHelp(bar)
+    opened = []
+    error_help.set_opener(opened.append)
+    try:
+        bar.pushMessage("観測記録", errors.tagged("記録の取得に失敗: サーバーに接続できない", "E101"), Qgis.MessageLevel.Warning, 0)
+        first = bar.currentItem()
+        assert len(_help_buttons(first)) == 1
+        for text in ("保存した", errors.tagged("保存に失敗: ほかの人が先に変更", "E301"), "3 件を読み込んだ"):
+            bar.pushMessage("観測記録", text, Qgis.MessageLevel.Info, 0)
+            bar.popWidget(bar.currentItem())
+            assert bar.currentItem() is first and len(_help_buttons(first)) == 1, text
+        # Two with a code, each back on top in turn: one each, for its own code.
+        bar.pushMessage("観測記録", errors.tagged("保存に失敗: ほかの人が先に変更", "E301"), Qgis.MessageLevel.Warning, 0)
+        second = bar.currentItem()
+        bar.pushMessage("観測記録", "保存した", Qgis.MessageLevel.Success, 0)
+        bar.popWidget(bar.currentItem())
+        assert bar.currentItem() is second and len(_help_buttons(second)) == 1
+        bar.popWidget(second)
+        assert bar.currentItem() is first
+        buttons = _help_buttons(first)
+        assert len(buttons) == 1
+        buttons[0].click()
+        assert opened == ["E101"]
+        # A text changed meanwhile: the button follows it when the item is on top again.
+        bar.pushMessage("観測記録", "保存した", Qgis.MessageLevel.Success, 0)
+        first.setText(errors.tagged("記録の取得に失敗: サーバーが混み合っている", "E102"))
+        bar.popWidget(bar.currentItem())
+        buttons = _help_buttons(first)
+        assert len(buttons) == 1 and "E102" in buttons[0].toolTip()
+        buttons[0].click()
+        assert opened == ["E101", "E102"]
+        bar.pushMessage("観測記録", "保存した", Qgis.MessageLevel.Success, 0)
+        first.setText("記録を取得した")
+        bar.popWidget(bar.currentItem())
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        assert bar.currentItem() is first and not _help_buttons(first)
+    finally:
+        bar_help.unload()
+        bar.clearWidgets()
+        error_help.set_opener(None)
 
 
 def test_nothing_opens_once_the_plugin_is_gone():
