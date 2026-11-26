@@ -26,8 +26,7 @@ class FakeClient:
 
 
 def names_of(rows):
-    return load_satellite_names(FakeClient(rows), alias_tables_of({"url": TABLE, "fields": {"satellite": "SAT", "alias": "ALIAS"}}, []),
-                                lambda url, token: token)[0]
+    return load_satellite_names(FakeClient(rows), alias_tables_of({"url": TABLE, "fields": {"satellite": "SAT", "alias": "ALIAS"}}, []))[0]
 
 
 def test_plain_and_alias_lists():
@@ -55,7 +54,7 @@ def test_rows_of_one_satellite_are_grouped():
                          {"SAT": "SkySat-C12", "ALIAS": "SkySat"}, {"SAT": "SkySat-C13", "ALIAS": "SkySat"},
                          {"SAT": "", "ALIAS": "X"}, {"SAT": "GeoEye-1", "ALIAS": None}])
     tables = alias_tables_of({"url": TABLE, "fields": {"satellite": "SAT", "alias": "ALIAS"}, "where": "USE = 1"}, [])
-    names, problems = load_satellite_names(client, tables, lambda url, token: token)
+    names, problems = load_satellite_names(client, tables)
     assert problems == []
     assert client.asked == [(TABLE, "USE = 1", "SAT,ALIAS", False)]
     assert names.expand("WorldView-3") == {"worldview3", "wv03", "wv3"}
@@ -70,7 +69,7 @@ def test_rows_of_one_satellite_are_grouped():
 
 def test_a_table_that_fails_is_reported():
     tables = alias_tables_of({"url": TABLE, "fields": {"satellite": "SAT", "alias": "ALIAS"}}, [])
-    names, problems = load_satellite_names(FakeClient([], fail=True), tables, lambda url, token: token)
+    names, problems = load_satellite_names(FakeClient([], fail=True), tables)
     assert not names
     assert problems == ["衛星名の対応表 1 の取得に失敗（接続できない）"]
 

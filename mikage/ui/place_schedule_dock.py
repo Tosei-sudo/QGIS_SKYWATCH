@@ -364,12 +364,9 @@ class PlaceScheduleDock(PluginDock):
                 self.pick.setChecked(False)
             self.canvas.refresh()
 
-    def token(self) -> Optional[str]:
-        return self.context.token_for(self.store.url, self.store.token) if self.store else None
-
     def repository(self) -> ScheduleRepository:
-        """The store's reads and writes (データ窓口), its token as it is now."""
-        return ScheduleRepository(self.context.esri(), self.store, self.token())
+        """The store's reads and writes (データ窓口)."""
+        return ScheduleRepository(self.context.esri(), self.store, None)
 
     # --- Reading --------------------------------------------------------------------------------
 

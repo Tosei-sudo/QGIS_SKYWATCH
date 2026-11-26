@@ -83,7 +83,7 @@ class ReviewBar(QWidget):
             self._again = (image_id, then)
             return
         client = self.dock.context.esri()
-        token = self.dock.context.token_for(source.url, source.token)
+        token = None
 
         def after() -> None:
             again, self._again = self._again, None

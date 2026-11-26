@@ -145,7 +145,7 @@ def prepare(tables: Sequence[Table], sql: str, conditions: dict, limit: int = DE
 
 
 def run(client: Any, prepared: Sequence[tuple[Table, Optional[LayerReader]]], sql: str, values: dict, conditions: dict,
-        token_for: Callable[[Table], Optional[str]], limit: int = DEFAULT_TABLE_LIMIT, task: Any = None,
+        limit: int = DEFAULT_TABLE_LIMIT, task: Any = None,
         cache_minutes: float = 0) -> tuple[Result, dict, dict]:
     """
     Reads the tables and runs the query (in a task); the result, how many rows
@@ -153,13 +153,13 @@ def run(client: Any, prepared: Sequence[tuple[Table, Optional[LayerReader]]], sq
     the columns read, the conditions and join keys sent, answers kept).
     """
     cancelled = (lambda: task.isCanceled()) if task is not None else None
-    reading = analysis_plan.prepare_reads(client, prepared, sql, values, conditions, wants_shape(sql), token_for,
+    reading = analysis_plan.prepare_reads(client, prepared, sql, values, conditions, wants_shape(sql),
                                           cache_minutes=cache_minutes)
     db = Database()
     counts: dict[str, int] = {}
     notes: dict[str, str] = {}
     try:
-        reads = analysis_plan.read_tables(client, reading, conditions, limit, token_for, cancelled,
+        reads = analysis_plan.read_tables(client, reading, conditions, limit, cancelled,
                                           task.progress if task is not None else None, cache_minutes)
         for r in reads:
             db.add(r.table.name, r.columns, r.rows)
@@ -175,9 +175,9 @@ def run(client: Any, prepared: Sequence[tuple[Table, Optional[LayerReader]]], sq
 
 
 def explain(client: Any, prepared: Sequence[tuple[Table, Optional[LayerReader]]], sql: str, values: dict, conditions: dict,
-            token_for: Callable[[Table], Optional[str]], cache_minutes: float = 0) -> str:
+            cache_minutes: float = 0) -> str:
     """「読み込み計画」: how the tables would be read (in a task: the layers' information and counts are asked)."""
-    reading = analysis_plan.prepare_reads(client, prepared, sql, values, conditions, wants_shape(sql), token_for, count_all=True,
+    reading = analysis_plan.prepare_reads(client, prepared, sql, values, conditions, wants_shape(sql), count_all=True,
                                           cache_minutes=cache_minutes)
     return analysis_plan.describe(reading, conditions, cache_minutes)
 

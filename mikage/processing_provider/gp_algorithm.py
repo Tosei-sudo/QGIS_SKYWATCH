@@ -35,7 +35,7 @@ UNITS = [("esriMeters", "メートル"), ("esriKilometers", "キロメートル"
 LAYERS = "LAYERS"
 RESULTS = "RESULTS"
 
-#: Tasks read in this session, by algorithm name: (task, token of the settings file or "").
+#: Tasks read in this session, by algorithm name.
 _tasks: dict = {}
 
 
@@ -47,10 +47,13 @@ def algorithm_name(task: GpTask) -> str:
     return "remote_" + hashlib.sha1(task.url.encode()).hexdigest()[:12]
 
 
-def register(task: GpTask, token: str = "") -> str:
-    """Makes `task` an algorithm of the provider; its id (mikage:remote_…)."""
+def register(task: GpTask) -> str:
+    """
+    Makes `task` an algorithm of the provider; its id (mikage:remote_…). Its
+    requests are signed in as the others (signIn, or the authentication chosen).
+    """
     name = algorithm_name(task)
-    _tasks[name] = (task, token)
+    _tasks[name] = task
     provider = QgsApplication.processingRegistry().providerById("mikage")
     if provider is not None:
         provider.refreshAlgorithms()
@@ -87,7 +90,7 @@ class RemoteTaskAlgorithm(QgsProcessingAlgorithm):
     def __init__(self, name: str):
         super().__init__()
         self._name = name
-        self._task, self._token = _tasks[name]
+        self._task = _tasks[name]
         self._names = parameter_names(self._task)
 
     def createInstance(self) -> "RemoteTaskAlgorithm":  # noqa: N802 (QGIS's name)
@@ -196,7 +199,7 @@ class RemoteTaskAlgorithm(QgsProcessingAlgorithm):
             if percent is not None:
                 feedback.setProgress(percent)
 
-        client = GpClient(lambda method, url, body, headers: gp_io.http(method, url, body, headers, feedback), self._token or None,
+        client = GpClient(lambda method, url, body, headers: gp_io.http(method, url, body, headers, feedback), None,
                           cancelled=feedback.isCanceled)
         try:
             result = client.run(self._task, values, status)

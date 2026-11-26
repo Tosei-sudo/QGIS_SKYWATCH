@@ -227,8 +227,8 @@ def run(fake, tables, sql, values=None, conditions=None, plan=True, limit=100_00
     prepared = [(t, readers.get(t.name)) for t in tables if t.name in used]
     client = EsriClient(fake)
     if plan:
-        reading = prepare_reads(client, prepared, sql, values, conditions, wants_shape(sql), lambda _t: None, cache_minutes=minutes)
-        reads = read_tables(client, reading, conditions, limit, lambda _t: None, cache_minutes=minutes)
+        reading = prepare_reads(client, prepared, sql, values, conditions, wants_shape(sql), cache_minutes=minutes)
+        reads = read_tables(client, reading, conditions, limit, cache_minutes=minutes)
     else:
         reads = []
         for t, reader in prepared:
@@ -382,7 +382,7 @@ def test_the_plan_of_reading_says_what_goes_to_the_server():
     sql = ("SELECT c.SAT, COUNT(*) FROM TBL_AI_RESULT a JOIN TBL_IMAGE_CATALOG c ON a.IMAGE_ID = c.IMG_ID "
            "WHERE a.MODEL = :m AND a.NOTE <> 'x' AND length(c.PATH) > 3 GROUP BY c.SAT")
     reading = prepare_reads(EsriClient(fake), [(t, None) for t in tables], sql, {"m": "m1"}, {"TBL_IMAGE_CATALOG": "N < 30"}, False,
-                            lambda _t: None, count_all=True)
+                            count_all=True)
     text = describe(reading, {"TBL_IMAGE_CATALOG": "N < 30"})
     assert fake.asked and all(form.get("returnCountOnly") == "true" for u, form in fake.asked if u.endswith("/query"))
     assert "1. TBL_AI_RESULT（AI）  SQL では a" in text and "件数: 3 行（サーバーの答え）" in text
@@ -394,7 +394,7 @@ def test_the_plan_of_reading_says_what_goes_to_the_server():
     assert "PC だけで見る条件: length(c.PATH) > 3 … 関数" in text
     # An error of the SQL: before anything is read.
     with pytest.raises(AnalysisError, match="列がない"):
-        prepare_reads(EsriClient(fake), [(t, None) for t in tables], "SELECT NOPE FROM TBL_AI_RESULT", {}, {}, False, lambda _t: None)
+        prepare_reads(EsriClient(fake), [(t, None) for t in tables], "SELECT NOPE FROM TBL_AI_RESULT", {}, {}, False)
 
 
 def _random_case(rng):

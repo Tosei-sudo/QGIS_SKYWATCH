@@ -173,10 +173,6 @@ def new_id(now: Optional[float] = None) -> str:
     return f"REF-{at:%Y%m%d-%H%M%S}-{secrets.token_hex(2)}"
 
 
-def _token(source: EsriSource, token: Optional[str]) -> Optional[str]:
-    return token or source.token
-
-
 def _where(source: EsriSource, *clauses: str) -> str:
     parts = [c for c in (source.where, *clauses) if c]
     return " AND ".join(f"({c})" for c in parts) or "1=1"
@@ -244,7 +240,7 @@ def attributes_of(info: ReferenceInfo, fields: dict[str, str], types: dict[str, 
 
 def _info_layer(client: EsriClient, settings: ReferenceSettings, token: Optional[str], refresh: bool = False):
     s = settings.layer
-    info = client.layer(s.url, _token(s, token), refresh=refresh)
+    info = client.layer(s.url, token, refresh=refresh)
     _need(info.field_types, s.fields, NEEDED_INFO, "参考情報のレイヤー")
     return info
 
@@ -259,7 +255,7 @@ def load_infos(client: EsriClient, settings: ReferenceSettings, token: Optional[
     a shorter period).
     """
     s = settings.layer
-    token = _token(s, token)
+    token = token
     info = _info_layer(client, settings, token, refresh=True)
     f = s.fields
     clauses = []
@@ -333,7 +329,7 @@ def feature_of(info: ReferenceInfo, fields: dict[str, str], layer) -> dict[str, 
 def save_info(client: EsriClient, settings: ReferenceSettings, info: ReferenceInfo, token: Optional[str] = None) -> ReferenceInfo:
     """Adds the info (no oid yet) or updates it; the info as saved (with its oid)."""
     s = settings.layer
-    token = _token(s, token)
+    token = token
     layer = _info_layer(client, settings, token, refresh=True)
     if not info.title.strip():
         raise ValueError("題名がない")
@@ -367,7 +363,7 @@ def delete_info(client: EsriClient, settings: ReferenceSettings, info: Reference
     links went. The info goes first: links left by a failure point at no info (never listed).
     """
     if info.oid is not None:
-        results = client.delete_features(settings.layer.url, [info.oid], _token(settings.layer, token))
+        results = client.delete_features(settings.layer.url, [info.oid], token)
         if results and not all(r.get("success") for r in results):
             raise EsriError(code="E305", detail="参考情報の削除: " + ((results[0].get("error") or {}).get("description") or ""))
     if settings.links is None:
@@ -382,7 +378,7 @@ def _link_layer(client: EsriClient, settings: ReferenceSettings, token: Optional
     s = settings.links
     if s is None:
         raise EsriError("参考情報の紐付けは使えない（管理者に連絡: referenceInfo.links）", code="E703")
-    info = client.layer(s.url, _token(s, token), refresh=True)
+    info = client.layer(s.url, token, refresh=True)
     _need(info.field_types, s.fields, NEEDED_LINK, "参考情報の紐付けテーブル")
     return info
 
@@ -393,7 +389,7 @@ def load_links(client: EsriClient, settings: ReferenceSettings, info_ids: Option
     s = settings.links
     if s is None:
         return []
-    token = _token(s, token)
+    token = token
     layer = _link_layer(client, settings, token)
     f = s.fields
     tracking = edit_stamp.tracking().fields
@@ -441,7 +437,7 @@ def add_link_pairs(client: EsriClient, settings: ReferenceSettings, pairs: Seque
     s = settings.links
     if s is None:
         raise EsriError("参考情報の紐付けは使えない（管理者に連絡: referenceInfo.links）", code="E703")
-    token = _token(s, token)
+    token = token
     layer = _link_layer(client, settings, token)
     types, lengths, f = layer.field_types, layer.field_lengths, s.fields
     have = {x.key for x in load_links(client, settings, list(dict.fromkeys(i for i, _item in pairs)), token=token)}
@@ -479,7 +475,7 @@ def remove_links(client: EsriClient, settings: ReferenceSettings, links: Sequenc
         return 0
     removed = 0
     for start in range(0, len(ids), 500):
-        results = client.delete_features(settings.links.url, ids[start:start + 500], _token(settings.links, token))
+        results = client.delete_features(settings.links.url, ids[start:start + 500], token)
         failed = [r for r in results if not r.get("success")]
         if failed:
             raise EsriError(f"紐付け {len(failed)} 件の解除をサーバーが受け付けない", code="E305",

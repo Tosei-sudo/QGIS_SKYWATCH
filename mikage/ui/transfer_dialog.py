@@ -129,7 +129,7 @@ class TransferDialog(QDialog):
         return list(layer.getFeatures(QgsFeatureRequest()))
 
     def _token(self, output: DetectionOutput) -> Optional[str]:
-        return self.context.token_for(output.url, output.token)
+        return None
 
     # What a transfer would do.
 

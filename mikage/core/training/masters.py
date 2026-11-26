@@ -27,7 +27,8 @@ whose `mode` is "training" (練習モードだけ) or "both" (両方) are shown 
 practising after the practice's own (with_practice_catalogs), on the built-in
 sample and on the organisation's practice settings file alike, whatever
 `fromProduction` says (the administrator chose them one by one); their
-tokens kept in memory only, their files found with the production's
+production's servers signed in to as in production (its `signIn`,
+taken whenever anything is), their files found with the production's
 pathMappings. MIKAGE only reads image catalogs.
 """
 from __future__ import annotations
@@ -103,13 +104,6 @@ def with_production(practice: dict, production: Any, names: Sequence[str], sourc
                     mine[key] = store[key]
                 else:
                     mine.pop(key, None)
-            table, token = mine.get("taxonomyTable"), (store or {}).get("token")
-            if isinstance(token, str) and token:
-                # The store's token, which the production's table was read with.
-                if isinstance(table, str):
-                    mine["taxonomyTable"] = {"url": table, "token": token}
-                elif isinstance(table, dict) and "token" not in table:
-                    table["token"] = token
             taken.append(name)
         elif name == "places" and "geocoders" in prod:
             value["geocoders"] = prod["geocoders"]
@@ -127,6 +121,9 @@ def with_production(practice: dict, production: Any, names: Sequence[str], sourc
         # 判読の練習's organisation's exercises: their images may be the production catalogs' (read only),
         # their files where the production finds them.
         value["pathMappings"] = [*(value.get("pathMappings") or []), *prod["pathMappings"]]
+    if (taken or exercise_images(prod)) and "signIn" in prod and "signIn" not in value:
+        # The production's servers read while practising are signed in to as in production.
+        value["signIn"] = prod["signIn"]
     return value, taken
 
 
@@ -181,7 +178,18 @@ def with_practice_catalogs(config: Any, production: Any, source: str) -> list[st
     if isinstance(whole["pathMappings"], list):
         extra = [m for m in path_mappings_of(whole["pathMappings"], []) if m not in config.path_mappings]
         config.path_mappings = [*config.path_mappings, *extra]
+    _with_sign_in(config, production)
     return [c.label for c in taken]
+
+
+def _with_sign_in(config: Any, production: dict) -> None:
+    """The production's `signIn` entries added to the practice's (a PluginConfig) for the servers it says nothing of."""
+    from ..sign_in import sign_in_rules_of
+
+    if production.get("signIn") is None:
+        return
+    have = {d for r in config.sign_in for d in r.domains}
+    config.sign_in = [*config.sign_in, *(r for r in sign_in_rules_of(production["signIn"], []) if not set(r.domains) & have)]
 
 
 def read_text(taken: Sequence[str], production: Any) -> str:
@@ -190,15 +198,6 @@ def read_text(taken: Sequence[str], production: Any) -> str:
     count = len(practice_catalog_entries(production))
     catalogs = f"画像カタログ {count} 件" if count else ""
     return "・".join(t for t in (names, catalogs) if t)
-
-
-def without_tokens(value: Any) -> Any:
-    """A settings file's value without its tokens (what is written to disk: the production's tokens are kept in memory only)."""
-    if isinstance(value, list):
-        return [without_tokens(v) for v in value]
-    if isinstance(value, dict):
-        return {k: without_tokens(v) for k, v in value.items() if k != "token"}
-    return value
 
 
 def config_text(value: dict, head: str = "") -> str:

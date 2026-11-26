@@ -1036,7 +1036,7 @@ def rules_of_rows(rows: Iterable[dict[str, Any]], fields: dict[str, str]) -> lis
 
 def load_rules(client: EsriClient, source: EsriSource, token: Optional[str] = None) -> list[AlertRule]:
     """The active rules of the rules table."""
-    rows = client.query_all(source.url, source.where or "1=1", token or source.token, geometry=False, limit=100_000)
+    rows = client.query_all(source.url, source.where or "1=1", token, geometry=False, limit=100_000)
     return rules_of_rows([f.get("attributes") or {} for f in rows], source.fields)
 
 
@@ -1044,7 +1044,7 @@ def load_geofences(client: EsriClient, source: EsriSource, token: Optional[str] 
     """The active geofences (polygons, WGS 84)."""
     out = []
     f = source.fields
-    for feature in client.query_all(source.url, source.where or "1=1", token or source.token, limit=100_000):
+    for feature in client.query_all(source.url, source.where or "1=1", token, limit=100_000):
         a = feature.get("attributes") or {}
         rings = (feature.get("geometry") or {}).get("rings") or []
         if not rings or (f["active"] in a and not _active(a.get(f["active"]))):
@@ -1173,7 +1173,7 @@ def load_named_areas(client: EsriClient, source: Optional[EsriSource], token: Op
         hit = _place_cache.get(key)
     if hit is not None and now - hit[0] < max_age:
         return hit[1]
-    rows = client.query_all(source.url, source.where or "1=1", token or source.token, limit=100_000)
+    rows = client.query_all(source.url, source.where or "1=1", token, limit=100_000)
     areas = named_areas_of_features(rows, source.fields, interest_too)
     with _place_lock:
         _place_cache[key] = (now, areas)
@@ -1212,7 +1212,7 @@ def _names_en(fences: Iterable[Geofence]) -> list[str]:
 
 def _log_types(client: EsriClient, settings: AlertSettings, token: Optional[str]) -> dict[str, str]:
     table = settings.table
-    types = client.layer(table.url, token or table.token, refresh=True).field_types
+    types = client.layer(table.url, token, refresh=True).field_types
     if table.fields["obsId"] not in types:
         raise EsriError(f"通報の表に必要な項目がない（管理者に連絡: {table.fields['obsId']}）", code="E704")
     return types
@@ -1240,7 +1240,7 @@ def reported_ids(client: EsriClient, settings: AlertSettings, token: Optional[st
                   for k in range(0, len(wanted), 100)]
     out: set[str] = set()
     for where in wheres:
-        rows = client.query_all(table.url, where, token or table.token, out_fields=f["obsId"], geometry=False, limit=1_000_000)
+        rows = client.query_all(table.url, where, token, out_fields=f["obsId"], geometry=False, limit=1_000_000)
         out |= {_text((r.get("attributes") or {}).get(f["obsId"])) for r in rows}
     return out - {""}
 
@@ -1286,7 +1286,6 @@ def poll_log(client: EsriClient, settings: AlertSettings, known: Iterable[int], 
     table = settings.table
     if table is None:
         return LogChanges([], set(), set())
-    token = token or table.token
     info = client.layer(table.url, token)
     types = info.field_types
     f = table.fields
@@ -1318,7 +1317,6 @@ def load_log(client: EsriClient, settings: AlertSettings, start: Optional[float]
     table = settings.table
     if table is None:
         return []
-    token = token or table.token
     types = _log_types(client, settings, token)
     f = table.fields
     oid = client.layer(table.url, token).object_id_field
@@ -1341,7 +1339,7 @@ def remove_log(client: EsriClient, settings: AlertSettings, rows: Sequence[LogRo
     ids = [r.oid for r in rows if r.oid is not None]
     if table is None or not ids:
         return 0
-    results = client.delete_features(table.url, ids, token or table.token)
+    results = client.delete_features(table.url, ids, token)
     failed = [r for r in results if not r.get("success")]
     if failed:
         raise EsriError(f"通報記録 {len(failed)} 件の削除をサーバーが受け付けない", code="E305", detail=(failed[0].get("error") or {}).get("description") or "")
@@ -1768,7 +1766,6 @@ def write_log(client: EsriClient, settings: AlertSettings, report: AlertFormat, 
     if table is None or not items:
         return 0
     types = _log_types(client, settings, token)
-    token = token or table.token
     f = table.fields
     batch = str(uuid.uuid4())
     adds = []

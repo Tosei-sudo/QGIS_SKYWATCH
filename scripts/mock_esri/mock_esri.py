@@ -64,7 +64,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"新着画像を登録: {image_id}")
         return 0
     config_path = os.path.join(a.data, "config.mock.jsonc")
-    sample.write_config(config_path, base, files, a.token)
+    sample.write_config(config_path, base, files)
     print(f"設定ファイル: {config_path}")
     if a.command == "config":
         return 0
@@ -75,7 +75,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     for name in store.services():
         print(f"  {base}/arcgis/rest/services/{name}/FeatureServer")
     if a.token:
-        print(f"  トークン: {a.token}（設定ファイルの token に書き込み済み）")
+        print(f"  トークン: {a.token}（「設定…」の表で、このサーバーに認証設定 ESRI-Token（このトークン）を選ぶ）")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

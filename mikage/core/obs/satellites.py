@@ -215,7 +215,6 @@ NO_CHOICES = SatelliteChoices()
 
 
 def load_satellite_choices(client: Any, image_catalogs: Sequence[Any], satellite_catalogs: Sequence[Any], names: SatelliteNames,
-                           token_for: Callable[[str, Optional[str]], Optional[str]],
                            cancelled: Optional[Callable[[], bool]] = None) -> tuple[SatelliteChoices, bool]:
     """
     The names known (in a task): the image catalogs' sensors and the
@@ -234,7 +233,7 @@ def load_satellite_choices(client: Any, image_catalogs: Sequence[Any], satellite
             return SatelliteChoices(tuple(catalog), tuple(satellites), names), False
         if not c.fields.get("sensor"):
             continue
-        for v in sensors_of(client, c, token_for(c.url, c.token)):
+        for v in sensors_of(client, c, None):
             if clean(v) and clean(v) not in catalog:
                 catalog.append(clean(v))
     for c in satellite_catalogs:
@@ -246,7 +245,7 @@ def load_satellite_choices(client: Any, image_catalogs: Sequence[Any], satellite
         try:
             answer = client.ask(f"{c.url}/query", {
                 "where": c.where or "1=1", "outFields": name, "returnDistinctValues": "true", "returnGeometry": "false",
-            }, token_for(c.url, c.token))
+            })
         except (EsriError, OSError, ValueError):
             whole = False
             continue

@@ -1,5 +1,5 @@
 """
-The settings file's Esri layers and tables (URL, or { url, fields, where, token }) and their attributes by
+The settings file's Esri layers and tables (URL, or { url, fields, where }) and their attributes by
 role, as the features read them (通報's rules, 衛星の障害情報, 関心地域, 引き継ぎ, 担当…).
 """
 from __future__ import annotations
@@ -19,14 +19,13 @@ class EsriSource:
     """An Esri layer or table and its attribute names by role."""
     url: str
     fields: dict[str, str]
-    token: Optional[str] = None
     where: Optional[str] = None
 
 
 def esri_source_of(v: Any, at: str, defaults: dict[str, str], problems: list[str], editable: bool = False,
                    ) -> Optional[EsriSource]:
     """
-    An Esri layer or table of the settings file (URL, or { url, fields, where, token }), its attributes by
+    An Esri layer or table of the settings file (URL, or { url, fields, where }), its attributes by
     role (`defaults`, renamed by `fields`); None (the reason in `problems`) when it cannot be used.
     """
     v = {"url": v} if isinstance(v, str) else v
@@ -44,9 +43,8 @@ def esri_source_of(v: Any, at: str, defaults: dict[str, str], problems: list[str
                 fields[k] = name
             else:
                 problems.append(f"{at}.fields.{k} は属性名で指定")
-    token, where = v.get("token"), v.get("where")
+    where = v.get("where")
     return EsriSource(
         url=layer_url(v["url"]), fields=fields,
-        token=token if isinstance(token, str) and token else None,
         where=where.strip() if isinstance(where, str) and where.strip() else None,
     )

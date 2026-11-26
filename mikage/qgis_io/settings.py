@@ -13,7 +13,7 @@ from typing import Optional
 
 from qgis.core import QgsApplication, QgsAuthMethodConfig
 
-from ..core import edit_stamp, edition
+from ..core import edit_stamp, edition, sign_in
 from . import training_io
 from . import qsettings
 from .qsettings import pref, set_pref  # noqa: F401 (pref and set_pref: read from here too)
@@ -109,8 +109,9 @@ _SECRET_PARAM = re.compile(r"([?&])(token|access_token|apikey|api_key|key|passwo
 
 def _without_tokens(value):
     """
-    A settings file's value with every `token` left out, and the secret
-    parameters of its URLs too (tokens are never kept in the profile).
+    A settings file's value with every `token` left out (one left in an old
+    file: the plugin does not use them), and the secret parameters of its
+    URLs too (tokens are never kept in the profile).
     """
     if isinstance(value, dict):
         return {k: _without_tokens(v) for k, v in value.items() if k != "token"}
@@ -151,7 +152,15 @@ def set_auth_map(mapping: dict[str, str]) -> None:
 
 
 def auth_for(url: str) -> Optional[str]:
-    """The authcfg of the service a request URL belongs to: the longest URL in the map that the request starts with."""
+    """
+    The authcfg of the service a request URL belongs to: for a host the
+    settings file's `signIn` names, its own (a `saml` portal's, else none:
+    core/sign_in.py); else the person's choice, the longest URL in the map
+    that the request starts with.
+    """
+    rule = sign_in.rule_for(url)
+    if rule is not None:
+        return sign_in.authcfg_for(rule)
     best: Optional[str] = None
     best_len = -1
     for prefix, authcfg in auth_map().items():

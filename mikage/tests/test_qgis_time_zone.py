@@ -101,10 +101,10 @@ def test_the_service_url_of_an_esri_layer():
     assert time_zone_fields.layer_url(ships()) is None
 
 
-def test_the_service_zone_is_asked_with_its_token_and_a_failure_is_told(monkeypatch):
-    """#86: the settings file's token goes with the question; when it cannot be read the person is told."""
+def test_the_service_zone_is_asked_and_a_failure_is_told(monkeypatch):
+    """The service's zone is asked (signed in as every request); when it cannot be read the person is told."""
     fake = FakeEsri()
-    info_layer = fake.add_layer(URL, FakeLayer({"seen": "esriFieldTypeDate"}, token="TOKEN"))
+    info_layer = fake.add_layer(URL, FakeLayer({"seen": "esriFieldTypeDate"}))
     plain = info_layer.info
     info_layer.info = lambda: {**plain(), "dateFieldsTimeReference": {"timeZoneIANA": "Asia/Tokyo"}}
     set_rules([source_rule(URL, UTC)])
@@ -112,12 +112,13 @@ def test_the_service_zone_is_asked_with_its_token_and_a_failure_is_told(monkeypa
 
     monkeypatch.setattr(time_zone_fields, "layer_url", lambda l: URL)
     monkeypatch.setitem(time_zone_fields.PROVIDERS, "memory", True)
-    for token, zone in (("TOKEN", "Asia/Tokyo"), (None, None)):
+    for answers, zone in ((True, "Asia/Tokyo"), (False, None)):
+        info_layer.token = None if answers else "NEEDED"
         layer = ships()
         QgsProject.instance().addMapLayer(layer, False)
         warnings = []
         try:
-            time_zone_fields.TimeZoneFields(lambda: EsriClient(fake), lambda url: token, warnings.append).layers_added([layer])
+            time_zone_fields.TimeZoneFields(lambda: EsriClient(fake), warnings.append).layers_added([layer])
             wait_for(lambda: "seen（UTC）" in layer.fields().names())
             if zone:
                 assert layer.customProperty(time_zone_fields.PROPERTY) == f"UTC（サービス側: {zone}）" and warnings == []
@@ -126,15 +127,3 @@ def test_the_service_zone_is_asked_with_its_token_and_a_failure_is_told(monkeypa
         finally:
             QgsProject.instance().removeMapLayer(layer.id())
 
-
-def test_the_token_of_a_service_from_the_settings_file():
-    from mikage.core.config import parse_config
-    from mikage.qgis_io.context import PluginContext
-
-    context = PluginContext()
-    base = "https://g.example.com/arcgis/rest/services"
-    context.config, _ = parse_config({"imageCatalogs": [{"label": "画像", "url": f"{base}/Img/FeatureServer/0", "token": "T1",
-                                                         "fields": {"source": "URL"}}]})
-    assert context.token_of(f"{base}/Img/FeatureServer/0") == "T1"
-    assert context.token_of(f"{base}/Img/FeatureServer/0/query") == "T1"
-    assert context.token_of(f"{base}/Other/FeatureServer/0") is None

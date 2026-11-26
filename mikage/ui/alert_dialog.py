@@ -52,7 +52,7 @@ def layer_fields(client, s: AlertSettings, tokens: dict) -> dict[str, list[str]]
         if source is None:
             continue
         try:
-            out[name] = list(client.layer(source.url, tokens.get(name) or source.token, refresh=True).field_types)
+            out[name] = list(client.layer(source.url, tokens.get(name), refresh=True).field_types)
         except EsriError:
             pass
     return out
@@ -209,7 +209,7 @@ class AlertDialog(QDialog):
         return self.dock.context.config.alert_reports
 
     def _token(self, source) -> Optional[str]:
-        return self.dock.context.token_for(source.url, source.token) if source else None
+        return None
 
     def log_repository(self) -> AlertLogRepository:
         """The alert log's reads and writes (データ窓口), its token as it is now."""

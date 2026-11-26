@@ -40,7 +40,7 @@ OUTPUT = "OUTPUT"
 ROWS = "ROWS"
 LIMIT = "LIMIT"
 
-#: The plugin's context (its settings file, Esri client and tokens), set by the plugin.
+#: The plugin's context (its settings file and Esri client), set by the plugin.
 _context: Callable[[], Any] = lambda: None
 
 
@@ -202,19 +202,18 @@ class AnalysisAlgorithm(QgsProcessingAlgorithm):
         esri = [t for t, _r in prepared if t.source == "esri"]
         if esri and plugin is None:
             raise QgsProcessingException(tr("Esri の表を読むにはプラグインの設定ファイルが必要"))
-        tokens = {t.name: plugin.token_for(t.url, t.token) for t in esri} if esri else {}
         client = plugin.esri() if esri else None
         minutes = getattr(config, "analysis_cache_minutes", 0) if config is not None else 0
-        self._prepared = (a, sql, values, prepared, tokens, client, limit, minutes)
+        self._prepared = (a, sql, values, prepared, client, limit, minutes)
         return True
 
     def processAlgorithm(self, parameters_, context, feedback) -> dict:  # noqa: N802 (QGIS's name)
         from ..qgis_io import analysis_io
 
-        a, sql, values, prepared, tokens, client, limit, minutes = self._prepared
+        a, sql, values, prepared, client, limit, minutes = self._prepared
         feedback.pushInfo(tr("読む表: {t}").format(t="、".join(t.name for t, _r in prepared)))
         try:
-            result, counts, notes = analysis_io.run(client, prepared, sql, values, dict(a.conditions), lambda t: tokens.get(t.name),
+            result, counts, notes = analysis_io.run(client, prepared, sql, values, dict(a.conditions),
                                                     limit, _Progress(feedback), minutes)
         except AnalysisError as error:
             if feedback.isCanceled():

@@ -285,6 +285,20 @@ dialog.modal.busy button { pointer-events: none; opacity: .6; }
   "movingFeeds",
   "stacCatalogs",
   "gpServices"
+ ],
+ "signInMethods": [
+  [
+   "iwa",
+   "統合 Windows 認証（IWA）"
+  ],
+  [
+   "saml",
+   "SAML（OAuth2）"
+  ],
+  [
+   "none",
+   "サインインなし"
+  ]
  ]
 }
 </script>
@@ -659,10 +673,9 @@ function editUrlOf(url, at, problems) {
 }
 function sourceOf(kind, entry, i, at, fields, problems) {
   const url = entry.url;
-  const token = typeof entry.token === "string" && entry.token ? entry.token : null;
   const where = typeof entry.where === "string" && entry.where.trim() ? entry.where.trim() : null;
   return {
-    kind, id: `${kind}${i}`, at, fields, token, where,
+    kind, id: `${kind}${i}`, at, fields, where,
     shownUrl: url.split("?")[0].replace(/\/+$/, ""), url: editUrlOf(url, at, problems),
     label: typeof entry.label === "string" && entry.label ? entry.label : "",
     swathUnit: entry.swathUnit === "m" ? "m" : "km",
@@ -672,7 +685,7 @@ function sourceOf(kind, entry, i, at, fields, problems) {
 /** 設定ファイルのうち、このツールが使う項目（config.py と同じ読み方）。 */
 function parseConfig(v) {
   const problems = [];
-  const out = { sats: [], sensors: [], inline: [], aliases: [], quotas: [], tracking: null, systems: [], timeZones: [], problems };
+  const out = { sats: [], sensors: [], inline: [], aliases: [], quotas: [], tracking: null, systems: [], timeZones: [], signIn: [], problems };
   if (!isObj(v)) { problems.push(badP("設定はオブジェクトで指定")); return out; }
   const listed = (key) => {
     if (!(key in v)) return [];
@@ -745,17 +758,48 @@ function parseConfig(v) {
       if (isName(name)) fields[role] = name;
       else problems.push(warnP(`requestStores[${i}].quotaFields.${role} は属性名（英数字と _）で指定（無視）`));
     }
-    const src = sourceOf("quota", { url: e.quotas, token: e.token }, i, at, fields, problems);
+    const src = sourceOf("quota", { url: e.quotas }, i, at, fields, problems);
     src.label = typeof e.label === "string" && e.label ? `年間撮像上限（${e.label}）` : "年間撮像上限";
     out.quotas.push(src);
   });
   out.tracking = trackingOf(v.editTracking, problems);
   for (const e of Array.isArray(v.requestExports) ? v.requestExports : []) if (isObj(e) && typeof e.system === "string" && e.system.trim()) out.systems.push(e.system.trim());
   out.timeZones = timeZoneRules(v, problems);
+  out.signIn = signInRules(v.signIn, problems);
   if (!out.sats.length) problems.push(badP("設定ファイルに使える satelliteCatalogs（衛星カタログ）なし"));
   if (!out.sensors.length && !out.inline.length) problems.push(warnP("sensorCatalogs（センサーモード）なし: センサーは編集できない"));
   if (!out.aliases.length) problems.push(warnP("satelliteAliases（衛星名の対応表）なし: 別名は編集できない"));
   return out;
+}
+/** signIn（core/sign_in.py の sign_in_rules_of）: サーバーのドメインごとのサインインの仕方。 */
+function signInRules(v, problems) {
+  if (v === undefined || v === null) return [];
+  if (isObj(v)) v = [v];
+  if (!Array.isArray(v)) { problems.push(warnP("signIn は配列で指定（無視）")); return []; }
+  const out = [], seen = new Set();
+  v.forEach((e, i) => {
+    if (!isObj(e) || !PC.signInMethods.some(([k]) => k === e.method)) return problems.push(warnP(`signIn[${i}] の method は ${PC.signInMethods.map(([k]) => k).join("・")} で指定（無視）`));
+    let portal = typeof e.portal === "string" ? e.portal.trim().replace(/\/+$/, "") : "";
+    if (!/^https?:\/\/[^/]+/i.test(portal)) portal = "";
+    if (e.method !== "none" && !portal) return problems.push(warnP(`signIn[${i}] の portal（ポータルの URL）なし（無視）`));
+    const domains = (Array.isArray(e.domains) ? e.domains : []).filter((d) => typeof d === "string" && d.trim()).map((d) => d.trim().toLowerCase());
+    if (portal) { const host = new URL(portal).hostname.toLowerCase(); if (!domains.includes(host)) domains.push(host); }
+    const kept = domains.filter((d) => !seen.has(d));
+    kept.forEach((d) => seen.add(d));
+    if (kept.length) out.push({ method: e.method, portal, domains: kept, label: typeof e.label === "string" && e.label.trim() ? e.label.trim() : domains[0] });
+  });
+  return out;
+}
+/** URL のホストをいちばん細かく名指す signIn（core/sign_in.py の match）。なければ null。 */
+function signInRuleFor(url) {
+  let host = "";
+  try { host = new URL(url).hostname.toLowerCase(); } catch (e) { return null; }
+  let best = null, at = 0;
+  for (const r of (S.cfg && S.cfg.signIn) || []) for (const d of r.domains) {
+    const p = d.startsWith("*.") ? (host.endsWith(d.slice(1)) && host !== d.slice(2) ? d.length : 0) : (host === d ? 10000 : 0);
+    if (p > at) { best = r; at = p; }
+  }
+  return best;
 }
 /** editTracking（edit_stamp.py の edit_tracking_of）。 */
 function trackingOf(v, problems) {
@@ -797,11 +841,11 @@ async function esri(url, params = {}, opt = {}) {
   const form = new URLSearchParams();
   for (const [k, v] of Object.entries({ ...params, f: "json" })) if (v !== undefined && v !== null) form.set(k, typeof v === "string" ? v : JSON.stringify(v));
   const signed = tokens.get(root);
-  const token = opt.noToken ? null : (signed && (!signed.expires || signed.expires > Date.now() + 30000) ? signed.token : opt.token);
+  const token = opt.noToken ? null : (signed && (!signed.expires || signed.expires > Date.now() + 30000) ? signed.token : null);
   if (token) form.set("token", token);
   let res, body;
   try {
-    res = await fetch(url, { method: "POST", body: form, credentials: sendCredentials ? "include" : "same-origin", cache: "no-store" });
+    res = await fetch(url, { method: "POST", body: form, credentials: sendCredentials || opt.windows ? "include" : "same-origin", cache: "no-store" });
     body = await res.text();
   } catch (e) {
     throw new EsriError(`サーバーに届かない（${url}）。URL・ネットワーク、またはサーバーの CORS の設定（このページからの要求を許しているか）を確かめる`);
@@ -815,14 +859,14 @@ async function esri(url, params = {}, opt = {}) {
     const details = Array.isArray(json.error.details) ? json.error.details.filter(Boolean) : [];
     const message = `${json.error.message || "エラー"}${details.length ? `（${details.join(" / ")}）` : ""}`;
     if ((code === 498 || code === 499) && opt.retry !== false && !opt.noToken) {
-      if (await signIn(root, code === 498 ? "トークンが無効か期限切れ" : "トークンが必要")) return esri(url, params, { ...opt, retry: false });
+      if (await signIn(root, code === 498 ? "トークンが無効か期限切れ" : "トークンが必要", url)) return esri(url, params, { ...opt, retry: false });
     }
     throw new EsriError(message, code);
   }
   return json;
 }
 async function layerInfo(src) {
-  const info = await esri(src.url, {}, { token: src.token });
+  const info = await esri(src.url, {});
   if (!Array.isArray(info.fields)) throw new EsriError("レイヤーの情報に fields がない（テーブルの URL か確かめる）");
   src.info = info;
   src.byLower = new Map(info.fields.map((f) => [f.name.toLowerCase(), f]));
@@ -840,7 +884,7 @@ async function queryAll(src, where) {
   const out = [];
   if (info.advancedQueryCapabilities && info.advancedQueryCapabilities.supportsPagination) {
     for (let offset = 0; offset < 1e6;) {
-      const r = await esri(`${src.url}/query`, { ...base, orderByFields: src.oidField, resultOffset: String(offset), resultRecordCount: String(size) }, { token: src.token });
+      const r = await esri(`${src.url}/query`, { ...base, orderByFields: src.oidField, resultOffset: String(offset), resultRecordCount: String(size) });
       const feats = r.features || [];
       out.push(...feats);
       if (!feats.length || !(r.exceededTransferLimit || feats.length >= size)) break;
@@ -849,19 +893,19 @@ async function queryAll(src, where) {
   } else {
     const ids = await queryIds(src, where);
     for (let i = 0; i < ids.length; i += size) {
-      const r = await esri(`${src.url}/query`, { objectIds: ids.slice(i, i + size).join(","), outFields: "*", returnGeometry: "false" }, { token: src.token });
+      const r = await esri(`${src.url}/query`, { objectIds: ids.slice(i, i + size).join(","), outFields: "*", returnGeometry: "false" });
       out.push(...(r.features || []));
     }
   }
   return out.map((f) => f.attributes || {});
 }
 async function queryIds(src, where) {
-  const r = await esri(`${src.url}/query`, { where: where || "1=1", returnIdsOnly: "true" }, { token: src.token });
+  const r = await esri(`${src.url}/query`, { where: where || "1=1", returnIdsOnly: "true" });
   return (r.objectIds || []).slice().sort((a, b) => a - b);
 }
 /** 1 行の今の値（なければ null）。 */
 async function fetchRow(src, oid) {
-  const r = await esri(`${src.url}/query`, { objectIds: String(oid), outFields: "*", returnGeometry: "false" }, { token: src.token });
+  const r = await esri(`${src.url}/query`, { objectIds: String(oid), outFields: "*", returnGeometry: "false" });
   return r.features && r.features.length ? r.features[0].attributes || {} : null;
 }
 
@@ -910,7 +954,7 @@ async function applyEdits(src, { adds = [], updates = [], deletes = [] }) {
   if (adds.length) params.adds = JSON.stringify(adds.map((a) => ({ attributes: { ...a, ...stampValues(src, true, when) } })));
   if (updates.length) params.updates = JSON.stringify(updates.map((a) => ({ attributes: { ...a, ...stampValues(src, false, when) } })));
   if (deletes.length) params.deletes = deletes.join(",");
-  const r = await esri(`${src.url}/applyEdits`, params, { token: src.token });
+  const r = await esri(`${src.url}/applyEdits`, params);
   const results = [...(r.addResults || []), ...(r.updateResults || []), ...(r.deleteResults || [])];
   const failed = results.filter((x) => !x.success);
   if (failed.length) {
@@ -928,13 +972,32 @@ function signInRoots() {
   if (S.cfg) for (const s of [...S.cfg.sats, ...S.cfg.sensors, ...S.cfg.aliases]) roots.add(serverRoot(s.url));
   return [...roots];
 }
-function signIn(root, reason) {
+function signIn(root, reason, url) {
   if (pendingSignIns.has(root)) return pendingSignIns.get(root);
-  const p = signInDialog(root, reason).finally(() => pendingSignIns.delete(root));
+  const rule = signInRuleFor(url || root);
+  const p = (async () => {
+    if (rule && rule.method === "iwa" && !windowsTried.has(root)) {
+      // 設定ファイルの signIn が統合 Windows 認証: 聞かずにポータルで取る（ブラウザが Windows のサインインを付ける）。
+      try { await windowsToken(root, rule); showSignState(); return true; } catch (e) { windowsTried.add(root); reason = `${reason}。統合 Windows 認証で取れない: ${e.message}`; }
+    }
+    return signInDialog(root, reason, rule);
+  })().finally(() => pendingSignIns.delete(root));
   pendingSignIns.set(root, p);
   return p;
 }
-async function signInDialog(root, reason) {
+const windowsTried = new Set();
+/** 統合 Windows 認証のポータル（signIn の iwa）のトークン: ポータルの generateToken を、ブラウザの Windows のサインインで。 */
+async function windowsToken(root, rule) {
+  const r = await esri(`${rule.portal}/sharing/rest/generateToken`, { request: "getToken", client: "requestip", expiration: "240" }, { noToken: true, windows: true });
+  if (!r.token) throw new Error("トークンが発行されなかった");
+  let user = "Windows";
+  try {
+    const me = await esri(`${rule.portal}/sharing/rest/community/self`, { token: r.token }, { noToken: true, windows: true });
+    if (me && me.username) user = me.username;
+  } catch (e) { /* 名前は出さないだけ */ }
+  tokens.set(root, { token: r.token, user, expires: isNum(r.expires) ? r.expires : 0 });
+}
+async function signInDialog(root, reason, rule) {
   const remembered = store.get(STORE_LOGIN) || "";
   const user = el("input", { type: "text", value: remembered, autocomplete: "username" });
   const pass = el("input", { type: "password", autocomplete: "current-password" });
@@ -946,13 +1009,17 @@ async function signInDialog(root, reason) {
     token: el("div", { class: "hidden" }, field2("トークン", pasted)),
     browser: el("div", { class: "hidden" }, el("p", { class: "note", text: "ブラウザがサーバーにサインイン済みの資格情報（統合 Windows 認証・Cookie）を要求に付ける。サーバーの CORS の設定でこのページが許されている必要がある" })),
   };
-  let mode = "password";
+  let mode = rule && rule.method === "iwa" ? "browser" : rule && rule.method === "saml" ? "token" : "password";
+  for (const [n, p] of Object.entries(panes)) p.classList.toggle("hidden", n !== mode);
   for (const [k, label] of [["password", "ユーザー名とパスワード"], ["token", "トークンを貼り付け"], ["browser", "ブラウザの資格情報（統合 Windows 認証など）"]]) {
     how.append(el("label", {}, el("input", { type: "radio", name: "how", value: k, checked: k === mode, onchange: () => { mode = k; for (const [n, p] of Object.entries(panes)) p.classList.toggle("hidden", n !== k); } }), label));
   }
   setTimeout(() => (remembered ? pass : user).focus(), 30);
   const ok = await modal("サインイン", [
     el("p", {}, el("b", { text: root }), reason ? el("span", { class: "note", text: `（${reason}）` }) : null),
+    rule ? el("p", { class: "note", text: rule.method === "saml"
+      ? `設定ファイルの signIn「${rule.label}」は SAML。ユーザー名とパスワードは通らないので、ポータル（${rule.portal}）にブラウザでサインインして発行したトークンを貼り付ける`
+      : `設定ファイルの signIn「${rule.label}」（${PC.signInMethods.find(([k]) => k === rule.method)[1]}）` }) : null,
     how, panes.password, panes.token, panes.browser,
   ], [{ label: "やめる", value: null }, { label: "サインイン", value: true, cls: "primary" }], async () => {
     if (mode === "token") {
@@ -960,7 +1027,10 @@ async function signInDialog(root, reason) {
       tokens.set(root, { token: pasted.value.trim(), user: "（トークン）", expires: 0 });
       return true;
     }
-    if (mode === "browser") { sendCredentials = true; tokens.delete(root); return true; }
+    if (mode === "browser") {
+      if (rule && rule.method === "iwa") { await windowsToken(root, rule); return true; }
+      sendCredentials = true; tokens.delete(root); return true;
+    }
     if (!user.value.trim() || !pass.value) throw new Error("ユーザー名とパスワードを入れる");
     const info = await esri(`${root}/rest/info`, {}, { noToken: true });
     const auth = info.authInfo || {};
@@ -1395,7 +1465,7 @@ function welcome() {
       el("li", {}, "左の一覧から衛星を選んで直す。「＋ 衛星を追加」で新しい衛星")),
     el("div", { class: "drop", text: "設定ファイル（.json・.jsonc）をここに落とす" }),
     last && last.config ? el("p", {}, el("button", { type: "button", onclick: () => openConfigText(JSON.stringify(last.config), last.name, false) }, `前回の設定ファイル（${last.name}、${localTime(last.at)}）で開く`),
-      el("span", { class: "note", text: " token はブラウザに控えないので、要ればサインインする" })) : null);
+      el("span", { class: "note", text: " サインインはブラウザに控えないので、要ればサインインし直す" })) : null);
 }
 function overview(all) {
   const box = el("div", {});

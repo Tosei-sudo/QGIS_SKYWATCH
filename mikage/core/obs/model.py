@@ -233,7 +233,6 @@ class ObservationStoreConfig:
     label: str
     url: str
     fields: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_OBSERVATION_FIELDS))
-    token: Optional[str] = None
     where: Optional[str] = None
     #: False: deleting removes the feature instead of marking it.
     soft_delete: bool = True
@@ -319,7 +318,7 @@ def observation_store_of(value: Any, problems: list[str], index: int) -> Optiona
                 mapped[key] = v
             else:
                 problems.append(f"{at} の fields.{key} は属性名で指定")
-    label, token, where = value.get("label"), value.get("token"), value.get("where")
+    label, where = value.get("label"), value.get("where")
     activities = words(value.get("activities"))
     refresh = value.get("refreshMinutes")
     if refresh is not None and not (is_number(refresh) and 0.5 <= refresh <= 1440):
@@ -328,7 +327,6 @@ def observation_store_of(value: Any, problems: list[str], index: int) -> Optiona
     return ObservationStoreConfig(
         label=label if isinstance(label, str) and label else f"観測の保存先 {index + 1}",
         url=layer_url(url),
-        token=token if isinstance(token, str) and token else None,
         fields=mapped,
         where=where.strip() if isinstance(where, str) and where.strip() else None,
         soft_delete=value.get("softDelete") is not False,

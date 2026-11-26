@@ -141,7 +141,6 @@ class Table:
     source: str
     kind: str = ""
     url: str = ""
-    token: Optional[str] = None
     #: The settings file's own condition (always added to the one of the analysis).
     where: Optional[str] = None
     #: Attribute names by role.
@@ -191,7 +190,7 @@ def esri_tables(config: Any) -> list[Table]:
     for x in getattr(c, "request_stores", []) or []:
         add("request", x.label, x)
         if _web(x.history):
-            found.append(("requestHistory", x.label, _Url(x.history, x.token), _roles(x.history_fields)))
+            found.append(("requestHistory", x.label, _Url(x.history), _roles(x.history_fields)))
     for x in getattr(c, "observation_stores", []) or []:
         add("observation", x.label, x)
         add("area", x.label, x.areas)
@@ -221,7 +220,7 @@ def esri_tables(config: Any) -> list[Table]:
         base, what = KINDS[kind]
         name = unique_name(base, taken)
         title = f"{what}（{label}）" if label and label != what else what
-        out.append(Table(name=name, title=title, source="esri", kind=kind, url=entry.url, token=getattr(entry, "token", None),
+        out.append(Table(name=name, title=title, source="esri", kind=kind, url=entry.url,
                          where=getattr(entry, "where", None) or None, roles=roles))
     return out
 
@@ -229,7 +228,6 @@ def esri_tables(config: Any) -> list[Table]:
 @dataclass
 class _Url:
     url: str
-    token: Optional[str] = None
 
 
 def unique_name(base: str, taken: set[str]) -> str:

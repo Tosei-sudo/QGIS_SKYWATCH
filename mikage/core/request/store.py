@@ -92,7 +92,6 @@ class RequestStoreConfig:
     history: Optional[str] = None
     fields: dict = field(default_factory=lambda: dict(DEFAULT_REQUEST_FIELDS))
     history_fields: dict = field(default_factory=lambda: dict(DEFAULT_HISTORY_FIELDS))
-    token: Optional[str] = None
     #: The image catalog (its label) asked whether requests were taken; the first one when absent.
     catalog: Optional[str] = None
     #: Days after its day a request handed out and not found in the catalog is 「未撮像」.
@@ -161,7 +160,7 @@ def request_store_of(value: Any, problems: list[str], index: int) -> Optional[Re
     if changes is not None and (not isinstance(changes, str) or not _FEATURE_LAYER.search(changes.split("?", 1)[0])):
         problems.append(f"{at} の areaChanges は依頼の範囲の変更記録のポリゴンレイヤーの URL（…/FeatureServer/34 など）で指定")
         changes = None
-    label, token, catalog = value.get("label"), value.get("token"), value.get("catalog")
+    label, catalog = value.get("label"), value.get("catalog")
     miss = value.get("missAfterDays")
     from .chances import MOST_DAYS, look_ahead_days
 
@@ -177,7 +176,6 @@ def request_store_of(value: Any, problems: list[str], index: int) -> Optional[Re
         history=layer_url(history) if history else None,
         fields=_fields(value.get("fields"), DEFAULT_REQUEST_FIELDS, f"{at}.fields", problems),
         history_fields=_fields(value.get("historyFields"), DEFAULT_HISTORY_FIELDS, f"{at}.historyFields", problems),
-        token=token if isinstance(token, str) and token else None,
         catalog=catalog if isinstance(catalog, str) and catalog else None,
         miss_after_days=float(miss) if is_number(miss) and miss > 0 else 3,
         groups=layer_url(groups) if groups else None,

@@ -62,21 +62,61 @@ class HealthDialog(QDialog):
         buttons.rejected.connect(self.reject)
         row.addWidget(buttons)
         layout.addLayout(row)
+        self._sign_in_item = None
+        context.sign_in.changed.connect(self._show_sign_in)
+
+    def _signed(self) -> list:
+        """(level, line) of each `signIn` entry, as qgis_io/sign_in_io.py knows them now."""
+        out = []
+        for state in self.context.sign_in.states.values():
+            level = PROBLEM if state.problem else NOTE if state.asking or (state.rule.method == "iwa" and state.user is None) else OK
+            out.append((level, state.text()))
+        return out
+
+    def _show_sign_in(self) -> None:
+        """The sign-in at the top: who the portals say is signed in, or why not."""
+        if self._sign_in_item is not None:
+            index = self.tree.indexOfTopLevelItem(self._sign_in_item)
+            if index >= 0:
+                self.tree.takeTopLevelItem(index)
+            self._sign_in_item = None
+        signed = self._signed()
+        if not signed:
+            return
+        levels = {level for level, _ in signed}
+        level = PROBLEM if PROBLEM in levels else NOTE if NOTE in levels else OK
+        item = QTreeWidgetItem([level, tr("サインイン（signIn）"), ""])
+        item.setForeground(0, QBrush(QColor(COLORS[level])))
+        children = []
+        for child_level, line in signed:
+            child = QTreeWidgetItem([line])
+            child.setForeground(0, QBrush(QColor(COLORS[child_level])))
+            child.setToolTip(0, line)
+            item.addChild(child)
+            children.append(child)
+        self.tree.insertTopLevelItem(0, item)
+        for child in children:
+            child.setFirstColumnSpanned(True)
+        item.setExpanded(True)
+        self._sign_in_item = item
+
+    def done(self, result: int) -> None:
+        try:
+            self.context.sign_in.changed.disconnect(self._show_sign_in)
+        except (TypeError, RuntimeError):
+            pass
+        super().done(result)
 
     def run(self) -> None:
         """Asks every service (in a task)."""
         if self._task is not None:
             return
+        self.context.sign_in.check()
         config = self.context.config
         client = self.context.esri()
-        tokens = {}
-
-        # Tokens are read here (the authentication database is not for tasks).
-        from ..core.health import targets
-
-        for t in targets(config):
-            tokens[t.url] = self.context.token_for(t.url, t.token)
         self.tree.clear()
+        self._sign_in_item = None
+        self._show_sign_in()
         self.copy_button.setEnabled(False)
         self.again_button.setEnabled(False)
         self.summary.setText(tr("点検中…"))
@@ -91,7 +131,7 @@ class HealthDialog(QDialog):
             self.again_button.setEnabled(True)
             self.summary.setText(tr("点検に失敗: {m}").format(m=message))
 
-        self._task = run_task(tr("接続と表の点検"), lambda task: check_all(client, config, lambda url, _t: tokens.get(url), task.isCanceled),
+        self._task = run_task(tr("接続と表の点検"), lambda task: check_all(client, config, task.isCanceled),
                               finished, failed)
 
     def show_results(self, results: list[Result]) -> None:
@@ -105,6 +145,8 @@ class HealthDialog(QDialog):
             self.summary.setText(tr("{n} 件: 問題 {p}・注意 {w}・OK {ok}（{at}）").format(
                 n=len(results), p=problems, w=notes, ok=len(results) - problems - notes, at=self.checked_at))
         self.tree.clear()
+        self._sign_in_item = None
+        self._show_sign_in()
         order = {PROBLEM: 0, NOTE: 1, OK: 2}
         for r in sorted(results, key=lambda r: order[r.level]):
             item = QTreeWidgetItem([r.level, r.target.name, r.target.url])
@@ -127,7 +169,7 @@ class HealthDialog(QDialog):
         self.copy_button.setEnabled(bool(results))
 
     def text(self) -> str:
-        return report_text(self.results, self.checked_at, self.context.source or "")
+        return report_text(self.results, self.checked_at, self.context.source or "", [line for _level, line in self._signed()])
 
     def copy(self) -> Optional[str]:
         if not self.results:

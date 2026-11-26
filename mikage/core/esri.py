@@ -200,10 +200,13 @@ class EsriClient:
     def _ask_renewing(self, url: str, params: dict[str, str], token: Optional[str]) -> dict[str, Any]:
         try:
             return self._ask(url, params, token)
-        except InvalidTokenError:
+        except InvalidTokenError as error:
             fresh = self.renew(url) if self.renew else None
             if not fresh:
-                raise
+                if token:
+                    raise
+                # (The token the sign-in put in the request's headers, core/sign_in.py, could not be asked again.)
+                raise EsriError(code="E203", detail=error.detail) from None
             return self._ask(url, params, fresh)
 
     def _ask(self, url: str, params: dict[str, str], token: Optional[str]) -> dict[str, Any]:
@@ -229,7 +232,8 @@ class EsriClient:
             message = _redact(str(error.get("message") or ""), token)
             details = [_redact(str(d), token) for d in error.get("details") or [] if d]
             said = f"{_address(url)}：{code} " + " ".join([message, *details]).strip()
-            if token and code in (498, 499):
+            if code in (498, 499) and (token or self.renew is not None):
+                # A token the client sent, or one its transport sent (the sign-in's headers): asked again (`renew`).
                 raise InvalidTokenError(detail=said)
             if code in (498, 499, 403):
                 raise EsriError(code="E202" if token else "E203", detail=said)

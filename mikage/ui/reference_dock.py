@@ -659,12 +659,6 @@ class ReferenceDock(PluginDock):
         task.taskCompleted.connect(lambda: self._tasks.remove(task) if task in self._tasks else None)
         task.taskTerminated.connect(lambda: self._tasks.remove(task) if task in self._tasks else None)
 
-    def _tokens(self):
-        s = self.settings
-        token = self.context.token_for(s.layer.url, s.layer.token)
-        links = self.context.token_for(s.links.url, s.links.token) if s.links is not None else None
-        return token, links
-
     def reload(self, then: Optional[Callable[[], None]] = None, keep: Optional[str] = None) -> None:
         """Reads the infos of the period again (in a task), then lists them (the one chosen stays chosen)."""
         s = self.settings
@@ -678,7 +672,7 @@ class ReferenceDock(PluginDock):
         self._again = False
         chosen = keep or (self.chosen().id if self.chosen() else None)
         client = self.context.esri()
-        token, _links = self._tokens()
+        token = None
         days = self.period_days()
         since = time.time() * 1000 - days * 86_400_000 if days else None
 
@@ -722,7 +716,7 @@ class ReferenceDock(PluginDock):
         if s is None or s.links is None or info.id in self.link_cache:
             return
         client = self.context.esri()
-        _token, token = self._tokens()
+        token = None
 
         def done(links) -> None:
             self.link_cache[info.id] = links
@@ -833,7 +827,7 @@ class ReferenceDock(PluginDock):
             self.say(self.tr("参考情報の紐付けは使えない（管理者に連絡: referenceInfo.links）"))
             return
         client = self.context.esri()
-        token, links_token = self._tokens()
+        token = links_token = None
 
         def work(_task):
             links = load_links(client, s, items=list(items), token=links_token)
@@ -858,7 +852,7 @@ class ReferenceDock(PluginDock):
         if s is None or s.links is None:
             return False
         client = self.context.esri()
-        token, links_token = self._tokens()
+        token = links_token = None
 
         def work(_task):
             links = load_links(client, s, items=list(items), token=links_token)
@@ -904,7 +898,7 @@ class ReferenceDock(PluginDock):
         if s is None or s.links is None or not info_ids or not targets:
             return
         client = self.context.esri()
-        _token, token = self._tokens()
+        token = None
 
         def done(result) -> None:
             added, skipped = result
@@ -925,7 +919,7 @@ class ReferenceDock(PluginDock):
         if s is None or not links:
             return
         client = self.context.esri()
-        _token, token = self._tokens()
+        token = None
 
         def done(n: int) -> None:
             for x in links:
@@ -981,7 +975,7 @@ class ReferenceDock(PluginDock):
         """Saves the info (in a task), then reads the list again with it chosen."""
         s = self.settings
         client = self.context.esri()
-        token, _links = self._tokens()
+        token = None
         new = info.oid is None
 
         def done(saved: ReferenceInfo) -> None:
@@ -1019,7 +1013,7 @@ class ReferenceDock(PluginDock):
             return
         s = self.settings
         client = self.context.esri()
-        token, links_token = self._tokens()
+        token = links_token = None
 
         def done(removed: int) -> None:
             if self.focus is not None:
@@ -1083,12 +1077,12 @@ class ReferenceDock(PluginDock):
         if s is None:
             raise ValueError("参考情報は使えない（管理者に連絡: referenceInfo）［E703］")
         client = self.context.esri()
-        token, links_token = self._tokens()
+        token = links_token = None
         reliabilities, kinds = self.reliabilities(), self.kinds()
         book = self.area_book()
         named = book.settings if book is not None else None
         listed = book.list if book is not None and named is not None else None
-        area_tokens = {k: self.context.token_for(x.url, x.token) for k, x in
+        area_tokens = {k: None for k, x in
                        (("areas", named.areas), ("categories", named.categories), ("countries", named.countries)) if x is not None} \
             if named is not None else {}
         needs = any(isinstance(r, dict) and r.get("area") for r in data.rows)

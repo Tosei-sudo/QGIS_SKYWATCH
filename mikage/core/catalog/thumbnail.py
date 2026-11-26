@@ -17,8 +17,9 @@ put in where `{…}` stands (as the settings file's other patterns, `{now:%Y}`):
   own vertex nearest each corner of the box around it (the image's real
   corner when it lies askew). A number format sets the digits
   (`{ur.lat:.6f}`), `@3857` gives Web Mercator metres (`{bbox@3857}`);
-* `{width}` `{height}`: the size asked for (pixels), `{token}` the
-  catalog's token (empty with an authentication configuration).
+* `{width}` `{height}`: the size asked for (pixels); `{token}` is left
+  empty (the settings file has no tokens: the address's server is signed in
+  to by `signIn` or the authentication chosen, core/sign_in.py).
 
 `{{` and `}}` are braces. In an http(s) address the text values are
 percent-encoded (spaces, `&`, `#` …; `/` and `:` kept); a pattern that is not
@@ -435,7 +436,6 @@ class FootprintLayer:
     format: str = ""
     where: Optional[str] = None
     max: Optional[int] = None
-    token: Optional[str] = None
     #: Each line's background from an attribute (`background`).
     background: Optional[RowColors] = None
 
@@ -449,7 +449,7 @@ class FootprintLayer:
 
 
 def footprint_layers_of(value: Any, problems: list[str], at: str) -> list[FootprintLayer]:
-    """`footprintLayers` of a catalog: an array of `{ "label", "url", "fields", "format", "where", "max", "token", "background" }`."""
+    """`footprintLayers` of a catalog: an array of `{ "label", "url", "fields", "format", "where", "max", "background" }`."""
     from ..esri import condition_problem
     from ..util import is_name, is_url, layer_url
 
@@ -492,12 +492,11 @@ def footprint_layers_of(value: Any, problems: list[str], at: str) -> list[Footpr
             problems.append(f"{where}.max はカードに出す地物の数の上限（1〜{HARD_LIMIT}。書かなければすべて）で指定")
             most = None
         label = entry.get("label")
-        token = entry.get("token")
         background = row_colors_of(entry.get("background"), problems, f"{where}.background")
         out.append(FootprintLayer(
             label=label.strip() if isinstance(label, str) and label.strip() else f"レイヤー {i + 1}", url=layer_url(url),
             fields=tuple(dict.fromkeys(names)), format=fmt, where=condition.strip() if isinstance(condition, str) and condition.strip() else None,
-            max=int(most) if most is not None else None, token=token if isinstance(token, str) and token else None,
+            max=int(most) if most is not None else None,
             background=background))
     return out
 

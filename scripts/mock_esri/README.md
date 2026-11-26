@@ -24,7 +24,7 @@ python scripts/mock_esri/mock_esri.py
 | `--data <フォルダ>` | データの置き場所（既定 `scripts/mock_esri/data`） |
 | `--reset` | データを消してサンプルから作り直す |
 | `--empty` | サンプルの地物を入れない（レイヤーの定義だけ） |
-| `--token secret` | トークン必須にする（`token=` か `X-Esri-Authorization: Bearer` で `secret`、または `generateToken` で発行したもの）。設定ファイルの各サービスに `token` を書く |
+| `--token secret` | トークン必須にする（`token=` か `X-Esri-Authorization: Bearer` で `secret`、または `generateToken` で発行したもの）。プラグインでは「設定…」の表で、このサーバーに認証設定 ESRI-Token（このトークン）を選ぶ（設定ファイルに `token` は書かない） |
 | `--services 定義.json` | レイヤーを足す（下記）。複数可 |
 
 ```

@@ -4,6 +4,15 @@ authentication configurations (`authcfg`: OAuth2, ESRI token, basic …)
 apply. Requests that wait for their answer are made only off the main
 thread, inside a QgsTask (and stop when it is cancelled); on the main
 thread they are refused.
+
+The settings file's `signIn` (core/sign_in.py) decides first, by the
+request's host: an `iwa` portal's own pages are asked with the Windows logon
+(core/windows_auth.py, not QGIS's stack) and its servers' services get the
+portal token in headers (not the API-header authcfg made for QGIS's own
+requests, which may hold the token before last); a `saml` portal's hosts get the OAuth2
+authentication configuration made for it; the person's choice of
+authentication configuration applies only to hosts that `signIn` does not
+name.
 """
 from __future__ import annotations
 
@@ -19,6 +28,7 @@ from qgis.PyQt.QtCore import QByteArray, QThread, QUrl
 from qgis.PyQt.QtNetwork import QNetworkReply, QNetworkRequest
 from qgis.PyQt.QtWidgets import QApplication
 
+from ..core import sign_in, windows_auth
 from ..core.esri import BusyError, EsriError, UnreachableError, form_body
 from .tasks import Cancelled, current_feedback
 
@@ -217,8 +227,16 @@ def _send(request: QNetworkRequest, authcfg: Optional[str], body: Optional[bytes
     if feedback is not None and feedback.isCanceled():
         raise Cancelled()
     url = request.url().toString()
-    request.setAttribute(QNetworkRequest.Attribute.RedirectPolicyAttribute, QNetworkRequest.RedirectPolicy.NoLessSafeRedirectPolicy)
     limit = _time_limit_ms(url) if limit_ms is None else limit_ms
+    rule = sign_in.rule_for(url)
+    if rule is not None:
+        # An iwa portal's token goes in the headers here (the freshest one, asked again when refused), not its authcfg.
+        authcfg = None if rule.method == "iwa" else sign_in.authcfg_for(rule)
+        if rule.method == "iwa" and sign_in.under_portal(rule, url):
+            return _send_windows(request, url, body, limit, feedback)
+        for name, value in sign_in.headers_for(url, rule).items():
+            request.setRawHeader(name.encode("ascii"), value.encode("utf-8"))
+    request.setAttribute(QNetworkRequest.Attribute.RedirectPolicyAttribute, QNetworkRequest.RedirectPolicy.NoLessSafeRedirectPolicy)
     job = _Job(request, authcfg, body)
     line = _take()
     started = time.monotonic()
@@ -236,6 +254,17 @@ def _send(request: QNetworkRequest, authcfg: Optional[str], body: Optional[bytes
     if job.error is not None:
         raise job.error
     return _answer(job.reply, url, authcfg)
+
+
+def _send_windows(request: QNetworkRequest, url: str, body: Optional[bytes], limit: int, feedback) -> bytes:
+    """A page of an `iwa` portal, asked with the Windows logon (on this thread: these are few and small)."""
+    if not windows_auth.available():
+        raise EsriError(code="E204", detail=f"{_address(url)}：統合 Windows 認証はこの PC では使えない")
+    content_type = request.header(QNetworkRequest.KnownHeaders.ContentTypeHeader) or "application/x-www-form-urlencoded"
+    answer = windows_auth.ask(url, body=body, content_type=str(content_type), timeout=(limit or 60_000) / 1000)
+    if feedback is not None and feedback.isCanceled():
+        raise Cancelled()
+    return answer
 
 
 def _answer(reply, url: str, authcfg: Optional[str]) -> bytes:

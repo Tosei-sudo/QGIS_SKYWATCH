@@ -461,8 +461,8 @@ class EventsDock(PluginDock):
         self._again = None
         chosen = keep or (self.chosen().id if self.chosen() else None)
         client = self.context.esri()
-        token = self.context.token_for(s.layer.url, s.layer.token)
-        link_token = self.context.token_for(s.links.url, s.links.token)
+        token = None
+        link_token = None
 
         def work(_task):
             return load_events(client, s, token), load_links(client, s, None, link_token)
@@ -602,7 +602,7 @@ class EventsDock(PluginDock):
     def save(self, event: Event, then: Optional[Callable[[Event], None]] = None, failed: Optional[Callable[[str], None]] = None) -> None:
         """Saves the event (in a task), then reads the list again with it chosen."""
         s = self.settings
-        client, token = self.context.esri(), self.context.token_for(s.layer.url, s.layer.token)
+        client, token = self.context.esri(), None
 
         def done(saved: Event) -> None:
             if self.status_filter.currentData() and saved.status != self.status_filter.currentData():
@@ -622,7 +622,7 @@ class EventsDock(PluginDock):
         if e is None:
             return
         s = self.settings
-        client, token = self.context.esri(), self.context.token_for(s.layer.url, s.layer.token)
+        client, token = self.context.esri(), None
         status = OPEN if not e.open else CLOSED
 
         def done(saved: Event) -> None:
@@ -641,8 +641,8 @@ class EventsDock(PluginDock):
                                   .format(name=e.name, n=n), yes=self.tr("削除")):
             return
         s = self.settings
-        client, token = self.context.esri(), self.context.token_for(s.layer.url, s.layer.token)
-        link_token = self.context.token_for(s.links.url, s.links.token)
+        client, token = self.context.esri(), None
+        link_token = None
         self._start(self.tr("イベントの削除"), lambda _t: delete_event(client, s, e, token, link_token),
                     lambda removed: self.reload(lambda: self.say(self.tr("「{name}」を削除（紐付け {n} 件）").format(name=e.name, n=removed))))
 
@@ -653,7 +653,7 @@ class EventsDock(PluginDock):
         s = self.settings
         if s is None or not items or not event_ids:
             return
-        client, token = self.context.esri(), self.context.token_for(s.links.url, s.links.token)
+        client, token = self.context.esri(), None
         names = [e.name for e in self.events or [] if e.id in event_ids]
 
         def done(result) -> None:
@@ -714,7 +714,7 @@ class EventsDock(PluginDock):
                                   yes=self.tr("除外")):
             return
         s = self.settings
-        client, token = self.context.esri(), self.context.token_for(s.links.url, s.links.token)
+        client, token = self.context.esri(), None
         self._start(self.tr("イベントから外す"), lambda _t: remove_links(client, s, links, token),
                     lambda n: self.reload(lambda: self.say(self.tr("{n} 件を除外").format(n=n))))
 
@@ -727,7 +727,7 @@ class EventsDock(PluginDock):
             if not ok:
                 return
         s = self.settings
-        client, token = self.context.esri(), self.context.token_for(s.links.url, s.links.token)
+        client, token = self.context.esri(), None
         self._start(self.tr("メモの保存"), lambda _t: set_link_note(client, s, links, note.strip(), token),
                     lambda n: self.reload(lambda: self.say(self.tr("{n} 件のメモを保存").format(n=n))))
 
@@ -893,7 +893,7 @@ class EventsDock(PluginDock):
                 continue
             groups.setdefault(id(c), (c, []))[1].append(x.item_id)
         client = self.context.esri()
-        asks = [(c, ids, self.context.token_for(c.url, c.token)) for c, ids in groups.values()]
+        asks = [(c, ids, None) for c, ids in groups.values()]
 
         def work(_task):
             out = []

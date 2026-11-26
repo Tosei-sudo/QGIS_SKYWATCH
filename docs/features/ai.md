@@ -9,7 +9,7 @@
 - ツールバーかメニュー「AI ▸ 物体検出（AI）…」（Processing の「MIKAGE」にも）: レイヤー・モデル・範囲・解析の画素の大きさ（0 で元の解像度。地図の表示から始まる）を選んで実行し、見つかった物を `class`・`class_id`・`score`（回転矩形なら `angle`）と画像の情報（`image`・`image_id`・`image_time`・`model`・`detected_at`・`note`）付きのポリゴンレイヤーにする。読めるモデルはビューアと同じ（YOLOv8/11 の検出・回転矩形・セグメンテーション、YOLOX、RT-DETR、Detectron2 など。入力の大きさとクラスはモデルの情報から読み、`aiModels` の値が優先）。レイヤーは表示のとおり（補正・スタイル込み）に描いて解析し、大きい範囲は区切って重なりを付けて解析する。詳細設定で確信度・重なり（IoU）・タイルの重なり・クラスの絞り込み
 - メニューの「AI ▸ クリック抽出（AI）」（地図ツール）: Segment Anything（SAM・MobileSAM など）のエンコーダーとデコーダーで、クリックした物の輪郭を描く。Shift+クリックで同じ物に足す点、Alt+クリックで除く点。地図の左上のパネルで、モデルの選択・「元に戻す」・「レイヤーにする」（一時レイヤー「AI 抽出」）。表示を動かすと次のクリックで描き直して解析する
 - `aiModels`: ビューアと同じ形。検出は `{"label", "url", "task", "inputSize", "classes", "mean", "std", "channels", "format", "maxDetections", …}`（プラグインだけの `kinds` で、観測記録へ取り込むときのクラス → 種別の対応も）、SAM は `{"label", "encoder", "decoder", "inputSize", "mean", "std"}`。`url`・`encoder`・`decoder` は URL か、設定ファイルからの相対パス・絶対パス。URL のモデルは初回に読み込んでプロファイルの `ai_models` に保存する（「設定…」の認証設定を使う）
-- メニューの「AI ▸ 検出結果を DB へ転記…」: AI のレイヤー（`class` の属性があるポリゴン・ポイントのレイヤー）の地物を、設定ファイルの `detectionOutputs` の Esri フィーチャーレイヤーへ書き込む。属性は役割ごとの対応（画像ID・ファイル名・撮像日時・検出日時・転記日時・クラス・クラス番号・確信度・モデル・状態・経度・緯度・面積・長辺・短辺・向き・備考）で、型に合わせて変換。状態はモデルのまま（AI）・人が直した（修正: 形かクラスを変更）・人が加えた（手動）。新しい地物は追加、転記後に変えた地物は更新、残りは送らない（何を送ったかはレイヤーに記録し、プロジェクトと一緒に保存）。「選択中の地物だけ」も可。ポイントのレイヤーへはポリゴンの中の点を送る。`detectionOutputs` の形はビューアと同じ（`{"label", "url", "fields": {役割: 属性名}, "statusValues", "constants", "token"}`。プラグインだけの `aiResults` はビューアでは無視）。転記した結果はドック「AI結果」でほかの人も確かめられる（[AI結果](#ai結果外部aiプラグイン内の物体検出)）
+- メニューの「AI ▸ 検出結果を DB へ転記…」: AI のレイヤー（`class` の属性があるポリゴン・ポイントのレイヤー）の地物を、設定ファイルの `detectionOutputs` の Esri フィーチャーレイヤーへ書き込む。属性は役割ごとの対応（画像ID・ファイル名・撮像日時・検出日時・転記日時・クラス・クラス番号・確信度・モデル・状態・経度・緯度・面積・長辺・短辺・向き・備考）で、型に合わせて変換。状態はモデルのまま（AI）・人が直した（修正: 形かクラスを変更）・人が加えた（手動）。新しい地物は追加、転記後に変えた地物は更新、残りは送らない（何を送ったかはレイヤーに記録し、プロジェクトと一緒に保存）。「選択中の地物だけ」も可。ポイントのレイヤーへはポリゴンの中の点を送る。`detectionOutputs` の形はビューアと同じ（`{"label", "url", "fields": {役割: 属性名}, "statusValues", "constants"}`。プラグインだけの `aiResults` はビューアでは無視。ビューアの `token` はプラグインでは使わない（問題の一覧に出る。サインインは `signIn`））。転記した結果はドック「AI結果」でほかの人も確かめられる（[AI結果](#ai結果外部aiプラグイン内の物体検出)）
 - 実行に `onnxruntime` が要る。Windows 版の zip（下の「導入」）には同梱。ほかは QGIS の Python に入れる: OSGeo4W シェルで `python -m pip install onnxruntime`、macOS は `/Applications/QGIS.app/Contents/MacOS/bin/python3 -m pip install onnxruntime`、Linux は `python3 -m pip install onnxruntime`。GPU 版（`onnxruntime-gpu`・`onnxruntime-directml`）を入れれば GPU で動く
 
 ## AI 学習（物体検出）
@@ -83,7 +83,7 @@
     "continuation": { "rules": [{ "label": "外形の中", "centerInRecord": true }] }, // この出どころだけの継続の判定（下記。書いたキーだけ aiContinuation より優先）
     "continueRadius": 50,                  // 古い書き方: これより近い（m）前後の画像のモノは確かなら自動で継続（0 で自動にしない）
     "candidateRadius": 300,                // 古い書き方: これより近い（m）ものを継続の候補に（0 で照合しない）
-    "maxResults": 2000, "token": "…" }
+    "maxResults": 2000 }
 ]
 ```
 

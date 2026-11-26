@@ -559,7 +559,6 @@ def _check(info, source) -> None:
 def load_outages(client: EsriClient, source, token: Optional[str] = None,
                  cancelled: Optional[Callable[[], bool]] = None) -> list[Outage]:
     """Every outage of the table (the history too), the latest start first."""
-    token = token or source.token
     info = client.layer(source.url, token, refresh=True)
     _check(info, source)
     from .. import edit_stamp
@@ -623,7 +622,6 @@ def save_outage(client: EsriClient, source, o: Outage, token: Optional[str] = No
     problems = check_outage(o)
     if problems:
         raise ValueError("、".join(problems))
-    token = token or source.token
     info = client.layer(source.url, token, refresh=True)
     _check(info, source)
     if o.for_system and not takes_systems(info, source):
@@ -658,7 +656,7 @@ def delete_outages(client: EsriClient, source, outages: Sequence[Outage], token:
     if not mine:
         return [], failed
     try:
-        results = client.delete_features(source.url, [o.object_id for o in mine], token or source.token)
+        results = client.delete_features(source.url, [o.object_id for o in mine], token)
     except EsriError as error:
         return [], failed + [f"{o.target}: {error}" for o in mine]
     by_oid = {r.get("objectId"): r for r in results if isinstance(r, dict)}
@@ -673,7 +671,7 @@ def delete_outages(client: EsriClient, source, outages: Sequence[Outage], token:
 
 
 def satellite_outages_of(value: Any, problems: list[str]):
-    """`satelliteOutages`: the table of outages (URL or `{ "url", "fields", "where", "token" }`)."""
+    """`satelliteOutages`: the table of outages (URL or `{ "url", "fields", "where" }`)."""
     from ..sources import esri_source_of
 
     return esri_source_of(value, "satelliteOutages", DEFAULT_OUTAGE_FIELDS, problems, editable=True)

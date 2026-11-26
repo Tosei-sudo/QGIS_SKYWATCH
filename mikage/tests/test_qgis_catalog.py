@@ -474,7 +474,6 @@ def test_watches_notify_new_images_only(plugin, monkeypatch):
     assert sorted(n.image_id for n in listed) == ["A", "B"] and all(n.read and n.earlier for n in listed)
     assert notices.notices.topLevelItem(0).text(0) == "設定前から" and p.notices_action.text() == "通知"
     assert sorted(notices.store().watch(watch.id).seen) == ["A", "B"]
-    assert notices.store().watch(watch.id).catalog.token is None
     assert "条件に合う画像 2 件" in notices.status.text()
     now = time.time() * 1000
     images.add({"IMG_ID": "D", "ACQ": now - DAY, "SENSOR": "S1", "OFF_NADIR": 5, "AZ": 90, "PATH": "https://x.example/d.tif"}, ring(139, 35, 140, 36))

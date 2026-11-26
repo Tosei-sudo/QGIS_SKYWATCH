@@ -90,12 +90,12 @@ def test_asks_every_geocoder_keeps_their_order_and_reports_the_ones_that_fail():
         GeocoderConfig("csv", "社内", "https://csv.test/places.csv"),
         GeocoderConfig("gsi", "地理院", "https://gsi.test/AddressSearch"),
         GeocoderConfig("nominatim", "OSM", "https://osm.test"),
-        GeocoderConfig("features", "施設", "https://esri.test/Places/FeatureServer/0/", token="t", field="NAME"),
+        GeocoderConfig("features", "施設", "https://esri.test/Places/FeatureServer/0/", field="NAME"),
     ], get, esri)
     places, errors = search.search("場所")
     assert [(p.name, p.source) for p in places] == [("社内の場所", "社内"), ("地理院の場所", "地理院"), ("施設の場所", "施設")]
     assert errors == ["OSM: HTTP 500"]
-    assert ("https://esri.test/Places/FeatureServer/0/query", "NAME LIKE '%場所%' ESCAPE '\\'", "t") in asked
+    assert ("https://esri.test/Places/FeatureServer/0/query", "NAME LIKE '%場所%' ESCAPE '\\'", None) in asked
     # The CSV is read once.
     search.search("社内")
     assert asked.count("https://csv.test/places.csv") == 1

@@ -48,6 +48,6 @@ def place_search_of(context) -> PlaceSearch:
     """The place search of the settings now (none asked when the settings have no `geocoders`)."""
 
     def ask_esri(url: str, params: dict, token: Optional[str]) -> dict:
-        return context.esri().ask(url, params, context.token_for(url, token))
+        return context.esri().ask(url, params, None)
 
     return PlaceSearch(context.config.geocoders, read_bytes, ask_esri, lambda url: resolve_url(context, url))

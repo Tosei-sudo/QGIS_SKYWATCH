@@ -335,6 +335,65 @@ def test_signed_in_run_uses_the_server_token(tmp_path, monkeypatch):
     assert load_history(EsriClient(fake), store, None)[0].captured == "撮像済み"
 
 
+def test_the_settings_files_sign_in_is_the_transports(monkeypatch):
+    """signIn: an iwa server with the portal's token in a header, the portal with the Windows logon, a none one as it is."""
+    from mikage.core import sign_in
+
+    config, problems = parse_config({"signIn": [
+        {"method": "iwa", "portal": "https://portal.example/portal", "domains": ["*.example"]},
+        {"method": "none", "domains": ["open.example"]},
+    ]})
+    assert problems == []
+    asked, sent = [], []
+
+    def windows(url, form=None, timeout=60.0, context=None, ssl_context=None, **_kw):
+        asked.append(url)
+        return json.dumps({"token": f"P{len(asked)}", "expires": time.time() * 1000 + 3_600_000}).encode()
+
+    def send(url, form, headers=None):
+        sent.append((url, dict(form), dict(headers or {})))
+        return b"{}"
+
+    class Password:
+        def token(self, url):
+            return "PW"
+
+        def renew(self, url):
+            return "PW2"
+
+    monkeypatch.setattr(follow_job.windows_auth, "available", lambda: True)
+    monkeypatch.setattr(follow_job.windows_auth, "ask", windows)
+    try:
+        assert follow_job.set_sign_in(config) == []
+        signed = follow_job.signed_transport(send, Password())
+        signed("https://gis.example/server/rest/services/R/FeatureServer/0", {"f": "json"})
+        signed("https://open.example/arcgis/rest/services/X/FeatureServer/0", {"f": "json"})
+        signed("https://other.test/arcgis/rest/services/X/FeatureServer/0", {"f": "json"})
+        signed("https://portal.example/portal/sharing/rest/portals/self", {"f": "json"})
+        assert asked[0] == "https://portal.example/portal/sharing/rest/generateToken"
+        assert asked[1] == "https://portal.example/portal/sharing/rest/portals/self"
+        assert sent[0][2] == {"X-Esri-Authorization": "Bearer P1", "Referer": "https://portal.example"} and "token" not in sent[0][1]
+        assert sent[1][2] == {} and "token" not in sent[1][1]
+        assert sent[2][2] == {} and sent[2][1]["token"] == "PW"
+        renew = follow_job.renewing(Password())
+        # (Asked a moment ago: that one, not asked again at once.)
+        assert renew("https://gis.example/server/rest/services/R/FeatureServer/0") == "P1" and len(asked) == 2
+        assert renew("https://other.test/x") == "PW2" and renew("https://open.example/x") is None
+    finally:
+        sign_in.set_rules([])
+        sign_in.set_tokens(None)
+    # Not on Windows, and SAML: said in the log.
+    monkeypatch.setattr(follow_job.windows_auth, "available", lambda: False)
+    config, _p = parse_config({"signIn": [{"method": "iwa", "portal": "https://portal.example/portal"},
+                                          {"method": "saml", "portal": "https://p2.example/portal", "clientId": "abc"}]})
+    try:
+        notes = follow_job.set_sign_in(config)
+    finally:
+        sign_in.set_rules([])
+        sign_in.set_tokens(None)
+    assert len(notes) == 2 and "Windows でのみ" in notes[0] and "SAML" in notes[1]
+
+
 def test_passwords_of_credentials():
     assert password_of("pä ss".encode("utf-16-le")) == "pä ss"
     assert password_of("パスワード".encode("utf-16-le")) == "パスワード"
@@ -378,7 +437,7 @@ def test_times_of_a_day_settled_run_by_run():
     now = time.time() * 1000
 
     def run():
-        return follow_store(client, parsed, store, lambda url, token: token, lambda: NO_NAMES, now)
+        return follow_store(client, parsed, store, lambda: NO_NAMES, now)
 
     assert run()[0] == "2 行を照合、撮像済み 1 件・未撮像 0 件を確認"
     rows = {r.occurrence: r for r in load_history(client, store, None)}

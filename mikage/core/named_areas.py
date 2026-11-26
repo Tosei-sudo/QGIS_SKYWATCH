@@ -137,13 +137,13 @@ class NamedAreaSettings:
         return int(rest) if rest.isdigit() else None
 
 
-_KEYS = ("url", "fields", "where", "token", "categories", "countries", "idPrefix", "idDigits", "label")
+_KEYS = ("url", "fields", "where", "categories", "countries", "idPrefix", "idDigits", "label")
 
 
 def named_area_settings_of(value: Any, problems: list[str]) -> Optional[NamedAreaSettings]:
     """
     `namedAreas`: the named area layer's URL, or `{ "url", "fields", "where",
-    "token", "categories", "countries", "idPrefix", "idDigits", "label" }`
+    "categories", "countries", "idPrefix", "idDigits", "label" }`
     (`categories` the TBL_AREA_CATEGORY table, `countries` TBL_COUNTRY);
     None when it cannot be used.
     """
@@ -154,9 +154,9 @@ def named_area_settings_of(value: Any, problems: list[str]) -> Optional[NamedAre
         problems.append(f'{at} は地名のレイヤーの URL か {{ "url", "categories", "countries" }} で指定')
         return None
     for k in value:
-        if k not in _KEYS:
+        if k not in _KEYS and k != "token":  # (a token: said once for the whole file, config.token_problem)
             problems.append(f"{at}.{k} は使えないキー（{'・'.join(_KEYS)}）")
-    areas = esri_source_of({k: v for k, v in value.items() if k in ("url", "fields", "where", "token")}, at,
+    areas = esri_source_of({k: v for k, v in value.items() if k in ("url", "fields", "where")}, at,
                            DEFAULT_PLACE_FIELDS, problems)
     if areas is None:
         return None
@@ -322,7 +322,7 @@ ORG_ROLES = ("use", "kana", "alias", "country", "category", "parent", "ownerGrou
 
 
 def _layer(client: EsriClient, source: EsriSource, token: Optional[str]):
-    info = client.layer(source.url, token or source.token, refresh=True)
+    info = client.layer(source.url, token, refresh=True)
     if info.geometry_type != "esriGeometryPolygon":
         raise EsriError(f"地名のレイヤーがポリゴンのレイヤーでない（管理者に連絡: {info.geometry_type or '形状なし'}）", code="E705")
     if source.fields["name"] not in info.field_types:
@@ -339,7 +339,7 @@ def read_shapes(client: EsriClient, source: EsriSource, oids: Sequence[int], tok
         if cancelled and cancelled():
             break
         chunk = wanted[i:i + SHAPE_BATCH]
-        rows = client.query_all(source.url, f"{oid_field} IN ({','.join(str(o) for o in chunk)})", token or source.token,
+        rows = client.query_all(source.url, f"{oid_field} IN ({','.join(str(o) for o in chunk)})", token,
                                 out_fields=oid_field, geometry=True, limit=len(chunk) + 10)
         for r in rows:
             oid = (r.get("attributes") or {}).get(oid_field)
@@ -368,7 +368,6 @@ def areas_at(client: EsriClient, settings: NamedAreaSettings, lon: float, lat: f
     the smallest first (「この地域で撮像依頼…」 on the map).
     """
     source = settings.areas
-    token = token or source.token
     info = _layer(client, source, token)
     extra = {"geometry": json.dumps({"x": lon, "y": lat, "spatialReference": {"wkid": 4326}}), "geometryType": "esriGeometryPoint", "inSR": "4326",
              "spatialRel": "esriSpatialRelIntersects"}
@@ -392,7 +391,6 @@ def areas_by_id(client: EsriClient, settings: NamedAreaSettings, ids: Iterable[s
     requests linked to them follow (地域の形に合わせる, core/request/area_follow.py).
     """
     source = settings.areas
-    token = token or source.token
     wanted = sorted({i.strip().upper() for i in ids if i and i.strip()})
     out: dict[str, list[OrgArea]] = {}
     if not wanted:
@@ -418,7 +416,7 @@ def layer_stamp(client: EsriClient, settings: NamedAreaSettings, token: Optional
     """When the named area layer says its data last changed (ms; None when it does not say)."""
     from .analysis_cache import stamp_of
 
-    info = client.layer(settings.areas.url, token or settings.areas.token, refresh=True)
+    info = client.layer(settings.areas.url, token, refresh=True)
     return stamp_of(info.raw)
 
 
@@ -431,7 +429,7 @@ def load_areas(client: EsriClient, settings: NamedAreaSettings, tokens: Optional
     """
     tokens = tokens or {}
     source = settings.areas
-    token = tokens.get("areas") or source.token
+    token = tokens.get("areas")
     info = _layer(client, source, token)
     oid = info.object_id_field
     rows = client.query_all(source.url, source.where or "1=1", token, geometry=False, limit=LIMIT, cancelled=cancelled)
@@ -463,7 +461,7 @@ def area_sort_key(a: OrgArea) -> tuple:
 def load_country_names(client: EsriClient, source: EsriSource, token: Optional[str] = None) -> list[tuple[str, str]]:
     """The countries' codes and names (no borders), by code."""
     f = source.fields
-    rows = client.query_all(source.url, source.where or "1=1", token or source.token, geometry=False, limit=10_000,
+    rows = client.query_all(source.url, source.where or "1=1", token, geometry=False, limit=10_000,
                             out_fields=",".join(dict.fromkeys(v for k, v in f.items() if k in ("code", "name", "active"))))
     out: dict[str, str] = {}
     for r in rows:
@@ -517,9 +515,9 @@ def _values(area: OrgArea, source: EsriSource, types: dict[str, str], lengths: d
 
 def ids_in_use(client: EsriClient, source: EsriSource, token: Optional[str] = None) -> list[tuple[int, str]]:
     """Every row's (object id, 管理番号), whatever the settings' `where` (an id is unique in the whole layer)."""
-    info = client.layer(source.url, token or source.token)
+    info = client.layer(source.url, token)
     oid, name = info.object_id_field, source.fields["id"]
-    rows = client.query_all(source.url, "1=1", token or source.token, out_fields=f"{oid},{name}", geometry=False, limit=LIMIT)
+    rows = client.query_all(source.url, "1=1", token, out_fields=f"{oid},{name}", geometry=False, limit=LIMIT)
     out = []
     for r in rows:
         a = r.get("attributes") or {}
@@ -530,9 +528,9 @@ def ids_in_use(client: EsriClient, source: EsriSource, token: Optional[str] = No
 
 def same_id(client: EsriClient, source: EsriSource, area_id: str, token: Optional[str] = None) -> list[OrgArea]:
     """The rows whose 管理番号 is `area_id` (case aside), whatever the settings' `where`."""
-    info = client.layer(source.url, token or source.token)
+    info = client.layer(source.url, token)
     f = source.fields
-    rows = client.query_all(source.url, f"UPPER({f['id']}) = {quote(area_id.strip().upper())}", token or source.token,
+    rows = client.query_all(source.url, f"UPPER({f['id']}) = {quote(area_id.strip().upper())}", token,
                             out_fields=",".join(dict.fromkeys((info.object_id_field, f["id"], f["name"]))), geometry=False, limit=100)
     return [area_of(r.get("attributes") or {}, f, info.object_id_field) for r in rows]
 
@@ -551,7 +549,6 @@ def save_area(client: EsriClient, settings: NamedAreaSettings, area: OrgArea, to
     rule's, else one the plugin gave: see `number_area`).
     """
     source = settings.areas
-    token = token or source.token
     if "id" not in source.fields:
         raise EsriError("地名のレイヤーの管理番号の役割（id）がない（管理者に連絡: namedAreas.fields.id）", code="E704")
     info = _layer(client, source, token)
@@ -585,8 +582,8 @@ def save_area(client: EsriClient, settings: NamedAreaSettings, area: OrgArea, to
 
 
 def _id_of(client: EsriClient, source: EsriSource, oid: int, token: Optional[str]) -> str:
-    info = client.layer(source.url, token or source.token)
-    rows = client.query_all(source.url, f"{info.object_id_field} = {int(oid)}", token or source.token,
+    info = client.layer(source.url, token)
+    rows = client.query_all(source.url, f"{info.object_id_field} = {int(oid)}", token,
                             out_fields=f"{info.object_id_field},{source.fields['id']}", geometry=False, limit=10)
     return _text((rows[0].get("attributes") or {}).get(source.fields["id"])) if rows else ""
 
@@ -600,7 +597,6 @@ def number_area(client: EsriClient, settings: NamedAreaSettings, area: OrgArea, 
     same moment: the row with the larger object id takes the next number).
     """
     source = settings.areas
-    token = token or source.token
     if area.oid is None:
         return area
     there = _id_of(client, source, area.oid, token)
@@ -628,7 +624,6 @@ def number_blanks(client: EsriClient, settings: NamedAreaSettings, token: Option
     11:52Z: 「全てに付番すること」); how many, and why some were not.
     """
     source = settings.areas
-    token = token or source.token
     info = _layer(client, source, token)
     if source.fields["id"] not in info.field_types:
         raise EsriError(f"地名のレイヤーに管理番号の項目がない（管理者に連絡: {source.fields['id']}）", code="E704")
@@ -747,10 +742,10 @@ def category_sort_key(c: AreaCategory) -> tuple:
 
 def load_categories(client: EsriClient, source: EsriSource, token: Optional[str] = None,
                     cancelled: Optional[Callable[[], bool]] = None) -> list[AreaCategory]:
-    info = client.layer(source.url, token or source.token, refresh=True)
+    info = client.layer(source.url, token, refresh=True)
     if source.fields["id"] not in info.field_types:
         raise EsriError(f"カテゴリーの表に必要な項目がない（管理者に連絡: {source.fields['id']}）", code="E704")
-    rows = client.query_all(source.url, source.where or "1=1", token or source.token, geometry=False, limit=10_000, cancelled=cancelled)
+    rows = client.query_all(source.url, source.where or "1=1", token, geometry=False, limit=10_000, cancelled=cancelled)
     out = [c for c in (category_of(r.get("attributes") or {}, source.fields, info.object_id_field) for r in rows) if c is not None]
     return sorted(out, key=category_sort_key)
 
@@ -823,7 +818,6 @@ def check_category(c: AreaCategory, categories: Sequence[AreaCategory], original
 def save_category(client: EsriClient, source: EsriSource, c: AreaCategory, token: Optional[str] = None,
                   original: Optional[AreaCategory] = None) -> AreaCategory:
     """Adds or updates the category (by its object id, else its id); the category as saved."""
-    token = token or source.token
     info = client.layer(source.url, token, refresh=True)
     types, lengths, f = info.field_types, info.field_lengths, source.fields
     values = {"id": c.id.strip(), "name": c.name.strip(), "nameEn": c.name_en.strip() or None, "parent": c.parent.strip() or None,
@@ -859,7 +853,6 @@ def rename_category_in_areas(client: EsriClient, settings: NamedAreaSettings, ol
                              token: Optional[str] = None) -> int:
     """The areas of category `old` put in `new` (an id changed); how many."""
     source = settings.areas
-    token = token or source.token
     name = source.fields.get("category")
     info = client.layer(source.url, token)
     if not name or name not in info.field_types or old == new:
@@ -911,7 +904,7 @@ def delete_categories(client: EsriClient, source: EsriSource, categories: Sequen
             problems.append(f"{c.name}: 地域が {counts[c.id.casefold()]} 件あるので削除できない（使わないなら「有効」を外す）")
     oids = [c.oid for c in free if c.oid is not None]
     if oids:
-        results = client.delete_features(source.url, oids, token or source.token)
+        results = client.delete_features(source.url, oids, token)
         by = {r.get("objectId"): r for r in results if isinstance(r, dict)}
         for c in free:
             r = by.get(c.oid) or {"success": all(x.get("success") for x in results if isinstance(x, dict))}

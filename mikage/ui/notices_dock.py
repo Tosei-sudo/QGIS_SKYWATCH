@@ -204,7 +204,7 @@ class NoticesDock(PluginDock):
         def ask_for(watch: CatalogWatch):
             current = self.catalog_for(watch)
             catalog = current or watch.catalog
-            token = self.context.token_for(catalog.url, catalog.token)
+            token = None
             return replace(watch, catalog=catalog), lambda url, params: client.ask(url, params, token)
 
         return ask_for
@@ -615,7 +615,7 @@ class NoticesDock(PluginDock):
             return
         name = dialog.name.text().strip()
         client = self.context.esri()
-        token = self.context.token_for(catalog.url, catalog.token)
+        token = None
         self._start(self.tr("画像カタログの確認"), lambda task: read_catalog_layer(client, catalog, token),
                     lambda info: self.add_watch(catalog, info.types, CatalogSearch(), area, name))
 

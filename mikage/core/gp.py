@@ -937,10 +937,9 @@ class GpClient:
 
 @dataclass
 class GpServiceConfig:
-    """A processing service of the settings file (`gpServices`): its name in the list, its URL, and a token when it needs one."""
+    """A processing service of the settings file (`gpServices`): its name in the list and its URL."""
     label: str
     url: str
-    token: str = ""
 
 
 def gp_service_of(value: Any, problems: list, index: int) -> Optional[GpServiceConfig]:
@@ -951,4 +950,4 @@ def gp_service_of(value: Any, problems: list, index: int) -> Optional[GpServiceC
         return None
     url = entry["url"].strip()
     label = entry["label"].strip() if isinstance(entry.get("label"), str) and entry["label"].strip() else url
-    return GpServiceConfig(label, url, entry["token"] if isinstance(entry.get("token"), str) else "")
+    return GpServiceConfig(label, url)

@@ -60,8 +60,6 @@ def open_base_map(base: BaseMapConfig, config_source: str) -> tuple[QgsMapLayer,
     else:
         style = resolve_url(base.style, config_source) if base.style else ""
         layer = QgsVectorTileLayer(vector_tile_source(base, url, authcfg, style), base.label)
-        if base.token and not authcfg:
-            notes.append("設定ファイルの token は使わず（「設定…」でこのサービスの認証設定を選択）")
     if not layer.isValid():
         error = layer.error().summary() if not layer.error().isEmpty() else ""
         raise errors.Failed("開けない", code="E104", detail=error)

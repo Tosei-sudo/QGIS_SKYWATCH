@@ -135,7 +135,7 @@ class Command(Feature):
                 self._areas_waiting.append(then)
             return
         self._areas_waiting = [then] if then is not None else []
-        client, token = self.context.esri(), self.context.token_for(source.url, source.token)
+        client, token = self.context.esri(), None
 
         def over(areas) -> None:
             if areas is not None:

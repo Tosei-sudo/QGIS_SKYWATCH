@@ -1050,7 +1050,7 @@ def _count(client: Any, table: Table, clauses: Sequence[str], token: Optional[st
 
 
 def prepare_reads(client: Any, prepared: Sequence[tuple[Table, Any]], sql: str, values: Optional[dict[str, Any]],
-                  conditions: dict[str, str], shape: bool, token_for: Callable[[Table], Optional[str]], count_all: bool = False,
+                  conditions: dict[str, str], shape: bool, count_all: bool = False,
                   cache_minutes: float = 0) -> Reading:
     """
     The plan of reading the tables of `prepared` (a project layer by its
@@ -1064,7 +1064,7 @@ def prepare_reads(client: Any, prepared: Sequence[tuple[Table, Any]], sql: str, 
     for r in reads:
         if r.esri:
             try:
-                r.info = client.layer(r.table.url, token_for(r.table))
+                r.info = client.layer(r.table.url)
             except EsriError as error:
                 # Read as before (read_esri says what is wrong).
                 r.problem = str(error)
@@ -1112,7 +1112,7 @@ def prepare_reads(client: Any, prepared: Sequence[tuple[Table, Any]], sql: str, 
             base = _base(r.table, conditions.get(r.table.name, ""))
             if base is None:
                 continue
-            token = token_for(r.table)
+            token = None
             stamp = analysis_cache.stamp_of(r.info.raw)
             mine = [f"({p})" for p in r.pushed]
             r.count = _count(client, r.table, base + mine, token, stamp, cache_minutes)
@@ -1129,7 +1129,7 @@ def prepare_reads(client: Any, prepared: Sequence[tuple[Table, Any]], sql: str, 
     return Reading(sql, plan, ordered, shape, used is not None)
 
 
-def read_tables(client: Any, reading: Reading, conditions: dict[str, str], limit: int, token_for: Callable[[Table], Optional[str]],
+def read_tables(client: Any, reading: Reading, conditions: dict[str, str], limit: int,
                 cancelled: Optional[Callable[[], bool]] = None, progress: Optional[Callable[[float], None]] = None,
                 cache_minutes: float = 0) -> list[Read]:
     """Each table once, as planned; in the order read."""
@@ -1149,7 +1149,7 @@ def read_tables(client: Any, reading: Reading, conditions: dict[str, str], limit
         notes: list[str] = []
         key = None
         span = None
-        token = token_for(t)
+        token = None
         if r.keys and r.info is not None and plan is not None:
             best = None
             for k in r.keys:

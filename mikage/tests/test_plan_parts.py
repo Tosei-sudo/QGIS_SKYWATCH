@@ -141,7 +141,7 @@ def test_catalogs_from_esri():
     layer.add({"NAME": "C", "TLE": f"{LINE1}\n{LINE2}"})
     layer.add({"NAME": "NO-TLE"})
     catalog = satellite_catalog_of({"label": "テスト衛星", "url": url, "fields": {"name": "NAME", "tle": "TLE", "kind": "KIND"}}, [], 0)
-    sats, problems = load_satellites(EsriClient(fake), catalog, lambda u, t: t)
+    sats, problems = load_satellites(EsriClient(fake), catalog)
     assert [s.name for s in sats] == ["ISS", "B", "C"] and [s.sar for s in sats] == [True, False, False]
     assert problems == ["NO-TLE: TLE なし"]
     table = "https://example.com/arcgis/rest/services/Sensors/FeatureServer/1"
@@ -150,7 +150,7 @@ def test_catalogs_from_esri():
     catalogs = [sensor_catalog_of({"url": table, "fields": {"sensor": "SENSOR", "mode": "MODE"}}, [], 0),
                 sensor_catalog_of({"label": "壊れた表", "url": "https://example.com/arcgis/rest/services/X/FeatureServer/9", "fields": {"sensor": "S"}}, [], 1),
                 sensor_catalog_of({"sensors": [{"sensor": "B", "modes": [{"mode": "Wide"}]}]}, [], 2)]
-    modes, problems = load_sensor_modes(EsriClient(fake), catalogs, lambda u, t: t)
+    modes, problems = load_sensor_modes(EsriClient(fake), catalogs)
     assert [(m.sensor, m.mode) for m in modes] == [("ISS", "Spot"), ("B", "Wide")]
     assert len(problems) == 1 and problems[0].startswith("壊れた表 の取得に失敗")
 

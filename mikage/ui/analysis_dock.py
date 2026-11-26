@@ -701,7 +701,7 @@ class AnalysisDock(PluginDock):
         if not todo:
             return
         client = self.context.esri()
-        asks = [(t, self.context.token_for(t.url, t.token)) for t in todo]
+        asks = [(t, None) for t in todo]
 
         def work(_task):
             out = {}
@@ -872,11 +872,10 @@ class AnalysisDock(PluginDock):
             return
         sql, values, conditions, limit, prepared = ready
         client = self.context.esri()
-        tokens = {t.name: self.context.token_for(t.url, t.token) for t, _r in prepared if t.source == "esri"}
         minutes = self._cache_minutes()
 
         def work(task):
-            return analysis_io.run(client, prepared, sql, values, conditions, lambda t: tokens.get(t.name), limit, task, minutes)
+            return analysis_io.run(client, prepared, sql, values, conditions, limit, task, minutes)
 
         def done(answer) -> None:
             self.task = None
@@ -921,11 +920,10 @@ class AnalysisDock(PluginDock):
             return
         sql, values, conditions, _limit, prepared = ready
         client = self.context.esri()
-        tokens = {t.name: self.context.token_for(t.url, t.token) for t, _r in prepared if t.source == "esri"}
         minutes = self._cache_minutes()
 
         def work(_task):
-            return analysis_io.explain(client, prepared, sql, values, conditions, lambda t: tokens.get(t.name), minutes)
+            return analysis_io.explain(client, prepared, sql, values, conditions, minutes)
 
         def done(text) -> None:
             self.task = None

@@ -169,7 +169,7 @@ class FixKeeper(QObject):
         source, context = self.source, self.context
 
         def work(task):
-            return load_fixes(context.esri(), source, ids, context.token_for(source.url, source.token), task.isCanceled)
+            return load_fixes(context.esri(), source, ids, None, task.isCanceled)
 
         def finished(fixes) -> None:
             self._remember(ids, fixes)
@@ -200,7 +200,7 @@ class FixKeeper(QObject):
         source, context = self.source, self.context
 
         def work(_task):
-            return save_fix(context.esri(), source, fix, context.token_for(source.url, source.token))
+            return save_fix(context.esri(), source, fix, None)
 
         self._start(TASK_SAVE, work, lambda saved: self._saved(saved, done), failed or self._say_failed)
 
@@ -227,7 +227,7 @@ class FixKeeper(QObject):
         source, context = self.source, self.context
 
         def work(_task):
-            return delete_fix(context.esri(), source, fix, context.token_for(source.url, source.token))
+            return delete_fix(context.esri(), source, fix, None)
 
         self._start(TASK_SAVE, work, forget, failed or self._say_failed)
 
@@ -258,7 +258,7 @@ class FixKeeper(QObject):
         if dem is None or not dem.configured:
             return ""
         context = self.context
-        token = context.token_for(dem.url, dem.token) if dem.url else None
+        token = None
         client = context.esri() if dem.url else None
         post = qgis_transport(settings.auth_for)
         return fetch_dem(dem, box, lambda url, params: client.ask(url, params, token), post, token, cancelled=cancelled,

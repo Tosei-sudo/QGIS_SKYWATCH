@@ -37,7 +37,6 @@ class SatelliteCatalogConfig:
     swath_unit: str = "km"
     defaults: dict[str, float] = field(default_factory=lambda: dict(BUILT_IN_DEFAULTS))
     sar_pattern: re.Pattern = DEFAULT_SAR
-    token: Optional[str] = None
     where: Optional[str] = None
     #: A QGIS authentication configuration id (plugin settings, not the file).
     authcfg: Optional[str] = None
@@ -90,12 +89,10 @@ def satellite_catalog_of(value: Any, problems: list[str], index: int) -> Optiona
             elif key in defaults:
                 problems.append(f"{at} の defaults.{key} は 0 以上の数で指定")
     label = value.get("label")
-    token = value.get("token")
     where = value.get("where")
     return SatelliteCatalogConfig(
         label=label if isinstance(label, str) and label else f"衛星カタログ {index + 1}",
         url=layer_url(url),
-        token=token if isinstance(token, str) and token else None,
         fields=mapped,
         where=where.strip() if isinstance(where, str) and where.strip() else None,
         swath_unit="m" if value.get("swathUnit") == "m" else "km",

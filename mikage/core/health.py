@@ -7,7 +7,7 @@ is found before someone's work stops on it (tsudo, 2026-11-08).
 
 The services are found by walking the settings read (core/config.py's
 PluginConfig): any entry with an ArcGIS REST `url`, its `fields` (role →
-attribute) and `token`. Which entries the plugin writes to is known by
+attribute). Which entries the plugin writes to is known by
 their kind (WRITTEN) and place (WRITTEN_PATHS). The edit stamps
 (`editTracking`) are looked for on those written to.
 
@@ -19,9 +19,10 @@ from __future__ import annotations
 import dataclasses
 import re
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterable, Optional
+from typing import Any, Callable, Iterable
 
-from .esri import EsriClient, EsriError, InvalidTokenError
+from . import sign_in
+from .esri import EsriClient, EsriError
 
 #: An ArcGIS REST address (a service or a layer of one).
 _REST = re.compile(r"/rest/services/", re.IGNORECASE)
@@ -48,7 +49,6 @@ class Target:
     """A service to ask: where in the settings, its address, and what is expected of it."""
     path: str
     url: str
-    token: Optional[str] = None
     #: role → attribute name(s).
     fields: dict[str, list[str]] = field(default_factory=dict)
     written: bool = False
@@ -109,7 +109,7 @@ def targets(config: Any) -> list[Target]:
                 fields = {k: v for k, v in fields.items() if v}
                 written = type(value).__name__ in WRITTEN or any(path == p or path.endswith("." + p) for p in WRITTEN_PATHS)
                 label = getattr(value, "label", "")
-                out.append(Target(path, url.split("?", 1)[0], getattr(value, "token", None), fields, written,
+                out.append(Target(path, url.split("?", 1)[0], fields, written,
                                   label if isinstance(label, str) else ""))
             for f in dataclasses.fields(value):
                 sub = f"{path}.{_camel(f.name)}" if path else _camel(f.name)
@@ -117,7 +117,7 @@ def targets(config: Any) -> list[Target]:
                 if f.name != "url" and isinstance(v, str) and _REST.search(v) and _LAYER.search(v.split("?", 1)[0]):
                     # Another layer named by its address alone (e.g. a ledger's `history`).
                     written = any(sub == p or sub.endswith("." + p) for p in WRITTEN_PATHS)
-                    out.append(Target(sub, v.split("?", 1)[0], getattr(value, "token", None), {}, written))
+                    out.append(Target(sub, v.split("?", 1)[0], {}, written))
                     continue
                 walk(v, sub)
         elif isinstance(value, (list, tuple)):
@@ -132,13 +132,25 @@ def targets(config: Any) -> list[Target]:
     return out
 
 
+#: The codes of a sign-in refused (core/errors.py).
+SIGN_IN_CODES = ("E201", "E202", "E203", "E204")
+
+
+def _sign_in_hint(url: str) -> str:
+    rule = sign_in.rule_for(url)
+    if rule is None:
+        return "「設定…」の認証設定を確認"
+    if rule.method == "none":
+        return f"設定ファイルの signIn で「{rule.label}」はサインインなし"
+    return f"設定ファイルの signIn の「{rule.label}」（{rule.shown}）を確認"
+
+
 def _capabilities(raw: dict[str, Any]) -> set[str]:
     caps = raw.get("capabilities")
     return {c.strip().lower() for c in caps.split(",")} if isinstance(caps, str) else set()
 
 
-def check(client: EsriClient, target: Target, token: Optional[str], stamps: Iterable[str] = (),
-          stamps_on: bool = False) -> Result:
+def check(client: EsriClient, target: Target, stamps: Iterable[str] = (), stamps_on: bool = False) -> Result:
     """
     Asks one service. A layer: its attributes (each role's, and the edit
     stamps of a written one), and, written to, whether it may be edited.
@@ -147,16 +159,13 @@ def check(client: EsriClient, target: Target, token: Optional[str], stamps: Iter
     say = result.findings.append
     try:
         if _LAYER.search(target.url):
-            info = client.layer(target.url, token, refresh=True)
+            info = client.layer(target.url, refresh=True)
             raw = info.raw
         else:
-            raw = client.ask(target.url, {}, token)
-    except InvalidTokenError as error:
-        say(Finding(PROBLEM, f"サインインが通らない: {error}（「設定…」の認証設定を確認）"))
-        return result
+            raw = client.ask(target.url, {})
     except EsriError as error:
-        signin = "トークン" in str(error) or "権限" in str(error)
-        say(Finding(PROBLEM, f"サインインが通らない: {error}（「設定…」の認証設定を確認）" if signin else f"応答なし: {error}"))
+        signin = getattr(error, "code", "") in SIGN_IN_CODES or "トークン" in str(error) or "権限" in str(error)
+        say(Finding(PROBLEM, f"サインインが通らない: {error}（{_sign_in_hint(target.url)}）" if signin else f"応答なし: {error}"))
         return result
     if not _LAYER.search(target.url):
         say(Finding(OK, "応答あり"))
@@ -188,7 +197,7 @@ def check(client: EsriClient, target: Target, token: Optional[str], stamps: Iter
     return result
 
 
-def check_all(client: EsriClient, config: Any, token_for: Callable[[str, Optional[str]], Optional[str]],
+def check_all(client: EsriClient, config: Any,
               cancelled: Callable[[], bool] = lambda: False) -> list[Result]:
     """Every service of the settings, one after another (stops when cancelled)."""
     tracking = getattr(config, "edit_tracking", None)
@@ -198,17 +207,18 @@ def check_all(client: EsriClient, config: Any, token_for: Callable[[str, Optiona
     for t in targets(config):
         if cancelled():
             break
-        out.append(check(client, t, token_for(t.url, t.token), stamps, stamps_on))
+        out.append(check(client, t, stamps, stamps_on))
     return out
 
 
-def report_text(results: list[Result], when: str = "", where: str = "") -> str:
-    """The results as text to copy (for whoever looks after the services)."""
+def report_text(results: list[Result], when: str = "", where: str = "", signed: Iterable[str] = ()) -> str:
+    """The results as text to copy (for whoever looks after the services); `signed`: the sign-in's lines (signIn)."""
     problems = sum(1 for r in results if r.level == PROBLEM)
     notes = sum(1 for r in results if r.level == NOTE)
     head = ["接続と表の点検" + (f"（{when}）" if when else "")]
     if where:
         head.append(f"設定ファイル: {where}")
+    head += [f"サインイン: {line}" for line in signed]
     head.append(f"{len(results)} 件: 問題 {problems}・注意 {notes}・OK {len(results) - problems - notes}")
     lines = ["\n".join(head), ""]
     for r in sorted(results, key=lambda r: {PROBLEM: 0, NOTE: 1, OK: 2}[r.level]):

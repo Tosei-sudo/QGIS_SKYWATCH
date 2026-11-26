@@ -160,7 +160,6 @@ def load_assignments(client: EsriClient, source: EsriSource, token: Optional[str
     the 完了 rows (which only grow), only those done since then (when the
     table has the state and done-time attributes).
     """
-    token = token or source.token
     types = _types(client, source, token)
     oid = client.layer(source.url, token).object_id_field
     f = source.fields
@@ -205,7 +204,6 @@ def take(client: EsriClient, source: EsriSource, image_id: str, user: str, now: 
     already. 協業 (`mode: "shared"`): others' rows do not stop it; `user`
     gets a row of their own beside them.
     """
-    token = token or source.token
     shared = is_shared(source)
     for x in holders(client, source, image_id, token):
         if same_person(x.assignee, user):
@@ -243,7 +241,6 @@ def update(client: EsriClient, source: EsriSource, x: Assignment, before: Assign
     someone else (a new assignee) fails when the row is no longer theirs
     to hand: it was handed or finished meanwhile.
     """
-    token = token or source.token
     types = _types(client, source, token)
     f = source.fields
     old, new = attributes_of(before, f), attributes_of(x, f)
@@ -265,7 +262,7 @@ def release(client: EsriClient, source: EsriSource, x: Assignment, token: Option
     """Gives an image back (its row deleted): anyone may take it."""
     if x.oid is None:
         return
-    results = client.delete_features(source.url, [x.oid], token or source.token)
+    results = client.delete_features(source.url, [x.oid], token)
     if not results or not all(r.get("success") for r in results):
         raise EsriError(code="E305", detail="分担の解除: " + (((results or [{}])[0].get("error") or {}).get("description") or ""))
 

@@ -195,7 +195,7 @@ def refusal(feature: str) -> str:
 # ---- the settings file and the table --------------------------------------------------------
 
 def user_roles_settings_of(value: Any, problems: list[str]) -> Optional[EsriSource]:
-    """`userRoles`: the table of the people's roles (URL or `{ "url", "fields", "where", "token" }`)."""
+    """`userRoles`: the table of the people's roles (URL or `{ "url", "fields", "where" }`)."""
     return esri_source_of(value, "userRoles", DEFAULT_USER_ROLE_FIELDS, problems, editable=True)
 
 
@@ -208,12 +208,12 @@ def user_where(source: EsriSource, user: str) -> str:
 def _rows(client: EsriClient, source: EsriSource, user: str, token: Optional[str]) -> tuple[list[tuple[Optional[int], str]], Any]:
     if not user.strip():
         raise EsriError("利用者名が分からない（管理者に連絡: editTracking.user）", code="E205")
-    info = client.layer(source.url, token or source.token, refresh=True)
+    info = client.layer(source.url, token, refresh=True)
     missing = [source.fields[k] for k in ("user", "role") if source.fields[k] not in info.field_types]
     if missing:
         raise EsriError(f"担当の表に必要な項目がない（管理者に連絡: {'・'.join(missing)}）", code="E704")
     oid_field = info.object_id_field
-    features = client.query_all(source.url, user_where(source, user), token or source.token,
+    features = client.query_all(source.url, user_where(source, user), token,
                                 out_fields=f"{oid_field},{source.fields['role']}", geometry=False, limit=LIMIT)
     rows = []
     for f in features:
@@ -229,11 +229,11 @@ def known_users(client: EsriClient, source: EsriSource, token: Optional[str] = N
     The user names the table has (each once, as first written, by name): the
     people who chose their roles, offered as members of a 依頼グループ.
     """
-    info = client.layer(source.url, token or source.token)
+    info = client.layer(source.url, token)
     name = source.fields["user"]
     if name not in info.field_types:
         return []
-    features = client.query_all(source.url, source.where or "1=1", token or source.token,
+    features = client.query_all(source.url, source.where or "1=1", token,
                                 out_fields=f"{info.object_id_field},{name}", geometry=False, limit=limit, cut=True)
     out: dict[str, str] = {}
     for f in features:
@@ -258,7 +258,6 @@ def save_user_roles(client: EsriClient, source: EsriSource, user: str, codes: Se
     """
     codes = clean_codes(codes)
     rows, info = _rows(client, source, user, token)
-    token = token or source.token
     kept: set = set()
     deletes = []
     for oid, code in rows:

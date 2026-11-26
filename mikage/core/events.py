@@ -153,10 +153,6 @@ def _text(v: Any) -> str:
     return "" if v is None else js_string(v).strip()
 
 
-def _token(source: EsriSource, token: Optional[str]) -> Optional[str]:
-    return token or source.token
-
-
 def _where(source: EsriSource, *clauses: str) -> str:
     parts = [c for c in (source.where, *clauses) if c]
     return " AND ".join(f"({c})" for c in parts) or "1=1"
@@ -191,7 +187,7 @@ def event_of(feature: dict[str, Any], fields: dict[str, str]) -> Optional[Event]
 def load_events(client: EsriClient, settings: EventSettings, token: Optional[str] = None) -> list[Event]:
     """Every event (newest start first; those without a start last)."""
     s = settings.layer
-    token = _token(s, token)
+    token = token
     info = client.layer(s.url, token, refresh=True)
     _need(info.field_types, s.fields, ("id", "name"), "イベントのレイヤー")
     polygon = info.geometry_type == "esriGeometryPolygon"
@@ -215,7 +211,7 @@ def new_event(name: str, **values: Any) -> Event:
 def save_event(client: EsriClient, settings: EventSettings, event: Event, token: Optional[str] = None) -> Event:
     """Adds the event (no oid yet) or updates it; the event as saved (with its oid)."""
     s = settings.layer
-    token = _token(s, token)
+    token = token
     info = client.layer(s.url, token, refresh=True)
     types = info.field_types
     _need(types, s.fields, ("id", "name"), "イベントのレイヤー")
@@ -266,7 +262,7 @@ def delete_event(client: EsriClient, settings: EventSettings, event: Event, toke
     """
     links = load_links(client, settings, [event.id], links_token)
     if event.oid is not None:
-        results = client.delete_features(settings.layer.url, [event.oid], _token(settings.layer, token))
+        results = client.delete_features(settings.layer.url, [event.oid], token)
         if results and not all(r.get("success") for r in results):
             raise EsriError(code="E305", detail="イベントの削除: " + ((results[0].get("error") or {}).get("description") or ""))
     return remove_links(client, settings, links, links_token)
@@ -277,7 +273,7 @@ def delete_event(client: EsriClient, settings: EventSettings, event: Event, toke
 
 def _link_types(client: EsriClient, settings: EventSettings, token: Optional[str]) -> dict[str, str]:
     s = settings.links
-    types = client.layer(s.url, _token(s, token), refresh=True).field_types
+    types = client.layer(s.url, token, refresh=True).field_types
     _need(types, s.fields, ("event", "type", "item"), "イベントの紐付けテーブル")
     return types
 
@@ -286,7 +282,7 @@ def load_links(client: EsriClient, settings: EventSettings, event_ids: Optional[
                token: Optional[str] = None) -> list[EventLink]:
     """The links of these events (all when None), oldest first."""
     s = settings.links
-    token = _token(s, token)
+    token = token
     _link_types(client, settings, token)
     f = s.fields
     oid = client.layer(s.url, token).object_id_field
@@ -319,7 +315,7 @@ def add_links(client: EsriClient, settings: EventSettings, event_ids: Sequence[s
     an event (the same type and id) is left as it is.
     """
     s = settings.links
-    token = _token(s, token)
+    token = token
     types = _link_types(client, settings, token)
     f = s.fields
     have = {x.key for x in load_links(client, settings, event_ids, token)}
@@ -352,7 +348,7 @@ def set_link_note(client: EsriClient, settings: EventSettings, links: Sequence[E
                   token: Optional[str] = None) -> int:
     """Sets the note of links; how many were changed."""
     s = settings.links
-    token = _token(s, token)
+    token = token
     types = _link_types(client, settings, token)
     if s.fields["note"] not in types:
         raise EsriError(f"イベントの紐付けの表に必要な項目がない（管理者に連絡: {s.fields['note']}）", code="E704")
@@ -374,7 +370,7 @@ def remove_links(client: EsriClient, settings: EventSettings, links: Sequence[Ev
         return 0
     removed = 0
     for start in range(0, len(ids), 500):
-        results = client.delete_features(settings.links.url, ids[start:start + 500], _token(settings.links, token))
+        results = client.delete_features(settings.links.url, ids[start:start + 500], token)
         failed = [r for r in results if not r.get("success")]
         if failed:
             raise EsriError(f"紐付け {len(failed)} 件の解除をサーバーが受け付けない", code="E305", detail=(failed[0].get("error") or {}).get("description") or "")

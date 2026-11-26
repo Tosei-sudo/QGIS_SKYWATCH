@@ -220,8 +220,10 @@ def test_job_states_and_messages():
 
 def test_gp_services_in_the_settings_file():
     config, problems = parse_config_text(json.dumps({"gpServices": ["https://h/GPServer", {"label": "解析", "url": "https://h/ogc", "token": "t"}, {"url": "ftp://x"}]}))
-    assert [(s.label, s.url, s.token) for s in config.gp_services] == [("https://h/GPServer", "https://h/GPServer", ""), ("解析", "https://h/ogc", "t")]
-    assert problems == ["gpServices[2] の url は http(s) の URL で指定"]
+    assert [(s.label, s.url) for s in config.gp_services] == [("https://h/GPServer", "https://h/GPServer"), ("解析", "https://h/ogc")]
+    # A token left in the file: not used, said once.
+    assert problems == ["gpServices[2] の url は http(s) の URL で指定",
+                        "token は使わない（gpServices[1].token）。サインインは signIn で指定（サーバーのドメインごとに iwa・saml・none）"]
 
 
 class Server:

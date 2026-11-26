@@ -247,11 +247,8 @@ class RequestGroupDialog(QDialog):
         layout.addLayout(row)
         self._update_buttons()
 
-    def token(self) -> Optional[str]:
-        return self.context.token_for(self.store.url, self.store.token) if self.store is not None else None
-
     def repository(self) -> RequestRepository:
-        return RequestRepository(self.context.esri(), self.store, self.token())
+        return RequestRepository(self.context.esri(), self.store, None)
 
     def _missing(self) -> str:
         """Why there is no list to show (no store or no groups table); "" when there is."""
@@ -277,7 +274,7 @@ class RequestGroupDialog(QDialog):
         repo = self.repository()
         roles = self.context.config.user_roles
         client = self.context.esri()
-        roles_token = self.context.token_for(roles.url, roles.token) if roles is not None else None
+        roles_token = None
         self.status.setText(self.tr("依頼グループを取得中…"))
 
         def work(task):

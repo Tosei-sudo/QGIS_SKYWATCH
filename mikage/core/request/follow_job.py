@@ -14,10 +14,13 @@ and nothing else (no files written, no raise offered: the next 「計算」 does
 Plain Python with NumPy (the core's imports need it): QGIS's own Python has
 both, QGIS itself is not started. Requests go through urllib: the system's
 proxy and certificates (on Windows its certificate store). A service's
-sign-in is the settings file's `token`, or a token from the server's
-generateToken with a user name and password (Windows' credential manager,
-or an environment variable). QGIS's authentication configurations (authcfg)
-cannot be used outside QGIS, nor Windows integrated authentication.
+sign-in is the settings file's `signIn` (core/sign_in.py): `iwa`, the
+portal's token asked with the Windows logon of the account the task runs as
+(core/windows_auth.py, no password anywhere); for a server `signIn` says
+nothing of, a token from the server's generateToken with a user name and
+password (--credential: Windows' credential manager, or --user and an
+environment variable). `saml` and QGIS's authentication configurations
+(authcfg) cannot be used outside QGIS.
 
 One run at a time (a lock the system lets go of when the process ends), a
 time limit, a log file a day, the audit log's lines for its edits
@@ -43,12 +46,13 @@ from datetime import date
 from typing import Callable, Optional, Sequence
 from urllib.parse import urljoin
 
-from .. import audit, edit_stamp, time_zone
+from .. import audit, edit_stamp, sign_in, time_zone, windows_auth
 from ..catalog.api import CatalogConfig
 from ..config import PluginConfig, parse_config_text, read_config_file
 from ..esri import EsriClient, EsriError, UnreachableError, form_body, quote
 from ..image_reviews import UnusableImages
 from ..plan.api import NO_NAMES, SatelliteNames, load_satellite_names
+from ..sign_in import PortalTokens
 from .follow import follow_and_save, found_text, with_settled_times
 from .model import ImagingRequest, day_bounds
 from .store import HistoryRow, RequestStoreConfig, history_where, load_history, load_requests
@@ -114,9 +118,9 @@ def _open(opener: urllib.request.OpenerDirector, request: urllib.request.Request
         if status == 401:
             schemes = " ".join(error.headers.get_all("WWW-Authenticate") or []) if error.headers else ""
             if re.search(r"negotiate|ntlm", schemes, re.IGNORECASE):
-                hint = "。統合 Windows 認証のサービスはこのツールからは使えない（トークンを使う）"
+                hint = "。統合 Windows 認証のサービス（設定ファイルの signIn に method \"iwa\" で書く）"
             else:
-                hint = "。サインインが要る（設定ファイルの token か --user・--credential）"
+                hint = "。サインインが要る（設定ファイルの signIn か --user・--credential）"
         raise EsriError(f"接続できない（{address}：HTTP {status}{hint}）") from None
     except urllib.error.URLError as error:
         reason = error.reason
@@ -132,16 +136,73 @@ def _open(opener: urllib.request.OpenerDirector, request: urllib.request.Request
 
 
 def url_transport(context: Optional[ssl.SSLContext] = None, timeout: float = READ_TIMEOUT,
-                  edit_timeout: float = EDIT_TIMEOUT) -> Callable[[str, dict], bytes]:
-    """A `Transport` for EsriClient: form POSTs through urllib (the system's proxy; `context`: the certificates trusted)."""
+                  edit_timeout: float = EDIT_TIMEOUT) -> Callable[..., bytes]:
+    """
+    A `Transport` for EsriClient: form POSTs through urllib (the system's
+    proxy; `context`: the certificates trusted), with `headers` when given.
+    """
     opener = _opener(context)
 
-    def send(url: str, form: dict[str, str]) -> bytes:
+    def send(url: str, form: dict[str, str], headers: Optional[dict[str, str]] = None) -> bytes:
         request = urllib.request.Request(url, data=form_body(form), method="POST", headers={
-            "Content-Type": "application/x-www-form-urlencoded", "User-Agent": USER_AGENT})
+            "Content-Type": "application/x-www-form-urlencoded", "User-Agent": USER_AGENT, **(headers or {})})
         return _open(opener, request, edit_timeout if _EDITS.search(_address(url)) else timeout)
 
     return send
+
+
+def signed_transport(send: Callable[..., bytes], password: Optional["SignIn"] = None,
+                     context: Optional[ssl.SSLContext] = None, timeout: float = READ_TIMEOUT) -> Callable[[str, dict], bytes]:
+    """
+    `send` (url_transport) with each request signed in: a server of an `iwa`
+    entry of `signIn` with the portal's token (the portal itself asked with
+    the Windows logon), one of a `none` entry as it is, any other with the
+    token of `password` (--user, --credential) when there is one.
+    """
+    def signed(url: str, form: dict[str, str]) -> bytes:
+        rule = sign_in.rule_for(url)
+        if rule is not None and rule.method == "iwa":
+            if sign_in.under_portal(rule, url):
+                return windows_auth.ask(url, form, timeout=timeout, ssl_context=context)
+            return send(url, form, sign_in.headers_for(url, rule))
+        if password is not None and (rule is None or rule.method == "saml") and "token" not in form:
+            token = password.token(url)
+            if token:
+                form = {**form, "token": token}
+        return send(url, form)
+
+    return signed
+
+
+def renewing(password: Optional["SignIn"]) -> Callable[[str], Optional[str]]:
+    """EsriClient's `renew` (the token sent was refused): the portal's again for an `iwa` server, else `password`'s."""
+    def renew(url: str) -> Optional[str]:
+        rule = sign_in.rule_for(url)
+        if rule is not None and rule.method == "iwa":
+            return sign_in.renew_for(url)
+        if password is not None and (rule is None or rule.method == "saml"):
+            return password.renew(url)
+        return None
+
+    return renew
+
+
+def set_sign_in(config: PluginConfig, context: Optional[ssl.SSLContext] = None, timeout: float = READ_TIMEOUT) -> list[str]:
+    """The settings file's `signIn` set for this run's requests; what cannot be used of it (for the log)."""
+    rules = list(config.sign_in)
+    sign_in.set_rules(rules)
+    notes = []
+    iwa = [r for r in rules if r.method == "iwa"]
+    if iwa and windows_auth.available():
+        sign_in.set_tokens(PortalTokens(lambda url, form: windows_auth.ask(url, form, timeout=timeout, ssl_context=context)))
+    else:
+        sign_in.set_tokens(None)
+        if iwa:
+            notes.append(f"統合 Windows 認証（signIn の {'・'.join(r.label for r in iwa)}）は Windows でのみ使える")
+    saml = [r for r in rules if r.method == "saml"]
+    if saml:
+        notes.append(f"SAML（signIn の {'・'.join(r.label for r in saml)}）はこのツールでは使えない（--user・--credential のトークンなら使える）")
+    return notes
 
 
 def get_text(url: str, context: Optional[ssl.SSLContext] = None, timeout: float = READ_TIMEOUT) -> str:
@@ -273,7 +334,7 @@ def read_windows_credential(target: str) -> tuple[str, str]:
 
 
 def credentials(args: argparse.Namespace, environ=None) -> Optional[tuple[str, str]]:
-    """(user name, password) for generateToken; None: the settings file's tokens only."""
+    """(user name, password) for generateToken; None: the settings file's `signIn` only."""
     environ = os.environ if environ is None else environ
     if args.credential:
         return read_windows_credential(args.credential)
@@ -481,24 +542,27 @@ def requests_of(client: EsriClient, store: RequestStoreConfig, token: Optional[s
     return out
 
 
-def follow_store(client: EsriClient, config: PluginConfig, store: RequestStoreConfig, token_for: Callable[[str, Optional[str]], Optional[str]],
+def follow_store(client: EsriClient, config: PluginConfig, store: RequestStoreConfig,
                  names_of: Callable[[], SatelliteNames], now: float, cancelled: Optional[Callable[[], bool]] = None) -> tuple[str, list[str]]:
-    """Follows one ledger up and saves what was found: what it says (for the log), and what could not be saved."""
+    """
+    Follows one ledger up and saves what was found: what it says (for the
+    log), and what could not be saved. The sign-in is the client's transport's (signed_transport).
+    """
     catalog = catalog_of_store(config, store)
     if catalog is None:
         raise EsriError(f"照合に使う画像カタログ「{store.catalog}」が imageCatalogs にない" if store.catalog else "画像カタログ（imageCatalogs）がない")
-    token = token_for(store.url, store.token)
+    token = None
     history = load_history(client, store, token, history_where(store, open_rows=True), cancelled=cancelled, shapes=True)
     due = due_rows(history, now)
     if not due:
         return "照合する行なし", []
     requests = requests_of(client, store, token, [r.request_id for r in due], cancelled)
     rows = with_settled_times(client, store, token, history, requests, cancelled)
-    catalog_token = token_for(catalog.url, catalog.token)
+    catalog_token = None
     problems: list[str] = []
     # 画像の評価: an image rated 使えない all over a request's area is not counted as taken.
     reviews = config.image_reviews
-    unusable = UnusableImages(client, reviews, token_for(reviews.url, reviews.token)) if reviews else None
+    unusable = UnusableImages(client, reviews, None) if reviews else None
     found, changed = follow_and_save(client, store, token, catalog, catalog_token, rows, requests, now, names_of(), cancelled, problems,
                                      unusable)
     if not found:
@@ -547,12 +611,11 @@ def run(args: argparse.Namespace, folder: str) -> int:
     if not stores:
         raise UsageError("照合する台帳がない（requestStores に history のある台帳がない）")
     signed = credentials(args)
+    for note in set_sign_in(config, context):
+        log.info(f"注意: {note}")
     transport = url_transport(context)
-    sign_in = SignIn(transport, *signed) if signed else None
-    client = EsriClient(transport, renew=sign_in.renew if sign_in else None)
-
-    def token_for(url: str, token: Optional[str]) -> Optional[str]:
-        return (sign_in.token(url) if sign_in else None) or token
+    password = SignIn(transport, *signed) if signed else None
+    client = EsriClient(signed_transport(transport, password, context), renew=renewing(password))
 
     names: list[SatelliteNames] = []
 
@@ -561,7 +624,7 @@ def run(args: argparse.Namespace, folder: str) -> int:
             names.append(NO_NAMES)
             if config.satellite_aliases:
                 try:
-                    found, failed = load_satellite_names(client, config.satellite_aliases, token_for, cancelled)
+                    found, failed = load_satellite_names(client, config.satellite_aliases, cancelled)
                 except Exception as error:  # noqa: BLE001 (names only make matches better)
                     found, failed = NO_NAMES, [str(error)]
                 names[0] = found
@@ -577,10 +640,12 @@ def run(args: argparse.Namespace, folder: str) -> int:
                 log.info(f"失敗: {store.label}: 時間切れ（--time-limit {args.time_limit:g} 分）のため照合しない")
                 failed = True
                 continue
-            if store.authcfg and not store.token and sign_in is None:
-                log.info(f"注意: {store.label} は QGIS の認証設定（authcfg）を使う設定。このツールでは使えないため token か --user・--credential が要る")
+            rule = sign_in.rule_for(store.url)
+            if store.authcfg and password is None and (rule is None or rule.method == "saml"):
+                log.info(f"注意: {store.label} は QGIS の認証設定（authcfg）を使う設定。このツールでは使えないため"
+                         " signIn の統合 Windows 認証か --user・--credential が要る")
             try:
-                text, problems = follow_store(client, config, store, token_for, names_of, time.time() * 1000, cancelled)
+                text, problems = follow_store(client, config, store, names_of, time.time() * 1000, cancelled)
             except UsageError:
                 raise
             except EsriError as error:

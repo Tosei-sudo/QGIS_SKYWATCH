@@ -83,13 +83,9 @@ class AssignmentBar(QWidget):
     def source(self):
         return self.dock.context.config.assignments
 
-    def token(self) -> Optional[str]:
-        s = self.source
-        return self.dock.context.token_for(s.url, s.token) if s else None
-
     def repository(self) -> AssignmentRepository:
-        """The assignments table's reads and writes (データ窓口), its token as it is now."""
-        return AssignmentRepository(self.dock.context.esri(), self.source, self.token())
+        """The assignments table's reads and writes (データ窓口)."""
+        return AssignmentRepository(self.dock.context.esri(), self.source, None)
 
     @staticmethod
     def user() -> str:

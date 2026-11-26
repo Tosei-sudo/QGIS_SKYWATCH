@@ -144,7 +144,7 @@
 
 ```jsonc
 "userRoles": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/26"
-// 属性名を変えたとき: { "url": "…", "fields": { "user": "USER_NAME", "role": "ROLE_NAME" }, "where": "…", "token": "…" }
+// 属性名を変えたとき: { "url": "…", "fields": { "user": "USER_NAME", "role": "ROLE_NAME" }, "where": "…" }
 ```
 
 ## 練習モード（`training`）
@@ -161,7 +161,7 @@
   - `places`（地名）: `geocoders`
   - `eventKinds`（イベントの種類）: `events.kinds`
   - `glossary`（備考の単語集）: `glossary`
-  - 本番の設定ファイルのトークンは、練習用の設定ファイル（ディスク）には書かず、練習中だけメモリーに持つ。本番の設定ファイルからの相対パス（`./` `../`）は書き直す。本番の設定ファイルが URL で、いま読めていなければ前回読めたもの（トークンなし）を使う
+  - 本番の設定ファイルから何かを読むときは、本番の `signIn`（サーバーのドメインごとのサインイン）も練習用の設定ファイルに写す。本番の設定ファイルからの相対パス（`./` `../`）は書き直す。本番の設定ファイルが URL で、いま読めていなければ前回読めたものを使う
 - **置き場所**: QGIS のユーザープロファイルの `mikage/training/`（人ごと）。練習用サーバーのデータ（`server/`）、練習用の設定ファイル（`config.training.jsonc`。始めるたびに書き出す。本番の URL・フォルダーは入らない）、ローカルの観測記録（`observations.gpkg`）、送信待ち（`offline_work.sqlite`）、地名の控え・開いた画像の履歴・サムネイル、出力（`出力/`: 撮像計画ファイル・通報のファイル）
 - **本番に書き込まない仕組み**: 練習中は設定ファイルとローカルのファイルを練習用に切り替える（`qgis_io/settings.py` が練習中は練習用の場所を答える。切り替えは設定ファイルを読み直すときと同じ道）。練習用の設定ファイルには `userRoles` も `auditLog` もなく、地理院の地名検索（インターネット）も入れない（本番から読む地名に地理院が入っていれば、それは使う）
   - 担当: 練習中だけ切り替えられる（この PC だけ）。始めるときにユーザープロファイルの `mikage/roles`・`rolesPending`・`role`・`plan_reminders`・`request_export_folder` を `mikage/training/saved` に取っておき、終えると戻す。練習中に QGIS が落ちても、次の起動で戻す（`mikage/training/active`）。練習で選んだ担当が本番の `userRoles` に送られることはない
@@ -206,7 +206,7 @@
 | `false`（`{ "enabled": false }` も） | 練習モードを出さない |
 | `{ "fromProduction": false }` | 衛星・分類体系なども含めて見本だけで練習する。`["satellites", "taxonomy"]` のように名前を並べると、それだけ本番から読む（既定 `true` = すべて） |
 | `{ "config": "練習用の設定ファイル" }` | 内蔵の見本の代わりに、組織の練習用サービス（SDE 上の練習用の表・実際の画像など）を指す設定ファイルで練習する（パスか URL。相対パスはこの設定ファイルのフォルダから）。練習用サーバーは動かさない。ローカルのファイル・担当・監査ログ・メールの扱いは内蔵の見本と同じ。その設定ファイルには本番の表を書かないこと |
-| `{ "exercises": { "exercises": "URL", "answers": "URL", "results": "URL", "token": "…" } }` | 判読の練習の組織の問題（[`TBL_TRAINING_EXERCISE`](../admin/esri-tables.md#tbl_training_exercise判読の練習の問題)）・正解（`TBL_TRAINING_ANSWER`）・結果（`TBL_TRAINING_RESULT`）の表。問題と正解の表は必須、`results` を書かなければ結果はその PC だけ。`token` は 3 つの表のトークン（QGIS の認証設定があればそちら） |
+| `{ "exercises": { "exercises": "URL", "answers": "URL", "results": "URL" } }` | 判読の練習の組織の問題（[`TBL_TRAINING_EXERCISE`](../admin/esri-tables.md#tbl_training_exercise判読の練習の問題)）・正解（`TBL_TRAINING_ANSWER`）・結果（`TBL_TRAINING_RESULT`）の表。問題と正解の表は必須、`results` を書かなければ結果はその PC だけ。`token` は 3 つの表のトークン（QGIS の認証設定があればそちら） |
 | `{ "scoring": { … } }` | 判読の練習の採点のしかた（組織の基準。書かないキーは既定のまま）。キーは `tolerance`（位置の許容 m、既定 50）・`toleranceByLength`（大きなものは長さ × これ、0.5）・`weights`（項目の割合 `find` 50・`kind` 30・`activity` 10・`measure` 10・`change` 50）・`kindCredit`（種別の部分点 `exact` 1・`parent` 0.5・`top` 0.2）・`extraPenalty`（誤り 1 件の減点、5）・`lengthTolerance`（長さ・幅の許容 %、15）・`headingTolerance`（向きの許容 度、15）・`headingEitherEnd`（向きを前後どちら向きでも可に、false）・`passScore`（合格点、70）。まちがった書き方は読み込みの問題に出して、その値は既定のまま |
 
 ```jsonc

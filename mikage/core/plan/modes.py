@@ -59,7 +59,6 @@ class SensorCatalogConfig:
     sar_pattern: re.Pattern = DEFAULT_SAR
     modes: list[SensorMode] = field(default_factory=list)
     url: Optional[str] = None
-    token: Optional[str] = None
     where: Optional[str] = None
     authcfg: Optional[str] = None
 
@@ -162,11 +161,9 @@ def sensor_catalog_of(value: Any, problems: list[str], index: int) -> Optional[S
     if not mapped.get("sensor"):
         problems.append(f"{at} に fields.sensor（センサー名の属性）なし")
         return None
-    token = value.get("token")
     where = value.get("where")
     return SensorCatalogConfig(
         label=label, fields=mapped, swath_unit=unit, sar_pattern=sar, modes=[], url=layer_url(url),
-        token=token if isinstance(token, str) and token else None,
         where=where.strip() if isinstance(where, str) and where.strip() else None,
     )
 

@@ -16,10 +16,11 @@ aside: its settings are its own (mikage_training/…) and it never goes back
 to a production.
 
 The masters only read (satellites, the taxonomy, places, …:
-core/training/masters.py) may be the production's (`Production`): their
-tokens are kept in memory (`TrainingSession.config_text`), the file written
-has none. So are the production's image catalogs shown while practising
-(`imageCatalogs[].mode`, `shown`): added to the settings as read, never written.
+core/training/masters.py) may be the production's (`Production`), signed in
+to with the production's `signIn` (written with them). So are the
+production's image catalogs shown while practising (`imageCatalogs[].mode`,
+`shown`): added to the settings as read (with the production's `signIn`),
+never written.
 """
 from __future__ import annotations
 
@@ -148,8 +149,6 @@ class TrainingSession:
     builtin: bool = True
     server: Optional[TrainingServer] = None
     started: float = field(default_factory=time.time)
-    #: The practice's settings file as read while practising (with the production's tokens; None: the file's own text).
-    config_text: Optional[str] = None
     #: The production's settings file, as it was when practising started (its masters read meanwhile).
     production: Optional["Production"] = None
     #: The masters taken from it (core/training/settings.py's MASTERS' keys).
@@ -173,7 +172,7 @@ def shown(config, source: str):
     The settings read from `source` (a PluginConfig) as they are used now:
     while practising on that file, every catalog of its own and, after them,
     the production's shown while practising (`mode` training or both, with
-    the production's tokens; core/training/masters.with_practice_catalogs).
+    the production's `signIn`; core/training/masters.with_practice_catalogs).
     """
     session = _session
     if session is None or source != session.config_source:
@@ -237,15 +236,10 @@ class Production:
     names: tuple
 
 
-def write_config(f: TrainingFiles, base: str, files: str, production: Optional[Production] = None) -> tuple[Optional[str], tuple]:
-    """
-    The practice's settings file written for the server at `base`: its text
-    with the production's tokens (None when it is the file's own) and the
-    masters taken from the production.
-    """
+def write_config(f: TrainingFiles, base: str, files: str, production: Optional[Production] = None) -> tuple:
+    """The practice's settings file written for the server at `base`; the masters taken from the production."""
     text = training_config(base, files, f.outputs)
     taken: list = []
-    whole: Optional[str] = None
     if production is not None and (production.names or masters.exercise_images(production.value)):
         own = load_jsonc(text)
         value, taken = masters.with_production(own, production.value, production.names,
@@ -253,20 +247,18 @@ def write_config(f: TrainingFiles, base: str, files: str, production: Optional[P
         if value != own:
             read = f"{masters.names_text(taken)}は本番の設定ファイルから（読むだけ）" if taken else "パスの置き換えは本番の設定ファイルから"
             head = ("練習モードの設定ファイル（MIKAGE が練習を始めるたびに書き出す。手で直しても次に上書きされる）\n"
-                    f"書き込む表はすべてこの PC の中の練習用サーバー。{read}\n"
-                    "本番のトークンはここには書かない（練習中は MIKAGE が覚えている）")
-            whole = masters.config_text(value, head)
-            text = masters.config_text(masters.without_tokens(value), head)
+                    f"書き込む表はすべてこの PC の中の練習用サーバー。{read}")
+            text = masters.config_text(value, head)
     with open(f.config, "w", encoding="utf-8") as out:
         out.write(text)
-    return (whole if whole != text else None), tuple(taken)
+    return tuple(taken)
 
 
-def start_server(f: TrainingFiles, production: Optional[Production] = None) -> tuple[TrainingServer, Optional[str], tuple]:
+def start_server(f: TrainingFiles, production: Optional[Production] = None) -> tuple[TrainingServer, tuple]:
     """
     The practice server started (on its last port when it is free) and the
-    practice's settings file written for it (write_config: also its text with
-    the production's tokens, and the masters taken from the production).
+    practice's settings file written for it (write_config: also the masters
+    taken from the production).
     """
     try:
         port = int(qsettings.value(PORT_KEY, 0) or 0)
@@ -276,8 +268,8 @@ def start_server(f: TrainingFiles, production: Optional[Production] = None) -> t
     base = server.start(port)
     qsettings.set_value(PORT_KEY, server.port)
     os.makedirs(f.outputs, exist_ok=True)
-    text, taken = write_config(f, base, server.files, production)
-    return server, text, taken
+    taken = write_config(f, base, server.files, production)
+    return server, taken
 
 
 def begin(session: TrainingSession) -> None:

@@ -77,7 +77,7 @@ class DraftHost:
         if source is None:
             then([], "")
             return
-        client, token = self.context.esri(), self.context.token_for(source.url, source.token)
+        client, token = self.context.esri(), None
         run_task(_tr("地名の取得"), lambda _t: load_named_areas(client, source, token, max_age=600, interest_too=True),
                  lambda areas: then(list(areas), ""), lambda m: then([], m), hidden=True)
 

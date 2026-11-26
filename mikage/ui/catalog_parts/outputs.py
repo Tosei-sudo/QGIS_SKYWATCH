@@ -127,7 +127,7 @@ class OutputsPart:
         info = self.layers.get(catalog.url)
         if info is None:
             client = self.context.esri()
-            token = self.context.token_for(catalog.url, catalog.token)
+            token = None
             self._start(self.tr("画像カタログの確認"), lambda task: self._layer_of(client, catalog, token),
                         lambda info: self.watch_requested(catalog, info.types, self.conditions(), drawn, **where))
             return

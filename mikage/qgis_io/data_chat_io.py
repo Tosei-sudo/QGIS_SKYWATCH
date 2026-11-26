@@ -123,7 +123,7 @@ class DataChat(QObject):
             failed(self.tr("質問できる表がない（設定ファイルに観測記録・撮像依頼などの Esri の表がない）［E703］"))
             return
         client = self.context.esri()
-        asks = [(t, self.context.token_for(t.url, t.token)) for t in tables]
+        asks = [(t, None) for t in tables]
 
         def work(task):
             values: dict = {}
@@ -268,12 +268,11 @@ class DataChat(QObject):
             failed(str(error), True)
             return
         client = self.context.esri()
-        tokens = {t.name: self.context.token_for(t.url, t.token) for t, _r in prepared}
         minutes = getattr(self.context.config, "analysis_cache_minutes", 0) or 0
 
         def work(task):
             try:
-                return analysis_io.run(client, prepared, sql, {}, conditions, lambda t: tokens.get(t.name), DEFAULT_TABLE_LIMIT,
+                return analysis_io.run(client, prepared, sql, {}, conditions, DEFAULT_TABLE_LIMIT,
                                        task, minutes), None
             except AnalysisError as error:
                 # SQLite's own refusal (no such column …) is given back to the model; a read that failed is not.

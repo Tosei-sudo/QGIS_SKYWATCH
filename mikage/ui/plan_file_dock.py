@@ -394,9 +394,6 @@ class PlanFileDock(PluginDock):
         self.simulation = LimitSimDialog(self.context, self.store, self.satellites, self.chosen_day(), self)
         self.simulation.show()
 
-    def token(self) -> Optional[str]:
-        return self.context.token_for(self.store.url, self.store.token) if self.store else None
-
     def _area_follow(self) -> Optional[tuple]:
         """
         For 地域の形に合わせる before 「計算」: the key its last look is kept
@@ -407,11 +404,11 @@ class PlanFileDock(PluginDock):
         if areas is None or self.store is None:
             return None
         key = f"{self.store.url}|{areas.areas.url}"
-        return key, areas, self.context.token_for(areas.areas.url, areas.areas.token), settings.area_follow_stamp(key)
+        return key, areas, None, settings.area_follow_stamp(key)
 
     def repository(self) -> ScheduleRepository:
-        """The store's reads and writes (データ窓口), its token as it is now."""
-        return ScheduleRepository(self.context.esri(), self.store, self.token())
+        """The store's reads and writes (データ窓口)."""
+        return ScheduleRepository(self.context.esri(), self.store, None)
 
     def close_all(self) -> None:
         """Stops nothing running but forgets the day (when the plugin is unloaded)."""
@@ -470,7 +467,7 @@ class PlanFileDock(PluginDock):
         authcfg = settings.auth_for(forecast.url) if forecast else None
         now = _now_ms()
         catalog = self.catalog()
-        catalog_token = self.context.token_for(catalog.url, catalog.token) if catalog else None
+        catalog_token = None
         follow = self._area_follow()
         self.status.setText(self.tr("依頼と雲量予報を取得中…"))
 

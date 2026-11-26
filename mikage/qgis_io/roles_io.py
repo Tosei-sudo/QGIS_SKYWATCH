@@ -152,7 +152,7 @@ class RoleKeeper(QObject):
         if source is None:
             return False
         client, user, codes = self.context.esri(), self.user(), self.codes
-        token = self.context.token_for(source.url, source.token)
+        token = None
         self.busy = True
 
         def work(_task):
@@ -191,7 +191,7 @@ class RoleKeeper(QObject):
         if pending():
             return self.push(then, failed)
         client, user = self.context.esri(), self.user()
-        token = self.context.token_for(source.url, source.token)
+        token = None
         self.busy = True
 
         def work(_task):

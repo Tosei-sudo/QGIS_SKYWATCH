@@ -66,7 +66,6 @@ class AreaStoreConfig:
     url: str
     fields: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_AREA_FIELDS))
     soft_delete: bool = True
-    token: Optional[str] = None
 
 
 def area_store_of(value: Any, problems: list[str], at: str) -> Optional[AreaStoreConfig]:
@@ -85,8 +84,7 @@ def area_store_of(value: Any, problems: list[str], at: str) -> Optional[AreaStor
                 fields[key] = name
             else:
                 problems.append(f"{at} の fields.{key} は属性名で指定")
-    token = v.get("token")
-    return AreaStoreConfig(url=url, fields=fields, soft_delete=v.get("softDelete") is not False, token=token if isinstance(token, str) and token else None)
+    return AreaStoreConfig(url=url, fields=fields, soft_delete=v.get("softDelete") is not False)
 
 
 def new_area_id() -> str:

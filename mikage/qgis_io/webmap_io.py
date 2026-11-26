@@ -29,6 +29,7 @@ from qgis.core import (
 )
 from qgis.PyQt.QtCore import QCoreApplication, QDate, QDateTime, Qt, QTime, QUrl, QUrlQuery
 
+from ..core import sign_in
 from ..core.basemaps import BaseMapConfig, raster_source
 from ..core.esri import EsriClient, EsriError
 from ..core.startup_layers import StartupLayer, layer_source
@@ -66,8 +67,14 @@ def crs_of_wkid(wkid: int) -> QgsCoordinateReferenceSystem:
 
 
 def auth_with_portal(portal: Optional[str], portal_auth: Optional[str]) -> Callable[[str], Optional[str]]:
-    """The authcfg for a request: the service's own (plugin settings), else the portal's where it may go."""
+    """
+    The authcfg for a request: the service's own (plugin settings), else the
+    portal's where it may go. A host the settings file's `signIn` names goes
+    as it says, whatever is chosen here (core/sign_in.py).
+    """
     def auth(url: str) -> Optional[str]:
+        if sign_in.rule_for(url) is not None:
+            return settings.auth_for(url)
         own = settings.auth_for(url)
         if own:
             return own

@@ -318,7 +318,7 @@ class OfflineController(QObject):
         config = context.config
         def work(task) -> UploadReport:
             # The drafts of before were moved out of QgsSettings on the main thread (_move_old_drafts).
-            return upload_all(config, context.esri, context.token_for, None, context.gpkg, only=only, outbox=self.work)
+            return upload_all(config, context.esri, None, context.gpkg, only=only, outbox=self.work)
 
         def done(report: UploadReport) -> None:
             self._uploading = False

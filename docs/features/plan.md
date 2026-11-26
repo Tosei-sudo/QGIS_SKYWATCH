@@ -38,7 +38,7 @@
 | SkySat-C12 | SkySat |
 | SkySat-C13 | SkySat |
 
-- 1 行に別名 1 つでも、カンマ（`,`・`、`）区切りで複数でも可。同じ衛星の行はまとめる。テーブルを複数使うなら配列。`where`・`token` も書ける
+- 1 行に別名 1 つでも、カンマ（`,`・`、`）区切りで複数でも可。同じ衛星の行はまとめる。テーブルを複数使うなら配列。`where` も書ける
 - 名前は英数字だけを大文字小文字の区別なく比べる（`WorldView-3` = `worldview3`、`WV-3` = `WV3`）
 - 使うところ: 撮像依頼の撮像済みの確認（画像のセンサーが衛星の名前・ID・別名と同じ画像を優先し、次に一方が他方を含む画像、なければ従来どおり時刻と範囲が合う最初の画像）、撮像依頼の衛星の指定と `requestExports` の `satellites`、フォルダのレコードの `imagePatterns`（センサーの別名のキーでも合う）
 - 1 つの別名を同じシリーズの複数の衛星に付けてよい（画像カタログが号機を区別しない場合）。SkySat-C12 と SkySat-C13 は互いの別名にはならない。号機の区別は撮像時刻（`matchMinutes`）と範囲による
@@ -50,7 +50,7 @@
 
 ```jsonc
 "satelliteOutages": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/27"
-// 属性名を変えたとき: { "url": "…", "fields": { "id": "OUTAGE_ID", "satellite": "SAT_NAME", … }, "where": "…", "token": "…" }
+// 属性名を変えたとき: { "url": "…", "fields": { "id": "OUTAGE_ID", "satellite": "SAT_NAME", … }, "where": "…" }
 ```
 
 1 件の障害で決めること:

@@ -35,7 +35,6 @@ class CatalogConfig:
     max_results: int = 500
     angle_kind: str = "offNadir"
     orbit_height: float = 600
-    token: Optional[str] = None
     authcfg: Optional[str] = None
     #: The images of a record whose path is a folder, by sensor (`*` for the others); see images.py.
     image_patterns: dict[str, list[str]] = field(default_factory=dict)
@@ -72,7 +71,7 @@ class CatalogConfig:
         return [columns.get(n) or roles.get(n) or n for n in self.keyword_fields]
 
     def to_json(self) -> dict[str, Any]:
-        """The catalog as a watch keeps it, without its token (the settings file's token is used when checking)."""
+        """The catalog as a watch keeps it."""
         return {
             "label": self.label, "url": self.url, "fields": dict(self.fields), "labels": dict(self.labels),
             "columns": [dict(c) for c in self.columns], "where": self.where, "maxResults": self.max_results,
@@ -172,11 +171,10 @@ def catalog_of(value: Any, problems: list[str], index: int) -> Optional[CatalogC
     patterns = image_patterns_of(value["imagePatterns"], problems, f"{at}.imagePatterns") if "imagePatterns" in value else {}
     thumbnail = thumbnail_of(value.get("thumbnail"), problems, f"{at}.thumbnail")
     footprint_layers = footprint_layers_of(value.get("footprintLayers"), problems, f"{at}.footprintLayers")
-    label, token, where, most = value.get("label"), value.get("token"), value.get("where"), value.get("maxResults")
+    label, where, most = value.get("label"), value.get("where"), value.get("maxResults")
     return CatalogConfig(
         label=label if isinstance(label, str) and label else f"カタログ {index + 1}",
         url=layer_url(url),
-        token=token if isinstance(token, str) and token else None,
         fields=mapped,
         labels=headings,
         columns=extra,

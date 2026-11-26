@@ -318,9 +318,6 @@ class HandoverDialog(QDialog):
 
     # ---- 引き継ぎメモ ------------------------------------------------------------------------
 
-    def _token(self, source) -> Optional[str]:
-        return self.dock.context.token_for(source.url, source.token) if source else None
-
     def _read_last(self) -> None:
         """The last memo kept (its end becomes this one's start)."""
         table = self.settings.table
@@ -329,7 +326,7 @@ class HandoverDialog(QDialog):
             self.last_text.setVisible(False)
             return
         self.last_text.setVisible(True)
-        client, token = self.dock.context.esri(), self._token(table)
+        client, token = self.dock.context.esri(), None
         since = time.time() * 1000 - 30 * DAY_MS
 
         def finished(memo) -> None:
@@ -370,11 +367,11 @@ class HandoverDialog(QDialog):
         config, client = self.dock.context.config, self.dock.context.esri()
         records = list(book.records) if book else []
         images = [(i.id, i.name) for i in book.images] if book else []
-        stores = [RequestRepository(client, s, self._token(s)) for s in config.request_stores]
+        stores = [RequestRepository(client, s, None) for s in config.request_stores]
         alerts = config.alert_reports if config.alert_reports and config.alert_reports.table else None
-        alert_log = AlertLogRepository(client, alerts, self._token(alerts.table)) if alerts else None
+        alert_log = AlertLogRepository(client, alerts, None) if alerts else None
         source = self.bar.source
-        assignments = AssignmentRepository(client, source, self.bar.token())
+        assignments = AssignmentRepository(client, source, None)
         now = time.time() * 1000
         data = HandoverData(start=start, end=end, now=now, user=edit_stamp.user_name(), records=records, images=images,
                             memo=self.memo_edit.toPlainText())
@@ -497,7 +494,7 @@ class HandoverDialog(QDialog):
         if s.table is None:
             self._say("・".join(said))
             return
-        client, token = self.dock.context.esri(), self._token(s.table)
+        client, token = self.dock.context.esri(), None
 
         def finished(cut) -> None:
             self.save_button.setEnabled(True)

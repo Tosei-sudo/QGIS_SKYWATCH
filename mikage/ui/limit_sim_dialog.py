@@ -213,12 +213,9 @@ class LimitSimDialog(QDialog):
         self.status.setText(self.tr("衛星カタログの取得に失敗: {m}").format(m=message))
         self.run_button.setEnabled(True)
 
-    def token(self) -> Optional[str]:
-        return self.context.token_for(self.store.url, self.store.token)
-
     def repository(self) -> ScheduleRepository:
-        """The store's reads and writes (データ窓口), its token as it is now."""
-        return ScheduleRepository(self.context.esri(), self.store, self.token())
+        """The store's reads and writes (データ窓口)."""
+        return ScheduleRepository(self.context.esri(), self.store, None)
 
     def _load(self, sats, start: date, days: int, key, read_ledger: bool) -> None:
         repo = self.repository()

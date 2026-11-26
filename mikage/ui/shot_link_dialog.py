@@ -341,7 +341,7 @@ class ShotLinkDialog(QDialog):
             self.status.setText(self.tr("このショットには範囲がないため、画像を探せない"))
             return
         repo = dock.repository()
-        catalog_token = self.context.token_for(catalog.url, catalog.token)
+        catalog_token = None
         requests = self.requests
         self.status.setText(self.tr("{c} から画像を探し中…").format(c=catalog.label))
 
