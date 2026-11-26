@@ -39,7 +39,7 @@ class SatellitesPart:
             minInterval=self.paste_gap.value(),
             maxPerDay=self.paste_per_day.value(),
             leadTime=self.paste_lead.value(),
-            sar=self.paste_sar.isChecked(),
+            kind=self.paste_kind.currentData(),
         )
 
     def list_sats(self) -> None:

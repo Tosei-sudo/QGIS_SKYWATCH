@@ -45,6 +45,7 @@ from ..core.catalog.api import areas_of, areas_of_shape, layer_origin
 from ..core.util import is_number, ms_of
 from . import settings
 from .obs_images import IMAGE_FILE, IMAGE_ID, SATELLITE, file_name, image_layer, image_path
+from . import local_copy_io
 from .overviews_io import before_open, place_beside
 from .pinned_layers import is_pinned, top_index
 from .plan_layer import make_field, qdatetime
@@ -302,6 +303,8 @@ def locate_record(record: CatalogRecord, catalog: CatalogConfig, mappings: Seque
         if rewrite.overviews_beside:
             # Its images' .ovr go beside them (`overviewsBeside`), for whoever opens them there.
             place_beside(target)
+        # Its images copied to this PC wherever they are, or never (`localCopy`).
+        local_copy_io.mark_place(target, rewrite.local_copy)
         return found
     try:
         return _as_written(record, catalog, mappings, choose_folder, names, scan)
@@ -478,10 +481,13 @@ def open_located(record: CatalogRecord, catalog: CatalogConfig, where: RecordIma
     if not where.files:
         url = where.place
         name = record.id or url.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
-        if not where.is_url:
+        copy = None if where.is_url else _copy_of(url)
+        if not where.is_url and not copy:
             before_open(url)
-        layer = image_layer(url, name, image_id=record.id or None, time=time,
+        layer = image_layer(copy or url, name, image_id=record.id or None, time=time,
                             authcfg=settings.auth_for(url) if where.is_url else None)
+        if copy and layer.isValid():
+            layer.setCustomProperty(local_copy_io.ORIGINAL, url)
         if not layer.isValid():
             raise PathError(f"{record.id or name} の画像を開けない", code="E503", detail=url if where.is_url else where.given)
         remember(layer, record, catalog)
@@ -493,11 +499,15 @@ def open_located(record: CatalogRecord, catalog: CatalogConfig, where: RecordIma
         path = os.path.join(where.place, *rel.split("/"))
         # One image: named as the record (its image id, as 観測記録 calls it); several: by their paths, in the record's group.
         name = rel if len(files) > 1 or not record.id else record.id
-        before_open(path)
-        layer = image_layer(path, name, image_id=record.id or None, time=time)
+        copy = _copy_of(path)
+        if not copy:
+            before_open(path)
+        layer = image_layer(copy or path, name, image_id=record.id or None, time=time)
         if not layer.isValid():
             failed.append(rel)
             continue
+        if copy:
+            layer.setCustomProperty(local_copy_io.ORIGINAL, path)
         remember(layer, record, catalog, rel)
         layers.append(layer)
     if layers:
@@ -510,6 +520,14 @@ def open_located(record: CatalogRecord, catalog: CatalogConfig, where: RecordIma
         if problems is not None:
             problems.append(str(error))
     return layers
+
+
+def _copy_of(path: str) -> Optional[str]:
+    """The copy of an image on this PC made before (localCopy), opened instead of the share's, else None."""
+    try:
+        return local_copy_io.copy_of(path) if local_copy_io.wanted(path) else None
+    except OSError:
+        return None
 
 
 _opened: Optional[OpenedImages] = None

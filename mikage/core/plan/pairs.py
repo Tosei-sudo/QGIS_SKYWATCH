@@ -106,7 +106,7 @@ def stereo_pairs(ops: Sequence[Opportunity], sats: Sequence[SatelliteSpec], targ
                 if b.time - a.time > options.maxDays * 86400000:
                     break
                 sa, sb = sats[a.satellite], sats[b.satellite]
-                if sa.sar != sb.sar or (options.sameSeries and sa.series != sb.series):
+                if sa.kind_name != sb.kind_name or (options.sameSeries and sa.series != sb.series):
                     continue
                 pair = relate(a, b, targets[target])
                 if options.minAngle <= pair.convergence <= options.maxAngle:

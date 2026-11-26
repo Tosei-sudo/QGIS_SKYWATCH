@@ -106,9 +106,8 @@ class SatelliteChoice:
 
     def tree(self) -> list[Group]:
         """The kinds, each with its series, each with its satellites (a satellite with several modes as a group of them)."""
-        kinds = [("optical", "光学", [l for l in self.listed if not l.sat.sar]), ("sar", "SAR", [l for l in self.listed if l.sat.sar])]
         out = []
-        for kind, name, members in kinds:
+        for kind, name, members in self._kinds():
             if not members:
                 continue
             series_groups = []
@@ -120,6 +119,18 @@ class SatelliteChoice:
                 series_groups.append(Group(f"{kind}/{series}", series, 2, in_series, children))
             out.append(Group(kind, name, 1, members, series_groups))
         return out
+
+    def _kinds(self) -> list[tuple]:
+        """The kinds' groups (key, name, members) in `satelliteKinds` order, then kinds not in use as they come."""
+        from .kinds import kinds
+
+        names = list(kinds().names)
+        for l in self.listed:
+            if l.sat.kind_name not in names:
+                names.append(l.sat.kind_name)
+        # 光学 and SAR keep the keys they had before the kinds came (2026-11-26).
+        keys = {"光学": "optical", "SAR": "sar"}
+        return [(keys.get(n, f"kind:{n}"), n, [l for l in self.listed if l.sat.kind_name == n]) for n in names]
 
     def checked(self) -> list[SatelliteSpec]:
         return [l.sat for l in self.listed if l.checked]

@@ -13,7 +13,9 @@ Entries with `pattern` and `to` instead of `prefix` (PathRewrite) are tried
 before all that: a path matching `pattern` is rewritten to `to`
 (`//nas/…/ID` → `D:/ID`), and the rewritten place is opened when it is
 there; otherwise the path goes on as written. With `overviewsBeside` the
-images found there get their .ovr beside them (qgis_io/overviews_io).
+images found there get their .ovr beside them (qgis_io/overviews_io); with
+`localCopy` true they are copied to this PC to be read there wherever they
+are, with false never (qgis_io/local_copy_io; core/local_copy.py).
 
 GDAL reads the .ovr, .RPB / _RPC.TXT and .IMD beside an image by itself.
 """
@@ -55,6 +57,9 @@ class PathRewrite:
     #: folder can be written, whatever `overviews.location` says, so whoever opens them there uses the same .ovr
     #: (a shared folder; tsudo, 2026-11-26). Images elsewhere follow `location`.
     overviews_beside: bool = False
+    #: `localCopy`: the images found where it takes a path are copied to this PC and read there (True), never (False),
+    #: or as `localCopy` says for images on network folders (None; tsudo, 2026-11-27).
+    local_copy: Optional[bool] = None
 
 
 #: `$1`, `${1}`, `${name}` and `$$` in a rewrite's `to`; any other `$` or `\\` is as written (Windows paths).
@@ -66,6 +71,10 @@ def _rewrite_of(value: dict, at: str, problems: list[str]) -> Optional[PathRewri
     beside = value.get("overviewsBeside", False)
     if not isinstance(beside, bool):
         problems.append(f"{at} の overviewsBeside は true か false で指定")
+        return None
+    copy = value.get("localCopy")
+    if copy is not None and not isinstance(copy, bool):
+        problems.append(f"{at} の localCopy は true か false で指定")
         return None
     if "prefix" in value or "url" in value:
         problems.append(f"{at} は prefix（・url）か pattern・to のどちらかで指定")
@@ -88,7 +97,7 @@ def _rewrite_of(value: dict, at: str, problems: list[str]) -> Optional[PathRewri
         if not (int(key) <= regex.groups if key.isdigit() else key in regex.groupindex):
             problems.append(f"{at} の to の ${key} は pattern にないグループ")
             return None
-    return PathRewrite(pattern, to.strip(), label if isinstance(label, str) and label else to.strip(), beside)
+    return PathRewrite(pattern, to.strip(), label if isinstance(label, str) and label else to.strip(), beside, copy)
 
 
 def path_mapping_of(value: Any, problems: list[str], index: int) -> Optional[PathMapping | PathRewrite]:
@@ -99,8 +108,9 @@ def path_mapping_of(value: Any, problems: list[str], index: int) -> Optional[Pat
         return None
     if "pattern" in value or "to" in value:
         return _rewrite_of(value, at, problems)
-    if "overviewsBeside" in value:
-        problems.append(f"{at} の overviewsBeside は pattern・to の読み替えにだけ書ける")
+    for key in ("overviewsBeside", "localCopy"):
+        if key in value:
+            problems.append(f"{at} の {key} は pattern・to の読み替えにだけ書ける")
     prefix, label, url = value.get("prefix"), value.get("label"), value.get("url")
     if not isinstance(prefix, str) or not path_parts(prefix):
         problems.append(f"{at} に prefix（パスの先頭）なし")

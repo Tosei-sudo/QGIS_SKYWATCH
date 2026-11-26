@@ -369,6 +369,8 @@ class Outcome:
     ovr: str = ""
     #: `ovr` is named through GDAL itself (attach_native: a read-only folder), not through PamAllocateProxy.
     native: bool = False
+    #: Built beside a copy on this PC (localCopy) and put beside the image on the share too (share_beside).
+    shared: bool = False
 
 
 def local_path(layer: QgsMapLayer) -> Optional[str]:
@@ -454,7 +456,8 @@ def build_external(path: str, options: OverviewOptions, progress: Callable[[floa
     config = _config(src, options)
     folder = os.path.dirname(os.path.abspath(path))
     # A rewrite's images with `overviewsBeside` (place_beside): beside them, as "auto" does, when it can be written.
-    beside = options.location in ("cache", "temp") and beside_wanted(path) and writable_folder(folder)
+    # A copy on this PC (localCopy): beside it, in its own folder (it goes with the copy).
+    beside = options.location in ("cache", "temp") and (beside_wanted(path) or _copied(path)) and writable_folder(folder)
     if options.location in ("cache", "temp") and not beside:
         # "temp" too: the .ovr is named in the image's .aux.xml in the cache folder.
         if not cache_folder():
@@ -497,6 +500,48 @@ def build_external(path: str, options: OverviewOptions, progress: Callable[[floa
         return Outcome(BUILT, path, tuple(factors))
     finally:
         shutil.rmtree(work, ignore_errors=True)
+        if os.path.exists(part):
+            try:
+                os.remove(part)
+            except OSError:
+                pass
+
+
+def _copied(path: str) -> Optional[str]:
+    """The image on the share `path` is this PC's copy of (localCopy), None otherwise."""
+    from . import local_copy_io
+
+    return local_copy_io.original_of(path)
+
+
+def share_beside(path: str, options: OverviewOptions) -> bool:
+    """
+    The .ovr just built beside a copy on this PC (localCopy) put beside the
+    image on the share too, where it would have been built without the
+    copy (`location` "auto", or a rewrite's `overviewsBeside`; the folder
+    can be written; none there yet), so whoever opens it next uses it.
+    Copied under another name first, so a half-written .ovr is never read.
+    Whether it was put there.
+    """
+    original = _copied(path)
+    built = path + ".ovr"
+    if not original or not os.path.isfile(built):
+        return False
+    target = original + ".ovr"
+    folder = os.path.dirname(os.path.abspath(original))
+    if not (options.location == "auto" or beside_wanted(original)) or os.path.exists(target) or not writable_folder(folder):
+        return False
+    part = os.path.join(folder, f".{os.path.basename(target)}.{uuid.uuid4().hex[:8]}.part")
+    try:
+        shutil.copyfile(built, part)
+        if os.path.exists(target):
+            return False
+        os.replace(part, target)
+        return True
+    except OSError as error:
+        QgsMessageLog.logMessage(f"{os.path.basename(target)} を共有フォルダの画像の隣に置けず（{error}）", LOG_TAG, Qgis.MessageLevel.Info)
+        return False
+    finally:
         if os.path.exists(part):
             try:
                 os.remove(part)
@@ -854,7 +899,8 @@ def before_open(path: str) -> bool:
     options = current
     if not options.enabled or options.location not in ("cache", "temp") or not path or path.startswith("/vsi") or "://" in path:
         return False
-    if not cache_folder() or not os.path.isfile(path) or pam_proxy() is None:
+    if not cache_folder() or not os.path.isfile(path) or pam_proxy() is None or _copied(path):
+        # A copy on this PC (localCopy) keeps its .aux.xml beside it, in its own folder.
         return False
     made: list[str] = []
     try:
@@ -1058,7 +1104,14 @@ class OverviewQueue:
         return ([self._current] if self._current else []) + [p for p, _ in self._waiting]
 
     def request(self, layers: Sequence[QgsMapLayer], options: OverviewOptions, message_bar=None) -> list[str]:
-        """Queues the local images of `layers` (unless `options` turns building off); the paths queued."""
+        """
+        Queues the local images of `layers` (unless `options` turns building
+        off); the paths queued. Large images on a network folder are copied to
+        this PC first (localCopy): theirs wait for the copy, built from it.
+        """
+        from . import local_copy_io
+
+        copying = local_copy_io.queue.request(layers, message_bar, options)
         if not options.enabled:
             return []
         if message_bar is not None:
@@ -1070,7 +1123,7 @@ class OverviewQueue:
             if not path:
                 continue
             key = os.path.normcase(os.path.abspath(path))
-            if key in known:
+            if key in known or key in copying:
                 continue
             known.add(key)
             self._waiting.append((path, options))
@@ -1093,7 +1146,10 @@ class OverviewQueue:
         name = os.path.basename(path)
 
         def work(task: FunctionTask) -> Outcome:
-            return build_external(path, options, task.progress, task.isCanceled)
+            outcome = build_external(path, options, task.progress, task.isCanceled)
+            if outcome.kind == BUILT and _copied(path) and share_beside(path, options):
+                return Outcome(BUILT, outcome.path, outcome.factors, shared=True)
+            return outcome
 
         self._task = run_task(f"ピラミッドの作成（{name}）", work,
                               lambda outcome: self._ended(outcome, None),
@@ -1107,7 +1163,9 @@ class OverviewQueue:
             if outcome is not None and outcome.kind == BUILT:
                 reload_layers(outcome.path)
                 if bar is not None:
-                    bar.pushMessage(TITLE, f"{name}.ovr を作成（画像の隣。画像本体はそのまま）", Qgis.MessageLevel.Info, 5)
+                    where = ("手元のコピーと共有フォルダの画像の隣" if outcome.shared else
+                             "手元のコピーの隣" if _copied(outcome.path) else "画像の隣。画像本体はそのまま")
+                    bar.pushMessage(TITLE, f"{name}.ovr を作成（{where}）", Qgis.MessageLevel.Info, 5)
             elif outcome is not None and outcome.kind == OTHERS:
                 reload_layers(outcome.path)
                 if bar is not None:

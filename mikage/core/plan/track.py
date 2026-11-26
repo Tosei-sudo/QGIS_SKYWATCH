@@ -106,7 +106,7 @@ def satellite_track(sat: SatelliteSpec, start: float, end: float, step: Optional
         result.track.append(g.lon_lat)
         result.heights.append(g.height * 1000)
         result.ascending.append(g.ascending)
-        result.open.append(min_sun is None or sat.sar or sun_elevation(g.lon_lat, t) >= min_sun)
+        result.open.append(min_sun is None or not sat.daylight or sun_elevation(g.lon_lat, t) >= min_sun)
         for k, (inner, outer) in enumerate(edges):
             inner.append(g.across[2 * k])
             outer.append(g.across[2 * k + 1])

@@ -6,59 +6,53 @@ name, id or other name (`satelliteAliases`), or a sensor as the catalog writes i
 
 An image's sensor is a satellite's when it names it as 計画と実績の照合 does (names.names_satellite: 「WV03」 for
 WorldView-3 by its other names, 「WorldView-3 PAN」, 「ICEYE-X27」 of the series ICEYE); failing every
-satellite, a series' (「ALOS-4」 of ALOS). Its kind is that of its satellites in the satellite catalog: SAR when
-their kind attribute says so (`sarPattern`), 光学 when it says anything else; a sensor of no satellite there, of
-satellites the catalog gives no kind, or of satellites of both kinds is of no known kind (left out of SAR and 光学,
-and said), unless its own name says SAR (TerraSAR-X).
+satellite, a series' (「ALOS-4」 of ALOS). Its kind is that of its satellites in the satellite catalog (衛星の種別,
+`satelliteKinds`: 光学・SAR・IR by default, read from their kind attribute, core/plan/kinds.py); a sensor of no
+satellite there, of satellites the catalog gives no kind, or of satellites of several kinds is of no known kind
+(left out of every kind, and said), unless its own name says one (TerraSAR-X: a kind's `match`).
+
+The kinds and the words for them (2026-11-26: IR, and the kinds of the settings) are those in use (kinds()).
 
 Pure Python: a sentence's words are read by core/text_command.py, the card and the search are the plugin's.
 """
 from __future__ import annotations
 
 import re
-import unicodedata
 from dataclasses import dataclass, field
 from typing import Any, Optional, Sequence
 
-from ..plan.api import NO_NAMES, SatelliteNames, names_satellite, plain
+from ..plan.api import NO_NAMES, SatelliteNames, kinds, names_satellite, plain
 
+#: The kinds of old (the names of the built-in ones).
 SAR, OPTICAL = "SAR", "光学"
-KINDS = (SAR, OPTICAL)
 #: Between the sensors of the センサー box (and of the card's 衛星・種別).
 SEPARATOR = "、"
-#: A sentence's words for each kind (NFKC).
-_KIND_WORDS = {
-    SAR: re.compile(r"(?<![A-Za-z])SAR(?![A-Za-z])|レーダ|合成開口", re.IGNORECASE),
-    OPTICAL: re.compile(r"光学|可視|(?<![A-Za-z])optical(?![A-Za-z])", re.IGNORECASE),
-}
-#: A word of the box that is a kind on its own (「SAR」「光学衛星」「レーダー画像」).
-_KIND_WORD = {
-    SAR: re.compile(r"(sar|レーダー?|合成開口(レーダー?)?)(衛星|画像|センサー?)?"),
-    OPTICAL: re.compile(r"(光学|可視|optical)(衛星|画像|センサー?)?"),
-}
-#: A sensor whose own name says it is SAR (TerraSAR-X, a catalog's 「… SAR」).
-_SAR_NAME = re.compile(r"SAR|radar|レーダ", re.IGNORECASE)
 
 
-def _nfkc(text: Any) -> str:
-    return unicodedata.normalize("NFKC", str(text or ""))
+class _Names:
+    """The names of the kinds in use (`satelliteKinds`), read each time: `"IR" in KINDS`."""
+
+    def __iter__(self):
+        return iter(kinds().names)
+
+    def __contains__(self, value) -> bool:
+        return value in kinds().names
+
+    def __len__(self) -> int:
+        return len(kinds().names)
+
+
+KINDS = _Names()
 
 
 def kinds_in(text: str) -> list[str]:
-    """The kinds a sentence names (SAR, 光学), in the order written."""
-    t = _nfkc(text)
-    found = []
-    for kind, pattern in _KIND_WORDS.items():
-        m = pattern.search(t)
-        if m:
-            found.append((m.start(), kind))
-    return [k for _at, k in sorted(found)]
+    """The kinds a sentence names (光学, SAR, IR …), in the order written."""
+    return kinds().kinds_in(text)
 
 
 def kind_word(word: str) -> Optional[str]:
-    """The kind a word of the box is on its own (「SAR」「光学」「レーダー」), else None (a satellite or a sensor)."""
-    w = re.sub(r"\s+", "", _nfkc(word)).lower()
-    return next((k for k, p in _KIND_WORD.items() if p.fullmatch(w)), None)
+    """The kind a word of the box is on its own (「SAR」「光学」「レーダー」「赤外画像」), else None (a satellite or a sensor)."""
+    return kinds().kind_word(word)
 
 
 def sensor_list(text: str) -> list[str]:
@@ -74,10 +68,10 @@ def words_of(text: str) -> list[str]:
 # ---- the satellites of a sensor, and its kind -------------------------------------------------------------
 
 def satellite_kind(sat: Any) -> Optional[str]:
-    """A satellite's kind: SAR when the catalog says so, 光学 when it gives another kind, None when it gives none."""
-    if getattr(sat, "sar", False):
-        return SAR
-    return OPTICAL if getattr(sat, "kind", None) else None
+    """A satellite's kind (its name: 光学, SAR, IR …) when the catalog gives it one (or it is SAR); None when not."""
+    if getattr(sat, "kind", None) or getattr(sat, "sar", False):
+        return getattr(sat, "kind_name", None) or (SAR if getattr(sat, "sar", False) else OPTICAL)
+    return None
 
 
 def _names(sat: Any, names: SatelliteNames) -> set:
@@ -94,11 +88,12 @@ def satellites_of_sensor(value: str, sats: Sequence[Any], names: SatelliteNames 
 
 def sensor_kind(value: str, sats: Sequence[Any], names: SatelliteNames = NO_NAMES) -> Optional[str]:
     """A catalog's sensor's kind (SAR, 光学), None when it is not known."""
-    kinds = {satellite_kind(s) for s in satellites_of_sensor(value, sats, names)} - {None}
-    if len(kinds) == 1:
-        return kinds.pop()
-    if not kinds and _SAR_NAME.search(str(value or "")):
-        return SAR
+    found = {satellite_kind(s) for s in satellites_of_sensor(value, sats, names)} - {None}
+    if len(found) == 1:
+        return found.pop()
+    if not found:
+        own = kinds().matched(value)
+        return own.name if own is not None else None
     return None
 
 
@@ -149,10 +144,10 @@ def pick_sensors(words: Sequence[str], values: Sequence[str], sats: Sequence[Any
     keeps those named of that kind (or of none known). Without the catalog's
     sensors (it can not list them): the names as written, the kinds missing.
     """
-    kinds = [k for k in dict.fromkeys(kind_word(w) for w in words) if k]
+    asked = [k for k in dict.fromkeys(kind_word(w) for w in words) if k]
     others = [w for w in words if not kind_word(w)]
     if not values:
-        return SensorPick(list(dict.fromkeys(others)), [], kinds, listed=False)
+        return SensorPick(list(dict.fromkeys(others)), [], asked, listed=False)
     pick = SensorPick()
     kind_of = {v: sensor_kind(v, sats, names) for v in values}
     chosen: set = set()
@@ -162,12 +157,12 @@ def pick_sensors(words: Sequence[str], values: Sequence[str], sats: Sequence[Any
             chosen.update(found)
         else:
             pick.missing.append(w)
-    if kinds and others:
-        chosen = {v for v in chosen if kind_of[v] in kinds or kind_of[v] is None}
-    elif kinds:
-        chosen = {v for v in values if kind_of[v] in kinds}
+    if asked and others:
+        chosen = {v for v in chosen if kind_of[v] in asked or kind_of[v] is None}
+    elif asked:
+        chosen = {v for v in values if kind_of[v] in asked}
         pick.unknown = [v for v in values if kind_of[v] is None]
-        pick.missing += [k for k in kinds if not any(kind_of[v] == k for v in values)]
+        pick.missing += [k for k in asked if not any(kind_of[v] == k for v in values)]
     pick.sensors = [v for v in values if v in chosen]
     return pick
 

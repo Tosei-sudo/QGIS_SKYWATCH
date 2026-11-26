@@ -198,6 +198,7 @@ class Command(Feature):
             return []
         if not pick.sensors:
             if any(w in KINDS for w in pick.missing) and not pick.listed:
-                raise RuntimeError(tr("画像カタログのセンサーの一覧が読めず、SAR・光学で探せない（衛星・種別を消すか、衛星の名前で）"))
+                raise RuntimeError(tr("画像カタログのセンサーの一覧が読めず、{k}で探せない（衛星・種別を消すか、衛星の名前で）")
+                                   .format(k="・".join(w for w in pick.missing if w in KINDS)))
             raise RuntimeError(tr("「{w}」に当たるセンサーが画像カタログにない（衛星・種別を直すか消す）").format(w="、".join(words)))
         return pick.sensors

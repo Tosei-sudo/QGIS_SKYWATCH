@@ -35,6 +35,8 @@ from typing import Any, Iterable, Optional, Sequence
 
 from . import analysis_plan
 from .analysis import KINDS, Table, fold
+# 撮像依頼の種別: 任意 and the satellites' kinds in use (`satelliteKinds`: 光学・SAR・IR), read each time told.
+from .request.api import REQUEST_KINDS
 from .text_assist import Message, TextTask
 
 TASK = "dataChat"
@@ -93,7 +95,7 @@ NOTES: dict[str, tuple[str, tuple[Col, ...]]] = {
         Col("id", "依頼ID"), Col("name", "依頼の名前"), Col("managementNo", "管理番号"), Col("group", "依頼グループ（空はグループなし）", read=True),
         Col("category", "区分", ("定点", "臨時")), Col("achieve", "達成条件", ("毎回", "期間内1回")), Col("start", "開始"),
         Col("end", "終了"), Col("status", "状態", ("有効", "停止", "完了")), Col("priority", "優先度（数が小さいほど優先度が高い）"),
-        Col("kind", "種別", ("任意", "光学", "SAR")), Col("requester", "依頼者", read=True))),
+        Col("kind", "種別", REQUEST_KINDS), Col("requester", "依頼者", read=True))),
     "requestHistory": ("日ごとの撮像予定（1 行 = 1 依頼・1 日）", (
         Col("day", "対象日 'YYYY-MM-DD'"), Col("requestId", "依頼ID"), Col("name", "依頼の名前"), Col("system", "出力したシステム", read=True),
         Col("satellite", "衛星", read=True), Col("result", "結果（採用 = 撮像予定として出力した・見送り・要求外）"),

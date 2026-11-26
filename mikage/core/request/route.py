@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 from typing import Optional, Sequence
 
-from ..plan.api import SatelliteSpec
+from ..plan.api import ANY_KIND, SatelliteSpec
 from .model import ImagingRequest, bbox_of, in_rings
 from .systems import ExportSystem
 
@@ -31,7 +31,7 @@ def system_of_satellite(sat: SatelliteSpec, systems: Sequence[ExportSystem]) -> 
     if own:
         return next((s for s in systems if _plain(s.system) == _plain(own)), None)
     for s in systems:
-        if s.kind == "光学" and sat.sar or s.kind == "SAR" and not sat.sar:
+        if s.kinds and not _named(s.kinds, sat.kind_name):
             continue
         if _named(s.satellites, sat.name, sat.id, *sat.aliases) or _named(s.series, sat.series):
             return s
@@ -52,9 +52,7 @@ def system_names(systems: Sequence[ExportSystem]):
 
 def why_not(req: ImagingRequest, sat: SatelliteSpec) -> Optional[str]:
     """Why a satellite (mode) cannot take a request; None when it can."""
-    if req.kind == "光学" and sat.sar:
-        return "種別"
-    if req.kind == "SAR" and not sat.sar:
+    if req.kind and req.kind != ANY_KIND and _plain(req.kind) != _plain(sat.kind_name):
         return "種別"
     if req.satellites and not _named(req.satellites, sat.name, sat.id, *sat.aliases):
         return "衛星"
@@ -71,7 +69,7 @@ def why_not(req: ImagingRequest, sat: SatelliteSpec) -> Optional[str]:
         return "観測方向"
     if req.resolution is not None and sat.resolution is not None and sat.resolution > req.resolution:
         return "分解能"
-    if req.time_of_day == "夜" and not sat.sar:
+    if req.time_of_day == "夜" and sat.daylight:
         return "時間帯"
     return None
 

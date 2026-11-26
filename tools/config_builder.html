@@ -155,7 +155,9 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "pathMappings",
   "overviews",
   "rasterSpeed",
+  "localCopy",
   "complexImages",
+  "satelliteKinds",
   "satelliteCatalogs",
   "sensorCatalogs",
   "satelliteAliases",
@@ -1621,7 +1623,7 @@ const WHERE = T("where", "絞り込み（where）", { ph: "STATUS = 'ACTIVE'", h
 const TZ = T("timeZone", "日時のタイムゾーン", { ph: "Asia/Tokyo・UTC・+09:00", help: "サービスの日時の本当のタイムゾーン（サービスの申告と違うとき）" });
 const STZ = T("serviceTimeZone", "サービスの申告", { ph: "UTC", help: "サービスが申告しているタイムゾーン（任意）" });
 const SWATH_UNIT = S("swathUnit", "観測幅の単位", [["km", "km"], ["m", "m"]]);
-const SAR = T("sarPattern", "SAR とみなす名前", { ph: "SAR|radar|レーダ", help: "衛星名・センサー名の正規表現" });
+const SAR = T("sarPattern", "SAR とみなす種別", { ph: "SAR|radar|レーダ", help: "種別の属性（fields.kind）に当てる正規表現。このカタログだけ satelliteKinds の SAR の match を置きかえる" });
 const catalogLabels = () => (state.imageCatalogs || []).map((c, i) => (c && c.label) || `カタログ ${i + 1}`);
 const CATALOG = T("catalog", "撮像済みを確かめるカタログ", { help: "画像カタログの名前（label）", list: catalogLabels });
 
@@ -1713,12 +1715,14 @@ const SPEC = [
         T("pattern", "先に試すパス（正規表現）", { ph: "^//[^/]+/(?:[^/]+/)*([^/]+)$", help: "Python の re、大文字小文字は区別なし。区切りは \\ も / として合わせる", showIf: (it) => !it.prefix && !it.url }),
         T("to", "読み替え先", { ph: "D:/$1", help: "$1・${name} がグループ、$$ が $。そこになければ元のパスで開く", showIf: (it) => !it.prefix && !it.url }),
         B("overviewsBeside", "ピラミッドは読み替え先の画像の隣に置く", { help: "既定 false。true: ここで見つかった画像の .ovr は、ピラミッドの置き場所が temp・cache でも画像の隣（書き込めるとき）。共有フォルダなら、だれかが一度作ればほかの人は作らずに使う", showIf: (it) => !it.prefix && !it.url }),
+        B("localCopy", "手元にコピーして見る", { help: "未指定: localCopy のとおり（ネットワーク上のフォルダの大きな画像だけコピー）。true: ここで見つかった大きな画像はどこにあっても手元の PC にコピーしてから表示。false: コピーしない", showIf: (it) => !it.prefix && !it.url }),
       ], { title: (it) => it.prefix || (it.pattern && `${it.pattern} → ${it.to || "?"}`), check: (it, at, p) => {
         const rewrite = it.pattern !== undefined || it.to !== undefined;
         if (rewrite && (it.prefix !== undefined || it.url !== undefined)) p.push(`${at}: prefix（・url）か pattern・to のどちらか`);
         else if (rewrite && !(it.pattern && it.to)) p.push(`${at}: pattern と to が必要`);
         else if (!rewrite && !it.prefix) p.push(`${at}: prefix（パスの先頭）か pattern・to が必要`);
         if (!rewrite && it.overviewsBeside !== undefined) p.push(`${at}: overviewsBeside は pattern・to の読み替えにだけ書ける`);
+        if (!rewrite && it.localCopy !== undefined) p.push(`${at}: localCopy は pattern・to の読み替えにだけ書ける`);
       } }) },
     { key: "overviews", label: "ピラミッド（.ovr）の自動作成", doc: "ピラミッドovrの自動作成overviews", help: "ピラミッドのない画像を開いたとき裏で .ovr を作る（既定は作る・auto・all）。",
       field: O("overviews", "ピラミッド", [
@@ -1736,6 +1740,14 @@ const SPEC = [
         TJ("gdalCacheMB", "GDAL のブロックキャッシュ（MB）", { ph: "auto", help: "auto（既定）= RAM の 10 %（最大 2048 MB。GDAL の既定 5 % より小さくはしない）。数（MB。RAM の半分まで）か false（変えない）" }),
         B("qgisSettings", "QGIS のオプションを直す", { help: "既定 true。false で QGIS のオプションは変えない" }),
       ], { allowFalse: "何も変えない（false）" }) },
+    { key: "localCopy", label: "手元にコピーして見る", doc: "手元にコピーして見るlocalcopy", help: "共有フォルダ（\\\\server\\… やネットワークドライブ）の大きな画像を開いたら、裏で手元の PC に丸ごとコピーし、終わったら手元から表示する（ピラミッドも手元のコピーから作り、書ければ共有フォルダの画像の隣にも置く）。書かなければ 300 MB 以上の画像を一時フォルダにコピー（QGIS を閉じたら消す）。",
+      field: O("localCopy", "手元のコピー", [
+        B("enabled", "使う", { help: "既定 true" }),
+        N("minMB", "コピーする最小の大きさ（MB）", { min: 0, ph: "300", help: "これより小さい画像は共有フォルダから読む。0 ですべて" }),
+        S("location", "置き場所", [["temp", "temp（一時フォルダ。QGIS を閉じたら消す）"], ["cache", "cache（残して次回も使う）"]], { ph: "temp" }),
+        T("folder", "フォルダ", { ph: "%TEMP%\\MIKAGE\\copies", help: "空なら temp は %TEMP%\\MIKAGE\\copies、cache は %LOCALAPPDATA%\\MIKAGE\\copies。環境変数を書ける" }),
+        N("maxGB", "上限（GB）", { min: 1, ph: "30", help: "コピーの合計の上限。超えるときは開いていないものを古い順に消す。PC の空きは 5 %（2 GB 以上）残す" }),
+      ], { allowFalse: "コピーしない（false）" }) },
     { key: "complexImages", label: "複素 SAR 画像（SICD）の表示", doc: "複素-sar-画像sicdの表示compleximages", help: "SICD の I・Q バンドや複素数の画素の画像を振幅で表示する（既定は dB）。",
       field: S("complexImages", "表示", [["dB", "dB（20·log10 振幅）"], ["amplitude", "amplitude（振幅 √(I²+Q²)）"]], { ph: "dB", falseLabel: "false（QGIS のまま I・Q を表示）" }) },
     { key: "imageRules", label: "画像ごとの補正", doc: "画像補正", help: "ファイル名に合う画像に補正・バンド・no data を当てる。",
@@ -1758,6 +1770,14 @@ const SPEC = [
       field: TJ("imageCorrections", "補正のテーブル", { ph: "URL か { \"url\", \"fields\", \"where\" }", help: "TBL_IMAGE_CORRECTION。役割: " + Object.entries(K.roles.imageCorrections).map(([k, v]) => `${k}（${v}）`).join("・") + "。必須は imageId（画像 ID）と points（目印の点）" }) },
   ] },
   { group: "撮像計画・撮像依頼", keys: [
+    { key: "satelliteKinds", label: "衛星の種別", doc: "撮像計画", help: "衛星の大分類（撮像計画・撮像依頼の衛星の一覧のいちばん上、依頼の種別）。並べた順に画面に出る。書かなければ 光学・SAR・IR。衛星がどの種別かは衛星カタログの種別の属性（fields.kind）で決め、名前と同じか match に当たる種別、どれにも当たらなければ match のない種別（既定は光学）。name が 光学・SAR・IR なら、書かない項目は組み込みの値。",
+      field: I("satelliteKinds", "種別", [
+        T("name", "名前", { req: true, ph: "IR", help: "画面に出る名前で、依頼の種別に保存される値（16 文字まで。「任意」は使えない）" }),
+        T("match", "種別の属性に当てる正規表現", { ph: "赤外|(?<![A-Za-z])IR(?![A-Za-z])|thermal", help: "衛星カタログ・センサーモードの種別の属性に当てる（大文字小文字を区別しない）。上の種別から順に当てる。書かなければ名前と同じときだけ（いちばん上の match のない種別は、どれにも当たらない衛星の種別）" }),
+        L("words", "文で読む言葉", { ph: "IR, 赤外, 熱赤外, サーマル", help: "文で操作の画像検索・依頼文から下書きで、この種別と読む言葉（名前も読む）" }),
+        B("daylight", "日中のみ撮像", { help: "true: 撮像計画の日照条件の対象・依頼の時間帯「夜」には使わない（光学）。false: 夜も撮像（SAR・熱赤外）" }),
+        B("clouds", "雲があると写らない", { help: "true: 雲量予報・実施しない雲量の対象（光学・IR）。false: 雲を通して撮像（SAR。干渉ペアの対象）" }),
+      ], { title: (it) => it.name || "種別" }) },
     { key: "satelliteCatalogs", label: "衛星カタログ（TLE）", doc: "撮像計画", help: "衛星の TLE と諸元。fields に tle か tle1＋tle2 が必須。",
       field: I("satelliteCatalogs", "衛星カタログ", [
         LABEL, URL_(), R("fields", "属性名", K.roles.satelliteCatalogs, { requiredAny: [["tle"], ["tle1", "tle2"]] }),
@@ -1796,7 +1816,7 @@ const SPEC = [
     { key: "requestExports", label: "日次出力（オーダー用ファイル）", doc: "", ext: "docs/imaging-requests.md", help: "衛星システムごとに、その日の依頼をどう書き出すか。CSV は列（キー）を、JSON は JSON Schema（x-source で中身を指定）を組む。下の見本で出力を確かめられる。",
       field: I("requestExports", "システム", [
         T("system", "システム名", { req: true, ph: "SYS-A" }), LABEL,
-        S("kind", "受け持つ種別", [["光学", "光学"], ["SAR", "SAR"], ["両方", "両方"]], { ph: "両方" }),
+        L("kind", "受け持つ種別", { single: true, ph: "両方（すべての種別）", help: "satelliteKinds の名前（光学・SAR・IR など）。複数はカンマ区切り。書かないか「両方」ですべての種別" }),
         L("series", "衛星シリーズ", { ph: "OPT-X, OPT-Y" }), L("satellites", "衛星", { help: "衛星名（シリーズで足りなければ）" }),
         N("order", "試す順番", { help: "小さいほど先" }),
         O("limit", "1 日の上限", [N("count", "依頼件数", { min: 0 }), N("scenes", "シーン数", { min: 0 })]),
@@ -2136,6 +2156,7 @@ const DOC_FILES = {
   "データ分析": "docs/features/analysis.md",
   "パスの読み替えpathmappings": "docs/features/images.md",
   "ピラミッドovrの自動作成overviews": "docs/features/images.md",
+  "手元にコピーして見るlocalcopy": "docs/features/images.md",
   "一覧のビュー列並べ替え絞り込みの保存": "docs/features/screen.md",
   "作成者更新者の記録edittracking": "docs/admin/operations.md",
   "個人の関心地域地点interests": "docs/features/images.md",
@@ -3254,7 +3275,14 @@ function checkExport(it, at, p) {
   });
   if (fmt === "json" && !(isObj(it.schema) || (typeof it.schema === "string" && it.schema))) p.push(`${at}: JSON Schema（schema）がない`);
   if (fmt === "json" && isObj(it.schema) && !JSON.stringify(it.schema).includes('"x-source":"requests"')) p.push({ warn: true, text: `${at}: スキーマに x-source: requests の配列がない（依頼が出ない）` });
-  if (it.kind !== undefined && !["光学", "SAR", "両方"].includes(it.kind)) p.push(`${at}: kind は 光学・SAR・両方`);
+  if (it.kind !== undefined) {
+    // 種別: satelliteKinds の名前（書かなければ 光学・SAR・IR）、その配列、または 両方（すべて）。
+    const names = Array.isArray(state.satelliteKinds) && state.satelliteKinds.length
+      ? state.satelliteKinds.map((k) => (isObj(k) ? k.name : k)).filter((n) => typeof n === "string") : ["光学", "SAR", "IR"];
+    const given = Array.isArray(it.kind) ? it.kind : [it.kind];
+    const odd = given.filter((k) => typeof k !== "string" || (!["両方", "すべて", "任意"].includes(k) && !names.some((n) => n.toLowerCase() === k.trim().toLowerCase())));
+    if (odd.length) p.push(`${at}: kind は 両方 か satelliteKinds の名前（${names.join("・")}）`);
+  }
   if (it.maxPerFile !== undefined && !(Number.isInteger(it.maxPerFile) && it.maxPerFile >= 1)) p.push(`${at}: maxPerFile は 1 以上の整数`);
   if (typeof it.linkIdLength === "number" && !Number.isInteger(it.linkIdLength)) p.push(`${at}: linkIdLength は整数（外部連携ID の文字数）`);
   if (it.timeZone && zoneOffset(it.timeZone, DAY) === 0 && !/^(utc|z|gmt|[+-]00:?00)$/i.test(it.timeZone) && !isIana(it.timeZone)) p.push({ warn: true, text: `${at}: timeZone「${it.timeZone}」をこのブラウザで確かめられない` });

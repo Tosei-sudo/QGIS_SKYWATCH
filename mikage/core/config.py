@@ -31,6 +31,7 @@ from .geocode import GeocoderConfig, geocoder_of
 from .layer_templates import LayerTemplate, templates_of
 from .overviews import DEFAULT_OVERVIEWS, OverviewOptions, overviews_of
 from .raster_speed import DEFAULT_RASTER_SPEED, RasterSpeedOptions, raster_speed_of
+from .local_copy import DEFAULT_LOCAL_COPY, LocalCopyOptions, local_copy_of
 from .complex_images import DEFAULT_MODE as DEFAULT_COMPLEX_MODE, complex_images_of
 from .obs.alerts import AlertSettings, EsriSource, alert_settings_of, level_key_problems
 from .obs.assignments import assignment_source_of
@@ -41,6 +42,7 @@ from .obs.handover import HandoverSettings, handover_settings_of
 from .obs.model import ObservationStoreConfig, ObservationVocabulary, observation_store_of, vocabulary_of
 from .plan.names import AliasTableConfig, alias_tables_of
 from .plan.outages import satellite_outages_of
+from .plan.api import DEFAULT_KINDS, SatelliteKinds, satellite_kinds_of
 from .plan.modes import SensorCatalogConfig, sensor_catalog_of
 from .plan.satellites import GroundStation, SatelliteCatalogConfig, ground_stations_of, satellite_catalog_of
 from .plan.weather import DEFAULT_CLOUD_FORECAST, CloudForecastConfig, cloud_forecast_of
@@ -79,9 +81,13 @@ class PluginConfig:
     overviews: OverviewOptions = DEFAULT_OVERVIEWS
     #: `rasterSpeed`: GDAL's threads and block cache in this QGIS, QGIS's slower options put right once (core/raster_speed.py).
     raster_speed: RasterSpeedOptions = DEFAULT_RASTER_SPEED
+    #: `localCopy`: large images on network folders copied to this PC in the background and read there (core/local_copy.py).
+    local_copy: LocalCopyOptions = DEFAULT_LOCAL_COPY
     #: `complexImages`: complex SAR images (SICD's I/Q bands, complex pixels) shown as "dB" or "amplitude"; None as QGIS opens them.
     complex_images: Optional[str] = DEFAULT_COMPLEX_MODE
     satellite_catalogs: list[SatelliteCatalogConfig] = field(default_factory=list)
+    #: `satelliteKinds`: 衛星の種別 (光学・SAR・IR by default; core/plan/kinds.py), in the order listed.
+    satellite_kinds: SatelliteKinds = DEFAULT_KINDS
     sensor_catalogs: list[SensorCatalogConfig] = field(default_factory=list)
     #: `satelliteAliases`: Esri tables of satellites' other names (the image catalog's 「WV03」 for 「WorldView-3」).
     satellite_aliases: list[AliasTableConfig] = field(default_factory=list)
@@ -349,7 +355,9 @@ SECTIONS = (
     Section("pathMappings", "path_mappings", path_mappings_of),
     Section("overviews", "overviews", overviews_of),
     Section("rasterSpeed", "raster_speed", raster_speed_of),
+    Section("localCopy", "local_copy", local_copy_of),
     Section("complexImages", "complex_images", complex_images_of),
+    Section("satelliteKinds", "satellite_kinds", satellite_kinds_of),
     Section("satelliteCatalogs", "satellite_catalogs", satellite_catalog_of, listed=True),
     Section("sensorCatalogs", "sensor_catalogs", sensor_catalog_of, listed=True),
     Section("satelliteAliases", "satellite_aliases", alias_tables_of),
@@ -422,6 +430,14 @@ def parse_config(value: Any) -> tuple[PluginConfig, list[str]]:
             setattr(config, s.attr, s.read(value[s.key], problems, config))
         else:
             setattr(config, s.attr, s.read(value[s.key], problems))
+    # 衛星の種別: the catalogs read their satellites' (and modes') kinds by the file's own.
+    for c in config.satellite_catalogs:
+        c.kinds = config.satellite_kinds
+    for c in config.sensor_catalogs:
+        c.kinds = config.satellite_kinds
+        for m in c.modes:
+            m.set_kind(config.satellite_kinds, c.sar_pattern)
+    problems.extend(kind_problems(config))
     # 練習モードだけのカタログ: aside (tsudo 2026-11-23).
     config.practice_catalogs = [c for c in config.image_catalogs if c.mode == "training"]
     config.image_catalogs = [c for c in config.image_catalogs if c.mode != "training"]
@@ -433,6 +449,17 @@ def parse_config(value: Any) -> tuple[PluginConfig, list[str]]:
     if leftover:
         problems.append(leftover)
     return config, problems
+
+
+def kind_problems(config: PluginConfig) -> list[str]:
+    """The kinds (`requestExports[].kind`) that are none of `satelliteKinds`."""
+    names = {n.casefold() for n in config.satellite_kinds.names}
+    out = []
+    for i, s in enumerate(config.request_exports):
+        unknown = [k for k in s.kinds if k.casefold() not in names]
+        if unknown:
+            out.append(f"requestExports[{i}] の kind「{'・'.join(unknown)}」は satelliteKinds にない種別")
+    return out
 
 
 def token_problem(value: Any) -> str:

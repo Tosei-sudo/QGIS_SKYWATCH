@@ -14,6 +14,9 @@ if TYPE_CHECKING:  # the door (core/door.py): each name is imported from its mod
         best_scene, framed, look_at, Opportunity, plan_access, PlanOptions, PlanResult, PlanTarget, reach_of, satrec_of,
     )
     from .catalogs import load_satellites, load_sensor_modes
+    from .kinds import (
+        ANY_KIND, DEFAULT_KINDS, kind_of_sat, kinds, request_kinds, satellite_kinds_of, SatelliteKind, SatelliteKinds, set_kinds,
+    )
     from .cover import cover_plan
     from .modes import sample_sensor_modes, with_modes
     from .moving import (
@@ -76,4 +79,6 @@ __all__ = [
     "track_layers", "track_place", "track_rate", "track_rows", "track_shapes", "track_ticks", "UncertaintyModel", "unit",
     "warning_of", "when_text", "with_modes",
     "OLD_TLE", "SAMPLE_SOURCE",
+    "ANY_KIND", "DEFAULT_KINDS", "kind_of_sat", "kinds", "request_kinds", "satellite_kinds_of", "SatelliteKind", "SatelliteKinds",
+    "set_kinds",
 ]

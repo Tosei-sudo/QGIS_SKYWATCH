@@ -31,6 +31,7 @@ from qgis.PyQt.QtWidgets import (
 
 from ..core import audit
 from ..core.catalog.api import kind_word, sensor_words_of
+from ..core.plan.api import kinds
 from ..core.data_chat import TASK as DATA_TASK, is_question
 from ..core.text_command import (
     ALL, BY_KEY, Operation, Reading, by_words, command_messages, lat_lon_in, operation_of, read, reply_done, word_matches,
@@ -174,14 +175,15 @@ class CommandCard(QDialog):
         self.satellites.setMinimumWidth(240)
         self.satellites.setPlaceholderText(self.tr("衛星の名前（、で区切る）"))
         self.satellites_row, _ = _row(self.tr("衛星"), self.satellites)
-        # 画像検索: SAR・光学, satellites, series or sensors, and the catalog's sensors they name.
+        # 画像検索: the kinds (光学・SAR・IR: satelliteKinds), satellites, series or sensors, and the catalog's sensors they name.
+        names = "・".join(kinds().names)
         self.sensors = QLineEdit()
         self.sensors.setClearButtonEnabled(True)
         self.sensors.setMinimumWidth(200)
-        self.sensors.setPlaceholderText(self.tr("SAR・光学・衛星の名前（、で区切る）"))
+        self.sensors.setPlaceholderText(self.tr("{k}・衛星の名前（、で区切る）").format(k=names))
         self.sensors.setToolTip(plain_tip(self.tr(
-            "SAR・光学、衛星・シリーズの名前（別名も）、カタログのセンサー名。画像カタログで選んでいるカタログの、"
-            "当たるセンサーで検索（SAR・光学は衛星の一覧の種別から）。空はすべてのセンサー")))
+            "種別（{k}）、衛星・シリーズの名前（別名も）、カタログのセンサー名。画像カタログで選んでいるカタログの、"
+            "当たるセンサーで検索（種別は衛星の一覧の種別から）。空はすべてのセンサー").format(k=names)))
         self.sensors_note = QLabel()
         self.sensors_note.setWordWrap(True)
         self.sensors_note.setStyleSheet("QLabel { font-size: 11px; color: #57534e; }")
@@ -385,7 +387,8 @@ class CommandCard(QDialog):
         elif not pick.sensors:
             warn = True
             if not pick.listed and any(kind_word(w) for w in words):
-                text = self.tr("センサーの一覧が読めず、SAR・光学で探せない（衛星の名前なら探せる）")
+                text = self.tr("センサーの一覧が読めず、{k}で探せない（衛星の名前なら探せる）").format(
+                    k="・".join(dict.fromkeys(k for k in (kind_word(w) for w in words) if k)))
             else:
                 text = self.tr("当たるセンサーが画像カタログにない")
         else:
