@@ -58,9 +58,9 @@ class GeoFixError(Coded):
 
 
 def fix_folder() -> str:
-    from qgis.core import QgsApplication
+    from .qsettings import profile_folder
 
-    folder = os.path.join(QgsApplication.qgisSettingsDirPath(), "mikage", "geofix")
+    folder = profile_folder("geofix")
     os.makedirs(folder, exist_ok=True)
     return folder
 

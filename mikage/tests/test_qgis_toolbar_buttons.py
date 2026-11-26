@@ -12,6 +12,7 @@ from qgis.core import QgsSettings  # noqa: E402
 from qgis.PyQt.QtCore import Qt  # noqa: E402
 from qgis.PyQt.QtWidgets import QToolButton  # noqa: E402
 
+from mikage.qgis_io import qsettings  # noqa: E402
 from mikage.core import roles  # noqa: E402
 from mikage.qgis_io import settings  # noqa: E402
 from mikage.tests.qgis_fakes import FakeIface  # noqa: E402
@@ -164,5 +165,5 @@ def test_own_buttons_with_texts_no_longer_there_or_not_of_the_roles(plugin):
     # A name no role has (a layout of the person's own, before roles): the standard without a role.
     assert toolbar_buttons.standard("夜間当番") == toolbar_buttons.DEFAULT
     # A broken setting: the standard.
-    QgsSettings().setValue(toolbar_buttons.KEY, "{not json")
+    QgsSettings().setValue(qsettings.key(toolbar_buttons.KEY), "{not json")
     assert toolbar_buttons.chosen("画像判読") == toolbar_buttons.ROLE_SETS["画像判読"]

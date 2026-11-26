@@ -13,18 +13,17 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
-from qgis.core import QgsSettings
 from qgis.gui import QgsAuthConfigSelect
 from qgis.PyQt.QtCore import QCoreApplication, Qt
 from qgis.PyQt.QtWidgets import QComboBox, QDialog, QFormLayout, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QPushButton, QVBoxLayout
 
 from ..core.gp import GpClient, GpError, GpService, GpTask, safe_url, service_root
 from ..processing_provider import gp_algorithm
-from ..qgis_io import gp_io, settings
+from ..qgis_io import gp_io, qsettings, settings
 from ..qgis_io.tasks import run_task
 from .fit import fit_text
 
-RECENT_KEY = "mikage/gp_recent"
+RECENT_KEY = "gp_recent"
 MAX_RECENT = 10
 
 
@@ -90,7 +89,7 @@ class RemoteProcessingDialog(QDialog):
     def prepare(self) -> None:
         """The services of the settings file and the URLs read lately, the last one chosen."""
         text = self.url.currentText()
-        recent = [u for u in (QgsSettings().value(RECENT_KEY, []) or []) if isinstance(u, str)]
+        recent = [u for u in (qsettings.value(RECENT_KEY, []) or []) if isinstance(u, str)]
         self.url.blockSignals(True)
         self.url.clear()
         for s in self.context.config.gp_services:
@@ -120,8 +119,8 @@ class RemoteProcessingDialog(QDialog):
         mapping = settings.auth_map()
         if chosen and mapping.get(root) != chosen:
             settings.set_auth_map({**mapping, root: chosen})
-        recent = [u for u in (QgsSettings().value(RECENT_KEY, []) or []) if isinstance(u, str) and u != url]
-        QgsSettings().setValue(RECENT_KEY, [url, *recent][:MAX_RECENT])
+        recent = [u for u in (qsettings.value(RECENT_KEY, []) or []) if isinstance(u, str) and u != url]
+        qsettings.set_value(RECENT_KEY, [url, *recent][:MAX_RECENT])
 
     def _token_for(self, url: str) -> str:
         root = service_root(url)

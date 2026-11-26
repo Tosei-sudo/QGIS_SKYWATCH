@@ -42,9 +42,9 @@ class DemError(Coded):
 
 
 def dem_folder() -> str:
-    from qgis.core import QgsApplication
+    from .qsettings import profile_folder
 
-    folder = os.path.join(QgsApplication.qgisSettingsDirPath(), "mikage", "dem")
+    folder = profile_folder("dem")
     os.makedirs(folder, exist_ok=True)
     return folder
 

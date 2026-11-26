@@ -15,7 +15,7 @@ import os
 import re
 from typing import Callable, Optional
 
-from qgis.core import QgsProject, QgsSettings
+from qgis.core import QgsProject
 from qgis.gui import QgsAuthConfigSelect
 from qgis.PyQt.QtCore import QCoreApplication, QObject, Qt
 from qgis.PyQt.QtWidgets import (
@@ -26,7 +26,7 @@ from qgis.PyQt.QtWidgets import (
 from ..core.webmap import (
     DEFAULT_PORTAL, MAX_WEBMAP_READ, SaveResult, WebMapItemRef, item_extent, item_page, parse_item_input, plan_web_map, portal_root,
 )
-from ..qgis_io import settings
+from ..qgis_io import qsettings, settings
 from ..qgis_io.tasks import error_text, run_task
 from ..qgis_io.webmap_io import (
     add_opened, auth_with_portal, fetch_web_map, open_plan, project_web_map, save_to_portal, view_in_degrees,
@@ -35,7 +35,7 @@ from .docks import save_text
 from .fit import fit_text
 
 TITLE = "ArcGIS Web マップ"
-PORTAL_KEY = "mikage/webmap_portal"
+PORTAL_KEY = "webmap_portal"
 
 
 def _tr(text: str) -> str:
@@ -57,7 +57,7 @@ class PortalRow(QObject):
     def fill(self, wanted: str = "") -> None:
         urls = [p.url for p in self.context.config.arcgis_portals]
         labels = {p.url: p.label for p in self.context.config.arcgis_portals}
-        remembered = QgsSettings().value(PORTAL_KEY, "") or ""
+        remembered = qsettings.value(PORTAL_KEY, "") or ""
         self.combo.blockSignals(True)
         self.combo.clear()
         for url in dict.fromkeys([*urls, DEFAULT_PORTAL, *([remembered] if remembered else [])]):
@@ -77,7 +77,7 @@ class PortalRow(QObject):
 
     def keep(self, portal: str) -> Optional[str]:
         """Remembers the portal and its sign-in (for the services of its web maps too); the authcfg."""
-        QgsSettings().setValue(PORTAL_KEY, portal)
+        qsettings.set_value(PORTAL_KEY, portal)
         chosen = self.auth.configId() or None
         mapping = settings.auth_map()
         if chosen and mapping.get(portal) != chosen:

@@ -13,6 +13,7 @@ APP = start_app()
 from qgis.core import QgsFeature, QgsGeometry, QgsProject, QgsSettings, QgsVectorLayer  # noqa: E402
 from qgis.PyQt.QtGui import QColor  # noqa: E402
 
+from mikage.qgis_io import qsettings  # noqa: E402
 from mikage.core.obs.alerts import DEFAULT_PLACE_FIELDS  # noqa: E402
 from mikage.core.named_areas import AreaCategory  # noqa: E402
 from mikage.qgis_io.org_areas_io import layer_of  # noqa: E402
@@ -59,11 +60,11 @@ def org(plugin, monkeypatch):  # noqa: F811
     write_config(tmp_path, config)
     p.api.reload_config()
     assert p.api.problems == [], p.api.problems
-    QgsSettings().remove(org_areas_panel.ON_MAP_KEY)
-    QgsSettings().remove(TAB_KEY)
+    QgsSettings().remove(qsettings.key(org_areas_panel.ON_MAP_KEY))
+    QgsSettings().remove(qsettings.key(TAB_KEY))
     yield p, iface, places, categories, fake
-    QgsSettings().remove(org_areas_panel.ON_MAP_KEY)
-    QgsSettings().remove(TAB_KEY)
+    QgsSettings().remove(qsettings.key(org_areas_panel.ON_MAP_KEY))
+    QgsSettings().remove(qsettings.key(TAB_KEY))
 
 
 def panel_of(p):
@@ -106,7 +107,7 @@ def test_the_list_by_category_parent_and_use(org):
     assert tree.topLevelItemCount() == 1 and tree.topLevelItem(0).text(0) == "横須賀港"
     assert "表示 1 件" in panel.status.text()
     # The tab is remembered.
-    assert QgsSettings().value(TAB_KEY, 0, type=int) == 1
+    assert QgsSettings().value(qsettings.key(TAB_KEY), 0, type=int) == 1
 
 
 def test_everyone_adds_and_edits_areas_and_numbers_them(org):

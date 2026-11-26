@@ -21,7 +21,7 @@ try:  # Qt6
 except ImportError:  # Qt5
     from qgis.PyQt.QtWidgets import QAction
 
-from .core import win64
+from .core import edition, win64
 from .core.preload import StartupClock
 from .core.roles import ALGORITHM_FEATURES, refusal as role_refusal
 from .features import ai, analysis, command, enhance, events, images, layers, maps, observations, plan, platform, rendering, requests, training
@@ -43,7 +43,8 @@ from .ui.ports import PluginEvents, Ports
 from .ui.shortcuts import Shortcuts
 from .ui.toolbar_buttons import ToolbarButtons
 
-MENU = "MIKAGE"
+#: The entries hidden in MIKAGE 練習版 whatever the settings (core/edition.py): the audit log is not kept there.
+NOT_IN_TRAINING_EDITION = ("監査ログ…",)
 #: The plugin's menu by area (tsudo, 2026-11-07): each group a submenu, its entries by their text in this order
 #: (None: a separator). The entries after the groups stay in the menu itself, 「設定…」 last.
 MENU_GROUPS = [
@@ -100,6 +101,23 @@ def tr(text: str) -> str:
     return QCoreApplication.translate("Mikage", text)
 
 
+def menu_name() -> str:
+    """The plugin's menu in QGIS's Plugins menu: 「MIKAGE」, or 「MIKAGE 練習版」 (core/edition.py)."""
+    return edition.name()
+
+
+def other_running() -> bool:
+    """
+    Whether the other version of the plugin runs in this QGIS (MIKAGE and MIKAGE 練習版 may both be installed,
+    and both turned on): they share their Processing provider, expression functions, shortcuts and docks' names.
+    """
+    try:
+        from qgis import utils
+    except ImportError:
+        return False
+    return edition.other_id() in (getattr(utils, "active_plugins", None) or [])
+
+
 def _log_library(text: str, problem: bool) -> None:
     """A line of the Windows zip's libraries (core/win64) in the log: where one was loaded from, or why it was not."""
     QgsMessageLog.logMessage(text, LOG_TAG, Qgis.MessageLevel.Warning if problem else Qgis.MessageLevel.Info, notifyUser=False)
@@ -143,8 +161,11 @@ class MikagePlugin:
         self.role_keeper: Optional[RoleKeeper] = None
         #: Each dock's feature: its menu entry's text (core/roles.FEATURES).
         self._dock_features: dict[str, str] = {}
-        #: Entries (by their text) hidden whatever the roles: 練習モード's when the settings file's `training` is false.
-        self.hidden_entries: set[str] = set()
+        #: Entries (by their text) hidden whatever the roles: 練習モード's when the settings file's `training` is false
+        #: (some always in MIKAGE 練習版).
+        self.hidden_entries: set[str] = {tr(t) for t in NOT_IN_TRAINING_EDITION} if edition.training_only() else set()
+        #: The other version of the plugin was running when this one was turned on: this one did nothing.
+        self.stood_aside = False
         #: Entries that cannot be used now (block_entries: 練習モード): their text before, and whether it was a dock's title.
         self._blocked: dict = {}
         self._algorithms_allowed: Optional[tuple] = None
@@ -184,7 +205,11 @@ class MikagePlugin:
         forecast, the project's saved analyses). QGIS calls it alone for `qgis_process` (metadata.txt
         hasProcessingProvider=yes: no window, no docks, the settings file read here); initGui calls it too.
         """
-        if self.provider is not None:
+        if self.provider is not None or self.stood_aside:
+            return
+        if other_running():
+            # (the other version's provider is 「mikage」 too)
+            self.stood_aside = True
             return
         if self.context is None:
             # qgis_process: only the settings file, as the plugin reads it (a URL is read in a task, so a local file is surer).
@@ -203,6 +228,13 @@ class MikagePlugin:
             signal.connect(self._analyses_changed)
 
     def initGui(self) -> None:  # noqa: N802 (QGIS's name)
+        if other_running():
+            # MIKAGE and MIKAGE 練習版 turned on together: the one started first runs, this one does nothing.
+            self.stood_aside = True
+            self.iface.messageBar().pushWarning(
+                tr(edition.name()), tr("{o} が有効なため、{n} は動かさない。どちらか一方だけを有効にして QGIS を起動し直す（プラグインの管理）")
+                .format(o=edition.other_name(), n=edition.name()))
+            return
         # 「最初の設定」 only the first time in this profile (asked before anything is written; not after an update).
         self.clock.lap()
         # The tasks' Python hands the GIL to QGIS's main thread sooner (qgis_io/tasks.py): the map and docks keep moving.
@@ -225,8 +257,9 @@ class MikagePlugin:
         self._first_start = first_setup.is_first_start()
         window = self.iface.mainWindow()
         self.context = PluginContext(window)
-        # 監査ログ before anything that records (its writing and sending run in threads of their own).
-        self.audit = AuditKeeper(self.iface, self.context, window)
+        # 監査ログ before anything that records (its writing and sending run in threads of their own); none in
+        # MIKAGE 練習版 (only practice: nothing of the production done).
+        self.audit = None if edition.training_only() else AuditKeeper(self.iface, self.context, window)
         # 一時的なオフライン作業: the status-bar button, the checks while a server is down, and the question when it is back.
         self.offline = OfflineController(self.iface, self.context, lambda: self._after_offline(True), window,
                                          refresh_docks=lambda: self._after_offline(False))
@@ -238,7 +271,7 @@ class MikagePlugin:
         self._features_started = True
         for feature in self.features:
             feature.start()
-        self.toolbar = self.iface.addToolBar(tr("MIKAGE"))
+        self.toolbar = self.iface.addToolBar(tr(edition.name()))
         self.toolbar.setObjectName("MikageToolbar")
         self._make_docks()
         self.clock.step("ドックの作成")
@@ -547,15 +580,15 @@ class MikagePlugin:
                 placed.add(entry)
                 last_separator = False
             self._submenus.append(menu)
-            self.iface.addPluginToMenu(MENU, menu.menuAction())
+            self.iface.addPluginToMenu(menu_name(), menu.menuAction())
         top = [by_text[tr(t)] for t in MENU_TOP if tr(t) in by_text]
         rest = [a for a in self._menu_entries if a not in placed and a not in top]
         separator = QAction(window)
         separator.setSeparator(True)
         self._menu_separator = separator
-        self.iface.addPluginToMenu(MENU, separator)
+        self.iface.addPluginToMenu(menu_name(), separator)
         for action in rest + top:
-            self.iface.addPluginToMenu(MENU, action)
+            self.iface.addPluginToMenu(menu_name(), action)
             self._menu_top.append(action)
 
     def place_docks(self) -> None:
@@ -627,6 +660,8 @@ class MikagePlugin:
             feature.after_offline(sent)
 
     def unload(self) -> None:
+        if self.stood_aside:
+            return
         if self.offline is not None:
             self.offline.unload()
             self.offline = None
@@ -669,12 +704,12 @@ class MikagePlugin:
         for feature in features:
             feature.unload()
         for action in self._menu_top:
-            self.iface.removePluginMenu(MENU, action)
+            self.iface.removePluginMenu(menu_name(), action)
         if self._menu_separator is not None:
-            self.iface.removePluginMenu(MENU, self._menu_separator)
+            self.iface.removePluginMenu(menu_name(), self._menu_separator)
             self._menu_separator = None
         for menu in self._submenus:
-            self.iface.removePluginMenu(MENU, menu.menuAction())
+            self.iface.removePluginMenu(menu_name(), menu.menuAction())
             menu.deleteLater()
         self._submenus, self._menu_top, self._menu_entries = [], [], []
         self._entry_titles = {}

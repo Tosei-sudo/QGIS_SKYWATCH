@@ -12,6 +12,7 @@ APP = start_app()
 
 from qgis.core import QgsFeature, QgsGeometry, QgsPointXY, QgsProject, QgsSettings, QgsVectorLayer  # noqa: E402
 
+from mikage.qgis_io import qsettings  # noqa: E402
 from mikage.qgis_io.interests_io import layers_of  # noqa: E402
 from mikage.tests.fake_esri import FakeLayer  # noqa: E402
 from mikage.tests.qgis_fakes import wait_for  # noqa: E402
@@ -40,9 +41,9 @@ def interests(plugin, monkeypatch):  # noqa: F811
     write_config(tmp_path, config)
     p.api.reload_config()
     assert p.api.problems == [], p.api.problems
-    QgsSettings().remove(ON_MAP_KEY)
+    QgsSettings().remove(qsettings.key(ON_MAP_KEY))
     yield p, iface, points, areas, fake
-    QgsSettings().remove(ON_MAP_KEY)
+    QgsSettings().remove(qsettings.key(ON_MAP_KEY))
 
 
 def test_the_cards_name_my_points_and_areas_first(interests):
@@ -171,14 +172,14 @@ def test_on_the_map_as_two_layers(interests):
     # Taken away by hand (other layers stay): not shown again until 「地図に表示」.
     project.addMapLayer(QgsVectorLayer("Point?crs=EPSG:4326", "ほか", "memory"))
     project.removeMapLayer(layers_of()["point"].id())
-    assert not QgsSettings().value(ON_MAP_KEY, True, type=bool)
+    assert not QgsSettings().value(qsettings.key(ON_MAP_KEY), True, type=bool)
     iface.newProjectCreated.emit()
     wait_for(lambda: False, ms=300)
     assert set(layers_of()) == {"area"}
     dock.buttons["map"].setChecked(False)
     assert layers_of() == {}
     dock.buttons["map"].setChecked(True)
-    assert set(layers_of()) == {"point", "area"} and QgsSettings().value(ON_MAP_KEY, True, type=bool)
+    assert set(layers_of()) == {"point", "area"} and QgsSettings().value(qsettings.key(ON_MAP_KEY), True, type=bool)
 
 
 def test_without_the_settings_or_a_user_name(plugin, monkeypatch):  # noqa: F811
