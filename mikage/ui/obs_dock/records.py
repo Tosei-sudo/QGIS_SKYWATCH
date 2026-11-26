@@ -72,7 +72,7 @@ class RecordsPart:
         mine = self.my_names() if self.mine_only.isChecked() else None
         if (not self.class_filter and not mine) or self.book is None:
             return None
-        taxa = self.book.taxonomy() if self.class_filter else []
+        taxa = self._once("taxonomy", self.book.taxonomy) if self.class_filter else []
         return lambda c: (not self.class_filter or self._shown_kind(c.source.kind, taxa)) and \
             (not mine or is_mine(c.source.recorded_by, mine))
 
@@ -182,7 +182,7 @@ class RecordsPart:
         if self.book is None or not self.flow_more.isChecked():
             self.rekind_levels.clear()
             return
-        self.rekind_levels.render(self.book.taxonomy(), self.rekind_input.text(), keep=True)
+        self.rekind_levels.render(self._once("taxonomy", self.book.taxonomy), self.rekind_input.text(), keep=True)
 
     def _rekind_chosen(self, path: list) -> None:
         """A level's button pressed: the kind in the field (nothing saved until 「名前・種別の変更」)."""

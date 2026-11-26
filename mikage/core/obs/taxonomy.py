@@ -284,7 +284,8 @@ def taxonomy_of(value: Any, problems: list[str], at: str = "observationTaxonomy"
 
 def with_kinds(items: list[Taxon], kinds: Iterable[str]) -> list[Taxon]:
     """The classification with the kinds records use that it does not have yet."""
-    return normalize([*items, *(Taxon(path=path_of(k)) for k in kinds)])
+    # Each kind once (a later class of the same path adds nothing): a few kinds over thousands of records.
+    return normalize([*items, *(Taxon(path=path_of(k)) for k in dict.fromkeys(kinds))])
 
 
 def find(items: list[Taxon], path: list[str]) -> Optional[Taxon]:

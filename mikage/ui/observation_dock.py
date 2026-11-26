@@ -49,6 +49,7 @@ from .list_views import ListViews, column_menus
 from .obs_many import ManyPanel
 from .obs_overlay import ObservationOverlay
 from .obs_tool import ObservationTool
+from .row_buttons import RowButtons
 from .obs_dock.alerts import AlertsPart
 from .obs_dock.images import ImagesPart
 from .obs_dock.modes import ModesPart
@@ -633,6 +634,8 @@ class ObservationDock(
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.cellClicked.connect(self._row_clicked)
         self.table.cellDoubleClicked.connect(self._row_double_clicked)
+        #: The rows' 「流れ」「継続」「消失」「復元」「削除」, painted in the last column (no widget per row).
+        self.row_buttons = RowButtons(self.table)
         b.addWidget(self.table, 1)
         self._row_actions: list[tuple[Callable, Optional[Callable]]] = []
         #: The record each row stands for (none for a thing carried over or an area), for 「一括編集」.
