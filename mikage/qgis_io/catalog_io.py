@@ -45,7 +45,7 @@ from ..core.catalog.api import areas_of, areas_of_shape, layer_origin
 from ..core.util import is_number, ms_of
 from . import settings
 from .obs_images import IMAGE_FILE, IMAGE_ID, SATELLITE, file_name, image_layer, image_path
-from .overviews_io import before_open
+from .overviews_io import before_open, place_beside
 from .pinned_layers import is_pinned, top_index
 from .plan_layer import make_field, qdatetime
 
@@ -280,22 +280,29 @@ def locate_record(record: CatalogRecord, catalog: CatalogConfig, mappings: Seque
     (or for another name of it in `names`, the satellite name tables).
     Before all that, where the rewrites of `pathMappings` (`pattern` / `to`)
     take the path: the first place that is there (a folder: with images)
-    wins; when none is, the path goes on as written. `scan` looks through a
-    folder (scan_folder: with a progress window after a moment).
+    wins (with `overviewsBeside`, its images' .ovr go beside them:
+    overviews_io.place_beside); when none is, the path goes on as written.
+    `scan` looks through a folder (scan_folder: with a progress window after
+    a moment).
     Raises PathError with the reason, Cancelled when no folder was chosen.
     """
     source = record.source
     if source is None:
         raise PathError(f"{record.id or '画像'} の画像の場所が分からない", code="E501")
     tried: list[str] = []
-    for _, target in rewrites_of(mappings, source.value):
+    for rewrite, target in rewrites_of(mappings, source.value):
         if not os.path.exists(target):
             tried.append(f"{target} なし")
             continue
         try:
-            return _local_images(record, catalog, target, target, names, scan)
+            found = _local_images(record, catalog, target, target, names, scan)
         except PathError:
             tried.append(f"{target} に画像なし")
+            continue
+        if rewrite.overviews_beside:
+            # Its images' .ovr go beside them (`overviewsBeside`), for whoever opens them there.
+            place_beside(target)
+        return found
     try:
         return _as_written(record, catalog, mappings, choose_folder, names, scan)
     except PathError as e:
