@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Optional, Protocol
 from urllib.parse import urlencode
 
-from . import analysis_cache, audit, edit_stamp, json_pieces, time_zone
+from . import analysis_cache, audit, edit_stamp, json_pieces, request_stats, time_zone
 from .errors import Coded
 from .util import iso_text, is_number
 
@@ -213,12 +213,15 @@ class EsriClient:
         form = {**params, "f": "json"}
         if token:
             form["token"] = token
+        started = time.perf_counter()
         try:
             body = self.transport(url, form)
         except EsriError as error:
+            self._noted(url, form, started, 0, False)
             # (A token never stays in the text: QGIS's messages repeat the address with its query.)
             kind = type(error) if isinstance(error, UnreachableError) else EsriError
             raise kind(_redact(error.message, token), code=error.code, detail=_redact(error.detail, token)) from None
+        self._noted(url, form, started, len(body or b""), True)
         try:
             # In pieces: a page of features read off the main thread does not hold QGIS's screen (core/json_pieces.py).
             value = json_pieces.loads(body.decode("utf-8-sig") if isinstance(body, (bytes, bytearray)) else body)
@@ -239,6 +242,13 @@ class EsriClient:
                 raise EsriError(code="E202" if token else "E203", detail=said)
             raise EsriError(code="E104", detail=said)
         return value
+
+    def _noted(self, url: str, form: dict[str, str], started: float, size: int, ok: bool) -> None:
+        """The request in 通信の記録 (core/request_stats.py), by its layer's name when its information was read."""
+        layer = request_stats.layer_of(url)
+        info = self._layers.get(layer)
+        name = info.get("name") if isinstance(info, dict) else None
+        request_stats.STATS.note(url, form, time.perf_counter() - started, size, ok, name if isinstance(name, str) and name else None)
 
     def layer(self, url: str, token: Optional[str] = None, refresh: bool = False) -> "LayerInfo":
         """The layer's information (asked once per URL; with LayerInfos, once in its time)."""
