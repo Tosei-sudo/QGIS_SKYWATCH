@@ -916,7 +916,9 @@ def test_a_record_whose_path_is_a_folder_opens_the_images_its_sensor_names(plugi
 
 def test_close_previous_closes_the_images_opened_before_once_the_next_are_open(plugin, monkeypatch):
     """tsudo 2026-11-10: looking through the list one image after another, the image opened before closes (kept per user)."""
+    from qgis.core import QgsFeature, QgsVectorLayer
     from mikage.core.catalog.search import record_of
+    from mikage.qgis_io.ai_results_io import RESULTS_OF
     from mikage.qgis_io.catalog_io import RECORD_GROUP
     from mikage.qgis_io.obs_images import open_images
 
@@ -956,10 +958,22 @@ def test_close_previous_closes_the_images_opened_before_once_the_next_are_open(p
     tile_ids = [t.id() for t in tiles]
     group = root.findGroup("G")
     assert group is not None and group.customProperty(RECORD_GROUP) == "G"
+    # Its AI results (tsudo 2026-11-26): the external ones QGIS put in the group (above the file chosen), its detection at the top.
+    results = QgsVectorLayer("Point?crs=EPSG:4326", "外部AI結果 船舶検出（G）", "memory")
+    results.setCustomProperty(RESULTS_OF, "G")
+    project.addMapLayer(results, False)
+    group.insertLayer(0, results)
+    detected = QgsVectorLayer("Polygon?crs=EPSG:4326&field=class:string&field=score:double&field=image_id:string&field=model:string"
+                              "&field=detected_at:datetime", "物体検出（船舶）", "memory")
+    f = QgsFeature(detected.fields())
+    f["image_id"] = "G"
+    detected.dataProvider().addFeatures([f])
+    project.addMapLayer(detected)
+    ai_ids = [results.id(), detected.id()]
     [third] = dock.open_records([a_as("A3")])
-    # The folder record's layers went, and its group with them; the new image is there.
+    # The folder record's layers went, its AI results and its group with them; the new image is there.
     third_id = third.id()
-    assert all(project.mapLayer(i) is None for i in tile_ids) and root.findGroup("G") is None
+    assert all(project.mapLayer(i) is None for i in tile_ids + ai_ids) and root.findGroup("G") is None
     assert {third_id, first.id(), second.id()} <= set(project.mapLayers())
     # Nothing opened (no place): what was opened stays.
     assert dock.open_records([r for r in dock.records if r.id == "C"]) == []
@@ -1133,6 +1147,50 @@ def test_a_rewritten_path_is_opened_when_it_is_there_and_the_path_as_written_oth
     assert "2026/11/SCENE_W なし" in str(e.value) and f"読み替え先も: {(local / 'SCENE_W').as_posix()} なし" in str(e.value)
     with pytest.raises(PathError, match="SCENE_Z に画像なし"):
         where("\\\\nas\\images\\SCENE_Z")
+
+
+def test_a_rewrite_with_overviews_beside_marks_where_it_found_the_images(tmp_path):
+    """`overviewsBeside` (tsudo 2026-11-26): the images a rewrite found get their .ovr beside them; others do not."""
+    from mikage.core.catalog import catalog_of
+    from mikage.core.catalog.paths import path_mappings_of
+    from mikage.core.catalog.search import record_of
+    from mikage.qgis_io import overviews_io
+    from mikage.qgis_io.catalog_io import locate_record
+
+    shared, plain, nas = tmp_path / "shared", tmp_path / "plain", tmp_path / "nas"
+    for rel in ("shared/S1/PAN/a.tif", "shared/s2.tif", "plain/P1.tif", "nas/S9.tif"):
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        geotiff(tmp_path / rel)
+    problems = []
+    mappings = path_mappings_of([
+        {"pattern": "^//nas/img/(S[^/]*)$", "to": shared.as_posix() + "/$1", "overviewsBeside": True},
+        {"pattern": "^//nas/img/(P[^/]*)$", "to": plain.as_posix() + "/$1"},
+        {"prefix": "\\\\nas\\img", "label": "NAS"},
+    ], problems)
+    assert not problems
+    QgsSettings().remove("mikage")
+    settings.set_path_folder("\\\\nas\\img", str(nas))
+    catalog = catalog_of({"url": IMAGES, "fields": {"id": "IMG_ID", "source": "PATH"}}, problems, 0)
+
+    def where(path):
+        record = record_of({"attributes": {"IMG_ID": "R", "PATH": path}}, catalog.fields)
+        return locate_record(record, catalog, mappings, lambda mapping: pytest.fail("no folder to choose"))
+
+    overviews_io._beside.clear()
+    try:
+        assert not overviews_io.beside_wanted(str(shared / "S1" / "PAN" / "a.tif"))
+        # A folder record: the images below it; a file: itself.
+        assert where("\\\\nas\\img\\S1").files == ["PAN/a.tif"]
+        assert overviews_io.beside_wanted(str(shared / "S1" / "PAN" / "a.tif"))
+        assert where("\\\\nas\\img\\s2.tif").place == (shared / "s2.tif").as_posix()
+        assert overviews_io.beside_wanted(str(shared / "s2.tif"))
+        # Not the folder's neighbours, nor what a rewrite without it found, nor the path as written.
+        assert not overviews_io.beside_wanted(str(shared / "s2.tif.bak")) and not overviews_io.beside_wanted(str(shared / "S10"))
+        assert where("\\\\nas\\img\\P1.tif").place == (plain / "P1.tif").as_posix()
+        assert where("\\\\nas\\img\\S9.tif").place == str(nas / "S9.tif")
+        assert not overviews_io.beside_wanted(str(plain / "P1.tif")) and not overviews_io.beside_wanted(str(nas / "S9.tif"))
+    finally:
+        overviews_io._beside.clear()
 
 
 def test_open_folders_shows_the_folder_of_the_chosen_images_the_rewritten_one_first(plugin, tmp_path, monkeypatch):

@@ -4,20 +4,51 @@ through qgis_io/settings.py as before (it lists them); a new one of this feature
 """
 from __future__ import annotations
 
+import os
+import uuid
 from typing import Optional
 
 from ..qsettings import pref, set_pref
 
+#: The values kept only while this QGIS runs: the images listed without their files (their footprints' layers
+#: follow the list). tsudo 2026-11-26: 画像なしの画像カタログから観測結果を入れたあと、QGIS を落として、また
+#: 立ち上げると、レイヤーが残っている. As the images opened (their layers go when QGIS closes): the next QGIS
+#: starts with none listed, their records stay. A new project, another store, the plugin reloaded keep them.
+RUN_KEYS = ("listed_images/",)
+#: This QGIS's mark, in its environment (a reloaded plugin keeps it): `<process id>-<8 letters>`.
+RUN_ENV = "MIKAGE_QGIS_RUN"
+
+
+def qgis_run() -> str:
+    """
+    This run of QGIS: the same until it closes (the plugin reloaded too), another at its next start (the 8
+    letters: the process id may come again), and in a QGIS started from this one (it has the environment).
+    """
+    pid = str(os.getpid())
+    known = os.environ.get(RUN_ENV, "")
+    if known.split("-")[0] == pid:
+        return known
+    run = f"{pid}-{uuid.uuid4().hex[:8]}"
+    os.environ[RUN_ENV] = run
+    return run
+
 
 class SettingsPrefs:
-    """The observation book's small values (the images listed without their file, per store) in QgsSettings."""
+    """
+    The observation book's small values in QgsSettings: what the last record said (per store), the records
+    waiting to be sent, and the images listed without their files (per store, only while this QGIS runs: RUN_KEYS).
+    """
 
     def get(self, key: str) -> Optional[str]:
         v = pref("observations/" + key)
+        if v and key.startswith(RUN_KEYS) and pref("observations/run/" + key) != qgis_run():
+            return None  # kept by an earlier run of QGIS
         return v or None
 
     def set(self, key: str, value: str) -> None:
         set_pref("observations/" + key, value)
+        if key.startswith(RUN_KEYS):
+            set_pref("observations/run/" + key, qgis_run())
 
 
 def point_count_setting() -> int:

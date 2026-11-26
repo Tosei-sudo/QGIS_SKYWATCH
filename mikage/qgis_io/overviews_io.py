@@ -25,6 +25,11 @@ What could not be deleted then (still open) goes when QGIS starts next
 (sweep_temp), with the folders of a QGIS that ended without unloading;
 those of a QGIS still running are kept.
 
+An image a rewrite of `pathMappings` with `overviewsBeside` found (a shared
+folder, place_beside) gets its .ovr beside it whatever `location` says,
+when that folder can be written: whoever opens it there then uses that
+.ovr, as GDAL looks beside the image before the cache folder's .aux.xml.
+
 One image is built at a time; an image asked for again while waiting or
 building is not queued twice. When one is done, the project's layers of
 that image are read again so the overviews are used at once.
@@ -77,6 +82,8 @@ TITLE = "ピラミッド"
 BUILT, CACHED, HAS_OVERVIEWS, SMALL, READ_ONLY = "built", "cached", "has", "small", "read-only"
 #: Built into the temporary folder (location "temp").
 TEMPORARY = "temp"
+#: Put beside the image by someone else while this one was being built (a shared folder): theirs is used.
+OTHERS = "others"
 #: location "cache" without a cache folder, or without GDAL's functions for it.
 NO_CACHE, UNSUPPORTED = "no-cache", "unsupported"
 
@@ -317,6 +324,40 @@ def end_session() -> int:
     return left
 
 
+# ---- `overviewsBeside`: the .ovr beside the images a rewrite of `pathMappings` found ----------------------
+
+#: The places (an image, or a folder of images) where a rewrite of `pathMappings` with `overviewsBeside` found a
+#: record's images (catalog_io.locate_record), as normcase(abspath()).
+_beside: set = set()
+_beside_lock = threading.Lock()
+
+
+def _place_key(path: str) -> str:
+    return os.path.normcase(os.path.abspath(path))
+
+
+def place_beside(place: str) -> None:
+    """
+    The images at `place` (an image, or a folder and those below it) get
+    their .ovr beside them when their folder can be written, whatever
+    `location` says: a rewrite of `pathMappings` with `overviewsBeside`
+    found them there (a shared folder, where whoever opens them uses that
+    .ovr). Kept while QGIS runs; an image opened another way follows
+    `location`, but once an .ovr is beside it GDAL uses that one first.
+    """
+    if place and "://" not in place and not place.startswith("/vsi"):
+        with _beside_lock:
+            _beside.add(_place_key(place))
+
+
+def beside_wanted(path: str) -> bool:
+    """Whether `path` is at, or below, a place given to place_beside."""
+    key = _place_key(path)
+    with _beside_lock:
+        places = list(_beside)
+    return any(key == p or key.startswith(p.rstrip(os.sep) + os.sep) for p in places)
+
+
 @dataclass(frozen=True)
 class Outcome:
     kind: str
@@ -375,6 +416,13 @@ def _config(ds, options: OverviewOptions) -> dict[str, str]:
             config["PREDICTOR_OVERVIEW"] = "3"
         elif not gdal.GetDataTypeName(dtype).startswith("C"):
             config["PREDICTOR_OVERVIEW"] = "2"
+    # The levels' bands lie as the image's do. GDAL lays an .ovr's bands one after another by default, and
+    # then builds them one band at a time: each pass decoded every block of a pixel-interleaved image again
+    # (all its bands) and read the image about 2.7 times over (on a shared folder, through the network),
+    # whatever GDAL's cache, unless the whole image fitted in it. QGIS drawing a colour image reads the three
+    # bands of a level block by block too, so it reads such an .ovr in fewer reads (about half; tsudo, 2026-11-26).
+    if ds.RasterCount > 1 and (ds.GetMetadataItem("INTERLEAVE", "IMAGE_STRUCTURE") or "").upper() == "PIXEL":
+        config["INTERLEAVE_OVERVIEW"] = "PIXEL"
     # YCbCr only for exactly three bands (RGB): GDAL refuses it for four (RGBN, RGBA), which stay plain JPEG (#80).
     if compress == "JPEG" and ds.RasterCount == 3:
         config["PHOTOMETRIC_OVERVIEW"] = "YCBCR"
@@ -387,8 +435,9 @@ def build_external(path: str, options: OverviewOptions, progress: Callable[[floa
     """
     Builds the .ovr of an image without overviews that is not small: beside
     it (`path + ".ovr"`) when its folder can be written and `location` is
-    "auto", in the temporary folder when it is "temp", else in the cache
-    folder. The image is only read. Raises Cancelled when `cancelled()`
+    "auto" (or the image is where a rewrite with `overviewsBeside` found
+    it: place_beside), in the temporary folder when it is "temp", else in
+    the cache folder. The image is only read. Raises Cancelled when `cancelled()`
     turns true, RuntimeError when GDAL fails.
     """
     target = path + ".ovr"
@@ -403,7 +452,10 @@ def build_external(path: str, options: OverviewOptions, progress: Callable[[floa
     if not factors:
         return Outcome(SMALL, path)
     config = _config(src, options)
-    if options.location in ("cache", "temp"):
+    folder = os.path.dirname(os.path.abspath(path))
+    # A rewrite's images with `overviewsBeside` (place_beside): beside them, as "auto" does, when it can be written.
+    beside = options.location in ("cache", "temp") and beside_wanted(path) and writable_folder(folder)
+    if options.location in ("cache", "temp") and not beside:
         # "temp" too: the .ovr is named in the image's .aux.xml in the cache folder.
         if not cache_folder():
             return Outcome(NO_CACHE, path)
@@ -416,8 +468,7 @@ def build_external(path: str, options: OverviewOptions, progress: Callable[[floa
                 raise OverviewError("一時フォルダを作れない", code=errors.os_code(error), detail=str(error)) from None
             return _build_into_cache(src, path, options, factors, config, progress, cancelled, folder, TEMPORARY)
         return _build_into_cache(src, path, options, factors, config, progress, cancelled)
-    folder = os.path.dirname(os.path.abspath(path))
-    if not writable_folder(folder):
+    if not beside and not writable_folder(folder):
         if not cache_folder():
             return Outcome(READ_ONLY, path)
         if gdaladdo() is not None:
@@ -431,12 +482,18 @@ def build_external(path: str, options: OverviewOptions, progress: Callable[[floa
     try:
         built = _build_in_temp(src, work, options, factors, config, progress, cancelled)
         if os.path.exists(target):
-            # Built meanwhile by someone else: theirs is kept.
-            return Outcome(HAS_OVERVIEWS, path)
+            # Built meanwhile by someone else (a shared folder): theirs is kept, and the layers read again to use it.
+            return Outcome(OTHERS, path)
         # Copied beside the image under another name first, so a half-written .ovr is never read.
         shutil.copyfile(built, part)
         progress(99.0)
-        os.replace(part, target)
+        try:
+            os.replace(part, target)
+        except OSError:
+            if os.path.exists(target):
+                # Put there meanwhile by someone else and open on their PC (Windows cannot replace it then).
+                return Outcome(OTHERS, path)
+            raise
         return Outcome(BUILT, path, tuple(factors))
     finally:
         shutil.rmtree(work, ignore_errors=True)
@@ -1051,6 +1108,10 @@ class OverviewQueue:
                 reload_layers(outcome.path)
                 if bar is not None:
                     bar.pushMessage(TITLE, f"{name}.ovr を作成（画像の隣。画像本体はそのまま）", Qgis.MessageLevel.Info, 5)
+            elif outcome is not None and outcome.kind == OTHERS:
+                reload_layers(outcome.path)
+                if bar is not None:
+                    bar.pushMessage(TITLE, f"{name}.ovr はほかの人が先に作成（それを使う）", Qgis.MessageLevel.Info, 5)
             elif outcome is not None and outcome.kind in (CACHED, TEMPORARY):
                 reload_layers(outcome.path)
                 if outcome.ovr:

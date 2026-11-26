@@ -3459,6 +3459,7 @@
   "update_observation"
  ],
  "config_keys": [
+  "aiContinuation",
   "aiModels",
   "aiResultSources",
   "alertReports",

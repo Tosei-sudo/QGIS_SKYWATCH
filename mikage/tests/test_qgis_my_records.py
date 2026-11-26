@@ -73,8 +73,8 @@ def test_lists_ones_records_across_the_images_and_opens_them_by_a_double_click(p
     dialog = dock._my_records
     assert dialog is not None and dialog.isVisible() and dialog.isWindow() and not dialog.isModal()
     table = dialog.table
-    assert dialog.who.currentText() == "自分（田中・tanaka）" and dialog.period.currentText() == "30 日"
-    assert dialog.summary.text() == "自分の記録 2 件・画像 2 枚（直近 30 日）"
+    assert dialog.who.currentText() == "自分（田中・tanaka）" and dialog.period.currentText() == "7 日"
+    assert dialog.summary.text() == "自分の記録 2 件・画像 2 枚（直近 7 日）"
     assert [table.horizontalHeaderItem(c).text() for c in range(table.columnCount())] == \
         ["撮像日時", "画像", "モノ", "種別", "活動", "備考", "記録日時", "記録者", "更新者"]
     # The newest made first.
@@ -239,7 +239,7 @@ def test_an_esri_stores_own_records_are_asked_without_reading_them_all(bare):
     p.context.reload()
     assert dock.store_set.remote and not dock.book.loaded
     dialog = dock.open_my_records()
-    # One's own of the last 30 days, asked of the layer; the dock's records not read.
+    # One's own of the last 7 days, asked of the layer; the dock's records not read.
     assert wait_for(lambda: dialog.source == "made")
     assert _texts(dialog.table, 2) == ["モノ0", "モノ1"] and not dock.book.loaded
     asked = [f["where"] for u, f in fake.asked if u == URL + "/query" and "where" in f]

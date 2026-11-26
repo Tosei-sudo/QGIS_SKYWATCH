@@ -41,14 +41,16 @@ def box(lon, lat, dx, dy):
 
 
 @pytest.fixture
-def plugin(tmp_path, monkeypatch):
+def plugin(tmp_path, monkeypatch, request):
     QgsSettings().remove("mikage")
     settings._set("local_gpkg", str(tmp_path / "local.gpkg"))
+    # More of the settings file (indirect parameters): "top" its keys, "ships" the first source's.
+    more = getattr(request, "param", {})
     config = {"aiResultSources": [
         {"label": "船舶検出", "url": POLYGONS, "fields": {"imageId": "IMAGE_ID", "class": "CLS", "score": "SCORE", "id": "DET_ID"},
-         "kinds": {"ship": "船舶"}, "activity": "停泊", "confidence": "推定"},
+         "kinds": {"ship": "船舶"}, "activity": "停泊", "confidence": "推定", **more.get("ships", {})},
         {"label": "車両点", "url": POINTS, "fields": {"imageId": "IMG", "class": "CLS", "name": "NAME"}},
-    ]}
+    ], **more.get("top", {})}
     path = tmp_path / "config.json"
     path.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
     settings.set_config_source(str(path))
@@ -188,6 +190,47 @@ def test_an_image_not_from_the_catalog_reads_by_its_file_name_and_importing_need
     assert dock.status.text() == "画像 IMG2 が観測記録の画像一覧になし（画像を開いて）"
 
 
+def test_the_results_go_just_above_their_image_in_its_group(plugin):
+    """
+    tsudo 2026-11-26: 「前の画像を閉じる」 takes the group of a record's files
+    out once it is empty; the results drawn in it were left there, and the
+    group with them. They go just above their image, in its group, and not in
+    the group of the image chosen before.
+    """
+    from qgis.PyQt.QtWidgets import QApplication
+
+    p, iface, tmp_path = plugin
+    dock = p.api.ai_results
+    project = QgsProject.instance()
+    root = project.layerTreeRoot()
+    # The results of IMG2 read once (shown again from the cache, at once, as the next image is added).
+    dock.load("IMG2")
+    assert wait_for(lambda: "IMG2" in dock.cache)
+    # A record of several files: in its group, below another file (apart: not brought up over it as it is chosen).
+    group = root.addGroup("IMG1")
+    other = QgsRasterLayer(geotiff(tmp_path / "other.tif", "2026-10-01T01:00:00Z", west=141.0), "other")
+    project.addMapLayer(other, False)
+    group.addLayer(other)
+    first = QgsRasterLayer(geotiff(tmp_path / "IMG1.tif", "2026-10-01T01:00:00Z"), "IMG1")
+    first.setCustomProperty(IMAGE_ID, "IMG1")
+    first.setCustomProperty(CATALOG_URL, CATALOG)
+    project.addMapLayer(first, False)
+    group.addLayer(first)
+    iface.setActiveLayer(first)
+    assert wait_for(lambda: dock.image_id == "IMG1" and len(result_layers()) == 2)
+    assert [n.name() for n in group.children()] == ["other", "外部AI結果 船舶検出（IMG1）", "外部AI結果 車両点（IMG1）", "IMG1"]
+    # The next image, added as the catalog adds one (in the layer tree just after the project): its results above it, at the top.
+    second = QgsRasterLayer(geotiff(tmp_path / "IMG2.tif", "2026-10-01T01:00:00Z"), "IMG2")
+    second.setCustomProperty(IMAGE_ID, "IMG2")
+    second.setCustomProperty(CATALOG_URL, CATALOG)
+    project.addMapLayer(second, False)
+    root.insertLayer(0, second)
+    QApplication.processEvents()
+    assert dock.image_id == "IMG2"
+    assert [n.name() for n in group.children()] == ["other", "IMG1"]
+    assert [n.name() for n in root.children()][:2] == ["外部AI結果 船舶検出（IMG2）", "IMG2"]
+
+
 def test_a_result_near_a_thing_of_the_image_before_is_recorded_as_it(plugin):
     p, iface, tmp_path = plugin
     dock = p.api.ai_results
@@ -225,3 +268,41 @@ def test_the_thing_to_continue_can_be_chosen_or_left_new(plugin):
     dock.list.itemWidget(dock.list.topLevelItem(1), 6).setCurrentIndex(0)
     [o] = dock.import_rows([1])
     assert o.object_name == "船舶" and o.object_id != ship.object_id and "継続" not in o.note
+
+
+INSIDE_AI = {"rules": [{"label": "AIの範囲の中", "recordInAi": True, "kind": "related"}], "candidateRadius": 0}
+
+
+@pytest.mark.parametrize("plugin", [{"top": {"aiContinuation": INSIDE_AI}}, {"top": {"aiContinuation": False}, "ships": {"continuation": INSIDE_AI}}],
+                         indirect=True, ids=["aiContinuation", "the source's own"])
+def test_a_rule_of_the_settings_file_decides_what_continues(plugin):
+    p, iface, tmp_path = plugin
+    dock = p.api.ai_results
+    first = open_catalog_image(tmp_path, "IMG1")
+    iface.setActiveLayer(first)
+    assert wait_for(lambda: len(dock.rows) == 3)
+    [ship] = dock.import_rows([0])
+    second = open_catalog_image(tmp_path, "IMG2")
+    iface.setActiveLayer(second)
+    assert wait_for(lambda: dock.image_id == "IMG2" and len(dock.rows) == 2)
+    # The ship of IMG1 is inside d-4's polygon: the rule holds (and nothing is offered beyond it: d-3 is far).
+    assert list(dock.continued) == [1] and dock.continued[1].tier == "auto"
+    widget = dock.list.itemWidget(dock.list.topLevelItem(1), 6)
+    assert widget.currentText().startswith("継続: 船舶（AIの範囲の中・")
+    assert widget.toolTip() == "自動で継続（ルール「AIの範囲の中」に当てはまる）"
+    saved = dock.import_rows([1])
+    assert saved[0].object_id == ship.object_id and saved[0].note.endswith("[AI:船舶検出#d-4] [自動継続:AIの範囲の中]")
+
+
+@pytest.mark.parametrize("plugin", [{"top": {"aiContinuation": False}}], indirect=True)
+def test_matching_can_be_turned_off(plugin):
+    p, iface, tmp_path = plugin
+    dock = p.api.ai_results
+    first = open_catalog_image(tmp_path, "IMG1")
+    iface.setActiveLayer(first)
+    assert wait_for(lambda: len(dock.rows) == 3)
+    dock.import_rows([0])
+    second = open_catalog_image(tmp_path, "IMG2")
+    iface.setActiveLayer(second)
+    assert wait_for(lambda: dock.image_id == "IMG2" and len(dock.rows) == 2)
+    assert dock.continued == {} and dock.list.itemWidget(dock.list.topLevelItem(1), 6) is None

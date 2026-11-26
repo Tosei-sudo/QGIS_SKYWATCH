@@ -185,6 +185,7 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "aiModels",
   "detectionOutputs",
   "aiResultSources",
+  "aiContinuation",
   "timeZones",
   "requestStores",
   "requestExports",
@@ -1185,6 +1186,24 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "obb",
   "segment"
  ],
+ "continueKinds": [
+  [
+   "same",
+   "same（同じ分類）"
+  ],
+  [
+   "related",
+   "related（同系の分類）"
+  ],
+  [
+   "sibling",
+   "sibling（同じ大分類）"
+  ],
+  [
+   "any",
+   "any（分類は見ない）"
+  ]
+ ],
  "detectFormats": [
   "auto",
   "yolov8",
@@ -1592,6 +1611,24 @@ const SAR = T("sarPattern", "SAR とみなす名前", { ph: "SAR|radar|レーダ
 const catalogLabels = () => (state.imageCatalogs || []).map((c, i) => (c && c.label) || `カタログ ${i + 1}`);
 const CATALOG = T("catalog", "撮像済みを確かめるカタログ", { help: "画像カタログの名前（label）", list: catalogLabels });
 
+/** AI結果の継続の判定（aiContinuation と aiResultSources[].continuation）: ルール（条件は AND、ルールは OR）・候補の半径・紛らわしさ。 */
+const CONTINUATION = (help, k = "continuation") => O(k, k === "continuation" ? "継続の判定（continuation）" : "判定", [
+  I("rules", "自動継続のルール", [
+    T("label", "名前", { help: "「継続」列と備考の [自動継続:名前] に出す（省略すると条件から）" }),
+    N("near", "記録の位置からの距離（m）", { min: 0, help: "長さのあるモノは長さの半分まで広げる" }),
+    B("centerInRecord", "AI の重心が記録の外形の中", { help: "幅まで測った（3 点・4 点入力の）記録の長さ × 幅の矩形" }),
+    B("recordInAi", "記録の位置が AI のポリゴンの中", { help: "点だけの記録向け" }),
+    N("overlap", "外形の重なり率（0〜1）", { min: 0, max: 1, help: "重なった面積 ÷ 2 つを合わせた面積（IoU）。両方に外形があるときだけ" }),
+    S("kind", "種別の一致", K.continueKinds, { help: "省略で見ない（大分類が違うものは any でない限り継続にしない）" }),
+    N("lengthGap", "長さの差の上限（0〜1）", { min: 0, max: 1, help: "長い方に対する割合。どちらかの長さがなければ見ない" }),
+    N("headingGap", "向きの差の上限（°）", { min: 0, max: 180, help: "どちらかの向きがなければ見ない" }),
+    N("minScore", "AI の確信度の下限（0〜1）", { min: 0, max: 1, help: "確信度のない結果は見ない" }),
+  ], { title: (it) => it.label || "ルール",
+       check: (it, at, p) => { if (!(it.near > 0) && !it.centerInRecord && !it.recordInAi && it.overlap === undefined) p.push(`${at}: 位置の条件（距離・重心が外形の中・記録が AI の中・重なり率）のどれかが必要`); } }),
+  N("candidateRadius", "候補の半径（m）", { min: 0, ph: "300", help: "これより近いもの（か長さの 2 倍）を「新規（候補あり）」に。0 でルールに当てはまるものだけ" }),
+  B("unique", "紛らわしいものがあれば候補止まり", { help: "既定 true。false で、ルールに当てはまるもののうち最も確からしいものを自動継続" }),
+], { allowFalse: "照合しない（false）", help });
+
 const PRIORITY = { k: "priority", t: "priority", l: "優先度の書き方" };
 const COLUMNS = { k: "columns", t: "columns", l: "CSV の列", showIf: (it) => (it.format || "csv") === "csv" };
 const SCHEMA = { k: "schema", t: "schema", l: "JSON Schema", showIf: (it) => it.format === "json" };
@@ -1646,11 +1683,13 @@ const SPEC = [
         T("url", "同じフォルダの URL", { help: "なければ各自が PC のフォルダを選ぶ", showIf: (it) => !it.pattern && !it.to }),
         T("pattern", "先に試すパス（正規表現）", { ph: "^//[^/]+/(?:[^/]+/)*([^/]+)$", help: "Python の re、大文字小文字は区別なし。区切りは \\ も / として合わせる", showIf: (it) => !it.prefix && !it.url }),
         T("to", "読み替え先", { ph: "D:/$1", help: "$1・${name} がグループ、$$ が $。そこになければ元のパスで開く", showIf: (it) => !it.prefix && !it.url }),
+        B("overviewsBeside", "ピラミッドは読み替え先の画像の隣に置く", { help: "既定 false。true: ここで見つかった画像の .ovr は、ピラミッドの置き場所が temp・cache でも画像の隣（書き込めるとき）。共有フォルダなら、だれかが一度作ればほかの人は作らずに使う", showIf: (it) => !it.prefix && !it.url }),
       ], { title: (it) => it.prefix || (it.pattern && `${it.pattern} → ${it.to || "?"}`), check: (it, at, p) => {
         const rewrite = it.pattern !== undefined || it.to !== undefined;
         if (rewrite && (it.prefix !== undefined || it.url !== undefined)) p.push(`${at}: prefix（・url）か pattern・to のどちらか`);
         else if (rewrite && !(it.pattern && it.to)) p.push(`${at}: pattern と to が必要`);
         else if (!rewrite && !it.prefix) p.push(`${at}: prefix（パスの先頭）か pattern・to が必要`);
+        if (!rewrite && it.overviewsBeside !== undefined) p.push(`${at}: overviewsBeside は pattern・to の読み替えにだけ書ける`);
       } }) },
     { key: "overviews", label: "ピラミッド（.ovr）の自動作成", doc: "ピラミッドovrの自動作成overviews", help: "ピラミッドのない画像を開いたとき裏で .ovr を作る（既定は作る・auto・all）。",
       field: O("overviews", "ピラミッド", [
@@ -2001,8 +2040,11 @@ const SPEC = [
         B("aiResults", "「AI結果」で読む", { help: "既定 true。転記した検出結果をほかの人も「AI結果」ドックで確かめられる（fields.imageId が要る）。false で読まない" }), TOKEN, TZ, STZ]) },
     { key: "aiResultSources", label: "外部 AI の結果", doc: "ai結果外部aiプラグイン内の物体検出", help: "カタログから開いた画像の外部 AI の結果を出す。fields.imageId が必須。",
       field: I("aiResultSources", "結果", [LABEL, URL_(), R("fields", "属性名", K.roles.aiResultSources, { required: ["imageId"] }), M("kinds", "クラス → 種別"),
-        N("minScore", "最低の確信度（0〜1）", { min: 0, max: 1 }), N("continueRadius", "続きとみなす半径（m）"), N("candidateRadius", "候補の半径（m）"), N("maxResults", "最大件数"),
+        N("minScore", "最低の確信度（0〜1）", { min: 0, max: 1 }), N("continueRadius", "続きとみなす半径（m）", { help: "古い書き方（continuation の rules があればそちら）" }), N("candidateRadius", "候補の半径（m）", { help: "0 で照合しない" }), N("maxResults", "最大件数"),
+        CONTINUATION("この出どころだけの継続の判定（書いたキーだけ aiContinuation より優先）"),
         T("activity", "取り込み時の活動"), T("confidence", "取り込み時の確度"), WHERE, TOKEN, TZ, STZ]) },
+    { key: "aiContinuation", label: "AI結果の継続の判定", doc: "継続の判定aicontinuation", help: "AI結果を取り込むとき、前後の画像のモノの続き（継続）とみなすルール。ルールの中の条件はすべて満たし、ルールはどれか 1 つで自動継続（上から順）。書かなければ 50 m 以内（か長さの半分）・分類が同じか上下・長さの差 30% 以内。外部 AI・転記先・プラグイン内の検出すべてに効く（aiResultSources の continuation が優先）。",
+      field: CONTINUATION("継続の判定", "aiContinuation") },
   ] },
   { group: "編集の記録", keys: [
     { key: "editTracking", label: "作成者・更新者の記録", doc: "作成者更新者の記録edittracking", help: "プラグインが書き込む Esri のレイヤー・テーブル（QGIS で直接編集した Esri レイヤーも）の作成日時・作成者・更新日時・更新者。属性があるレイヤーだけ書く。ユーザー名は ArcGIS の認証ではなく環境変数（既定 USERNAME）。",
@@ -2058,6 +2100,7 @@ const SPEC = [
 const DOC_FILES = {
   "ai物体検出クリック抽出": "docs/features/ai.md",
   "ai結果外部aiプラグイン内の物体検出": "docs/features/ai.md",
+  "継続の判定aicontinuation": "docs/features/ai.md",
   "arcgis-web-マップ": "docs/features/map.md",
   "イベント地震対応などevents": "docs/features/observations.md",
   "サーバー障害時のオフライン作業": "docs/admin/operations.md",

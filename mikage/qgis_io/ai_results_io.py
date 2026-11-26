@@ -10,16 +10,18 @@ from __future__ import annotations
 from typing import Any, Callable, Optional, Sequence
 
 from qgis.core import (
-    QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsFeature, QgsFields, QgsGeometry, QgsLineSymbol, QgsMarkerSymbol,
-    QgsPalLayerSettings, QgsPointXY, QgsProject, QgsSingleSymbolRenderer, QgsFillSymbol, QgsTextFormat, QgsVectorLayer,
+    QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsFeature, QgsFields, QgsGeometry, QgsLayerTreeGroup, QgsLineSymbol, QgsMapLayer,
+    QgsMarkerSymbol, QgsPalLayerSettings, QgsPointXY, QgsProject, QgsSingleSymbolRenderer, QgsFillSymbol, QgsTextFormat, QgsVectorLayer,
     QgsVectorLayerSimpleLabeling, QgsWkbTypes,
 )
+from qgis.PyQt.QtCore import QTimer
 from qgis.PyQt.QtGui import QColor
 
 from ..core.ai_results import AiResult, AiResultSource, image_where, kind_for, result_of
 from ..core.esri import EsriClient
 from ..core.util import is_number
 from .catalog_io import footprint
+from .pinned_layers import top_index
 from .plan_layer import make_field, qdatetime
 
 #: On the layers this makes: the image id they show (so they are replaced when another image is shown).
@@ -109,6 +111,28 @@ def place_of(result: AiResult) -> Optional[tuple[float, float, Optional[float], 
     return p.x(), p.y(), length, width
 
 
+def ring_of(result: AiResult, most: int = 2000) -> Optional[list[list[float]]]:
+    """
+    A polygon result's outline for matching (継続): the outer ring (lon, lat) of
+    its largest part, simplified to at most `most` points (its rotated
+    rectangle when it cannot be); None for a point or a line.
+    """
+    g = geometry_of(result.geometry)
+    if g is None or g.isEmpty() or g.type() != QgsWkbTypes.GeometryType.PolygonGeometry:
+        return None
+    parts = g.asMultiPolygon() if g.isMultipart() else [g.asPolygon()]
+    rings = [p[0] for p in parts if p and len(p[0]) >= 4]
+    if not rings:
+        return None
+    ring = max(rings, key=lambda r: abs(QgsGeometry.fromPolygonXY([r]).area()))
+    if len(ring) > most:
+        box = QgsGeometry.fromPolygonXY([ring]).orientedMinimumBoundingBox()
+        if not box or box[0].isEmpty():
+            return None
+        ring = box[0].asPolygon()[0]
+    return [[p.x(), p.y()] for p in ring]
+
+
 def results_layer(results: Sequence[AiResult], rows: Sequence[int], source: AiResultSource, image_id: str,
                   imported: set[str]) -> QgsVectorLayer:
     """One source's results as a memory layer (WGS 84), labelled with their class and score; `row` is the list's row."""
@@ -137,6 +161,48 @@ def results_layer(results: Sequence[AiResult], rows: Sequence[int], source: AiRe
     layer.setCustomProperty(RESULTS_OF, image_id)
     _style(layer, family)
     return layer
+
+
+def add_above(layer: QgsVectorLayer, image: Optional[QgsMapLayer], project: Optional[QgsProject] = None) -> None:
+    """
+    Adds a results layer to the project just above its image's layer, in the
+    image's group (a record's several files), so 「前の画像を閉じる」 leaves
+    the group empty and takes it out with the image (tsudo 2026-11-26), and
+    not into the group of the image chosen before. An image still being added
+    (the dock follows it as the project adds it, before it is in the layer
+    tree): a moment later, once it is there. Without an image, where QGIS
+    adds a layer (above the one chosen in the layer list).
+    """
+    project = project or QgsProject.instance()
+    if image is None:
+        project.addMapLayer(layer)
+        return
+    project.addMapLayer(layer, False)
+    if not _put_above(layer, image, project):
+        QTimer.singleShot(0, lambda: _put_later(layer, image, project))
+
+
+def _put_above(layer: QgsVectorLayer, image: QgsMapLayer, project: QgsProject) -> bool:
+    node = project.layerTreeRoot().findLayer(image.id())
+    parent = node.parent() if node is not None else None
+    if not isinstance(parent, QgsLayerTreeGroup):
+        return False
+    index = next((i for i, child in enumerate(parent.children()) if child is node), 0)
+    parent.insertLayer(index, layer)
+    return True
+
+
+def _put_later(layer: QgsVectorLayer, image: QgsMapLayer, project: QgsProject) -> None:
+    """The results layer put in the layer tree once its image is (at the top when the image is not there)."""
+    try:
+        root = project.layerTreeRoot()
+        if project.mapLayer(layer.id()) is None or root.findLayer(layer.id()) is not None:
+            return
+        if project.mapLayer(image.id()) is None or not _put_above(layer, image, project):
+            root.insertLayer(top_index(root), layer)
+    except RuntimeError:
+        # The layer or the image deleted meanwhile (the project cleared).
+        pass
 
 
 def _style(layer: QgsVectorLayer, family: str) -> None:
