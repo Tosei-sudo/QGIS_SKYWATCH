@@ -6,7 +6,9 @@ footprint, in the group 「ファイルなしの画像」 at the top of the laye
 だけでも追加したほうがわかりやすい。これを消すことで、観測記録の方からも外れる).
 
 The layers follow the list (the book's `listed`, kept per store in
-QgsSettings): added, renamed and removed with it, never saved as work of
+QgsSettings while QGIS runs: the next QGIS starts without them, as without
+the images opened; tsudo 2026-11-26 「QGIS を落として、また立ち上げると、
+レイヤーが残っている」): added, renamed and removed with it, never saved as work of
 the project (QGIS does not offer to keep them, the project is not marked
 changed by them). Removing one by hand (or the group) takes its image off
 the list (`removed`), as closing an opened image's layer does; removing
@@ -27,6 +29,7 @@ from qgis.PyQt.QtGui import QColor
 from ..core.obs.api import ListedImage
 from .geometry import rings_geometry
 from .pinned_layers import top_index
+from .startup_layers import leave_unchanged, was_unchanged
 from .plan_layer import make_field, qdatetime
 
 #: The group the layers go in (at the top of the layer list).
@@ -227,14 +230,20 @@ class ListedLayers(QObject):
                 layer.triggerRepaint()
 
     def _quietly(self, change: Callable[[], None]) -> None:
-        """A change of our own: the image stays listed, and the project is not marked changed (the layers are not its work)."""
-        dirty = self.project.isDirty()
+        """
+        A change of our own: the image stays listed, and the project is not marked changed (the layers are not its
+        work): now, and once QGIS has marked it a moment later (the map bridge sets the CRS of a project without
+        layers from the first one: it then asked to save it when closing, and at the next start, 2026-11-26).
+        """
+        clean = was_unchanged(self.project)
         self._quiet += 1
         try:
             change()
         finally:
             self._quiet -= 1
-            if not dirty and self.project.isDirty():
+            if clean and self.project is QgsProject.instance():
+                leave_unchanged()
+            elif clean and self.project.isDirty():
                 self.project.setDirty(False)
 
     # ---- the project's signals --------------------------------------------
@@ -292,7 +301,7 @@ class ListedLayers(QObject):
             self.show(self._images, self._current, self._store)
 
     def close(self) -> None:
-        """The plugin unloads: the layers go (the images stay listed, for the next time)."""
+        """The plugin unloads: the layers go (the images stay listed while QGIS runs: the plugin loaded again shows them)."""
         self._closed = True
         for signal, slot in self._hooks:
             try:

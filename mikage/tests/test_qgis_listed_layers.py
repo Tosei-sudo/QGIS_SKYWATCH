@@ -96,7 +96,7 @@ def test_the_catalogs_images_without_files_are_layers_of_their_footprints(bare):
     # Its layer chosen in the layer list: the image recorded on.
     iface.setActiveLayer(one)
     assert dock.book.current.id == "IMG1"
-    # The listing kept in QgsSettings keeps the shape (a later session draws it again).
+    # The listing kept in QgsSettings keeps the shape (the plugin loaded again draws it again).
     assert "rings" in settings.SettingsPrefs().get("listed_images/ローカル")
 
 
@@ -185,7 +185,7 @@ def test_the_images_stay_listed_when_the_project_is_cleared_or_the_plugin_reload
     # Every layer removed at once (as the tests do): the same.
     project.removeAllMapLayers()
     assert wait_for(lambda: _names() == ["IMG1", "IMG2"])
-    # The plugin unloaded: the layers go, the list stays for the next time.
+    # The plugin unloaded: the layers go, the list stays while QGIS runs (the plugin loaded again shows them).
     p.unload()
     assert _group() is None
 
@@ -197,6 +197,87 @@ def test_the_images_stay_listed_when_the_project_is_cleared_or_the_plugin_reload
     finally:
         again.unload()
     p.initGui()  # the fixture unloads it
+
+
+def test_the_next_qgis_starts_without_them_and_their_records_stay(bare, monkeypatch):
+    """
+    tsudo 2026-11-26: 画像なしの画像カタログから観測結果を入れたあと、QGIS を落として、また立ち上げると、
+    レイヤーが残っている. As the images opened (their layers go with QGIS): none listed at the next start.
+    """
+    from mikage.qgis_io.prefs.observations import RUN_ENV
+
+    p, iface, dock, _ = bare
+    dock.list_catalog_images([listed_image(_record("IMG1", 1, RING))])
+    dock.set_active(True)
+    dock.map_clicked(139.7, 35.6, None)
+    dock.object_input.setText("あおば")
+    dock.submit()
+    assert [o.image_id for o in dock.book.living()] == ["IMG1"] and _names() == ["IMG1"]
+    # QGIS closed (the plugin unloaded, every layer gone) and started again: a process without this run's mark.
+    p.unload()
+    QgsProject.instance().clear()
+    monkeypatch.delenv(RUN_ENV, raising=False)
+    again = small_plugin(iface, Observations)
+    again.initGui()
+    try:
+        book = again.api.observation_dock.book
+        wait_for(lambda: False, 100)
+        assert book.listed == [] and book.current is None and _group() is None
+        # The records stay: the image listed again has them.
+        again.api.observation_dock.list_catalog_images([listed_image(_record("IMG1", 1, RING))])
+        assert _names() == ["IMG1"]
+        assert [o.object_name for o in again.api.observation_dock.read_now().living()] == ["あおば"]
+    finally:
+        again.unload()
+    p.initGui()  # the fixture unloads it
+
+
+def test_only_the_listing_of_this_run_of_qgis_is_read(bare, monkeypatch):
+    from mikage.qgis_io.prefs.observations import RUN_ENV, qgis_run
+
+    prefs = settings.SettingsPrefs()
+    prefs.set("listed_images/A", "[1]")
+    prefs.set("last_values/A", "{}")
+    run = qgis_run()
+    assert qgis_run() == run and prefs.get("listed_images/A") == "[1]"
+    # Another process with this one's environment (started from it): another run.
+    monkeypatch.setenv(RUN_ENV, "1-abcdef01")
+    assert qgis_run() != run and prefs.get("listed_images/A") is None
+    # The next start (the process id may come again): another run. What the last record said is kept.
+    monkeypatch.delenv(RUN_ENV)
+    assert qgis_run() != run and prefs.get("listed_images/A") is None and prefs.get("last_values/A") == "{}"
+    # Another store's listing saved now does not bring an earlier run's back.
+    prefs.set("listed_images/B", "[2]")
+    assert prefs.get("listed_images/B") == "[2]" and prefs.get("listed_images/A") is None
+
+
+def test_the_layers_leave_the_project_unchanged_when_qgis_marks_it_a_moment_later(bare):
+    """
+    QGIS marks the project changed when the layer panel gets a layer, and again a moment later when the map
+    bridge sets the project's CRS from the first layer: QGIS then asked to save it when closing, and at the next
+    start once the layers came back (seen in QGIS 3.34, 2026-11-26).
+    """
+    from qgis.PyQt.QtCore import QTimer
+
+    p, iface, dock, _ = bare
+    project = QgsProject.instance()
+
+    def mark(*_):
+        project.setDirty(True)
+        QTimer.singleShot(0, lambda: project.setDirty(True))
+
+    project.layerTreeRoot().addedChildren.connect(mark)
+    try:
+        dock.list_catalog_images([listed_image(_record("IMG1", 1, RING))])
+        wait_for(lambda: False, 300)
+        assert _names() == ["IMG1"] and not project.isDirty()
+        # The project changed by the person before: left changed.
+        project.setDirty(True)
+        dock.list_catalog_images([listed_image(_record("IMG2", 2, RING))])
+        wait_for(lambda: False, 300)
+        assert _names() == ["IMG1", "IMG2"] and project.isDirty()
+    finally:
+        project.layerTreeRoot().addedChildren.disconnect(mark)
 
 
 def test_each_store_has_its_own_images_without_files(bare, tmp_path):
