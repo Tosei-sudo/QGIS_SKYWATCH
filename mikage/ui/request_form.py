@@ -315,7 +315,7 @@ class RequestForm(QDialog):
         cf = QFormLayout(cond)
         kinds = QHBoxLayout()
         self.kind = QComboBox()
-        self.kind.addItems(KINDS)
+        self.kind.addItems(list(KINDS))
         self.look = QComboBox()
         self.look.addItems(LOOK_SIDES)
         self.orbit = QComboBox()

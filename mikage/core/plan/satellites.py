@@ -24,7 +24,6 @@ BUILT_IN_DEFAULTS: dict[str, float] = {
     "maxOffNadir": 30, "minOffNadir": 0, "swath": 10, "scenesPerPass": 1, "minInterval": 0, "maxPerDay": 0, "leadTime": 0,
     "shotsPerPass": 0,
 }
-DEFAULT_SAR = re.compile(r"SAR|radar|レーダ", re.IGNORECASE)
 _LAYER = re.compile(r"/(FeatureServer|MapServer)/\d+/?$", re.IGNORECASE)
 
 
@@ -36,14 +35,17 @@ class SatelliteCatalogConfig:
     fields: dict[str, str]
     swath_unit: str = "km"
     defaults: dict[str, float] = field(default_factory=lambda: dict(BUILT_IN_DEFAULTS))
-    sar_pattern: re.Pattern = DEFAULT_SAR
+    #: `sarPattern`: the cloud-free kind's (SAR) `match` for this catalog; None: the kind's own.
+    sar_pattern: Optional[re.Pattern] = None
     where: Optional[str] = None
     #: A QGIS authentication configuration id (plugin settings, not the file).
     authcfg: Optional[str] = None
+    #: The kinds its satellites are of (`satelliteKinds`, set with the settings); None: those in use (kinds.kinds()).
+    kinds: Any = None
 
 
-def compile_pattern(value: Any, problems: list[str], at: str, fallback: re.Pattern = DEFAULT_SAR) -> re.Pattern:
-    """A `sarPattern` (case-insensitive); the default when it is not one."""
+def compile_pattern(value: Any, problems: list[str], at: str, fallback: Optional[re.Pattern] = None) -> Optional[re.Pattern]:
+    """A `sarPattern` (case-insensitive); `fallback` (None: the SAR kind's own `match`) when it is not one."""
     if isinstance(value, str) and value:
         try:
             return re.compile(value, re.IGNORECASE)
@@ -184,6 +186,29 @@ class SatelliteSpec:
     #: Its kind as the catalog writes it (`fields.kind`: 「SAR」「光学」…; `sar` from it); None when not given
     #: (画像カタログ's SAR・光学 then do not know it: core/catalog/sensors.py).
     kind: Optional[str] = None
+    #: Its kind of `satelliteKinds` when known (kind_name); "": SAR or the others' kind by `sar`.
+    kind_given: str = ""
+    #: Whether it images only in daylight when known (daylight); None: as its kind does.
+    daylight_given: Optional[bool] = None
+
+    @property
+    def kind_name(self) -> str:
+        """Its kind of `satelliteKinds` (core/plan/kinds.py: 光学, SAR, IR …)."""
+        if self.kind_given:
+            return self.kind_given
+        from .kinds import kinds
+
+        return kinds().of_flag(self.sar).name
+
+    @property
+    def daylight(self) -> bool:
+        """Whether it images only in daylight (its kind's `daylight`; not SAR when its kind is none in use)."""
+        if self.daylight_given is not None:
+            return self.daylight_given
+        from .kinds import kinds
+
+        own = kinds().named(self.kind_name)
+        return own.daylight if own is not None else not self.sar
 
 
 def platform_key(sat: SatelliteSpec) -> str:
@@ -269,6 +294,9 @@ def satellite_of(attributes: dict, catalog: SatelliteCatalogConfig):
         return v if v is not None else fallback
 
     kind = get("kind")
+    from .kinds import kinds as kinds_in_use
+
+    own = (catalog.kinds or kinds_in_use()).of_text(kind, catalog.sar_pattern)
     resolution = _number(get("resolution"))
     return SatelliteSpec(
         name=name,
@@ -285,21 +313,29 @@ def satellite_of(attributes: dict, catalog: SatelliteCatalogConfig):
         leadTime=max(0, num("leadTime", defaults["leadTime"])),
         series=_text(get("series")) or series_of(name),
         lookSide=look_side_of(get("lookSide")),
-        sar=isinstance(kind, str) and bool(catalog.sar_pattern.search(kind)),
+        sar=own.radar,
         source=catalog.label,
         sensor=_text(get("sensor")) or None,
         mode=_text(get("mode")) or None,
         resolution=resolution,
         system=_text(get("system")) or None,
         kind=_text(kind) or None,
+        kind_given=own.name,
+        daylight_given=own.daylight,
         shotsPerPass=max(0, _js_round(num("shotsPerPass", defaults.get("shotsPerPass", 0)))),
     )
 
 
 def satellites_from_text(text: str, maxOffNadir: float, minOffNadir: float, swath: float, scenesPerPass: float = 1,
                          minInterval: float = 0, maxPerDay: float = 0, leadTime: float = 0, lookSide: str = "both",
-                         sar: bool = False) -> list[SatelliteSpec]:
-    """Satellites from pasted TLE text (two lines each, or three with a name line), all with the same specifications."""
+                         sar: bool = False, kind: Optional[str] = None) -> list[SatelliteSpec]:
+    """
+    Satellites from pasted TLE text (two lines each, or three with a name line), all with the same specifications
+    and of one kind (`kind`'s name; without it, SAR or the others' by `sar`).
+    """
+    from .kinds import kinds
+
+    own = kinds().named(kind) if kind else None
     lines = [l.strip() for l in re.split(r"\r?\n", text) if l.strip()]
     found: list[SatelliteSpec] = []
     i = 0
@@ -314,7 +350,9 @@ def satellites_from_text(text: str, maxOffNadir: float, minOffNadir: float, swat
             maxOffNadir=maxOffNadir, minOffNadir=minOffNadir, swath=swath, length=swath,
             scenesPerPass=max(1, _js_round(scenesPerPass)), minInterval=max(0, minInterval),
             maxPerDay=max(0, _js_round(maxPerDay)), leadTime=max(0, leadTime), series=series_of(name),
-            lookSide=lookSide, sar=sar, source="貼り付け", kind="SAR" if sar else "光学",
+            lookSide=lookSide, source="貼り付け", **(
+                dict(sar=own.radar, kind=own.name, kind_given=own.name, daylight_given=own.daylight) if own is not None
+                else dict(sar=sar, kind="SAR" if sar else "光学")),
         ))
         i += 2
     return found

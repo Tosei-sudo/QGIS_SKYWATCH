@@ -198,7 +198,7 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | `SWATH` | 観測幅 | `Double` | 観測幅（`swathUnit` の単位、既定 km。既定 10） | `swath` |
 | `SCENE_LENGTH` | シーン長 | `Double` | 1 シーンの長さ（`swath` と同じ単位。空なら観測幅と同じ） | `length` |
 | `LOOK_SIDE` | 観測方向 | `String(16)` | `右`・`左`・`両方`（`right`・`R` なども可） | `lookSide` |
-| `SENSOR_TYPE` | センサー種別 | `String(64)` | `光学`・`SAR` など（`sarPattern` に合えば SAR） | `kind` |
+| `SENSOR_TYPE` | センサー種別 | `String(64)` | `光学`・`SAR`・`IR` など。設定の `satelliteKinds` の名前と同じか `match`（SAR はカタログの `sarPattern` も）に当たる種別、どれにも当たらなければ光学 | `kind` |
 | `SCENES_PER_PASS` | 1パスのシーン数 | `Integer` | 1 回のパスで撮れるシーン数（既定 1） | `scenesPerPass` |
 | `MIN_INTERVAL_MIN` | 最小撮像間隔 | `Double` | 撮像と撮像の間隔の下限（分、既定 0） | `minInterval` |
 | `MAX_PER_DAY` | 1日の上限 | `Integer` | 1 日の撮像数の上限（0 で制限なし） | `maxPerDay` |
@@ -218,7 +218,7 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | --- | --- | --- | --- | --- |
 | `SENSOR` | センサー | `String(255)` | センサー名。**必須** | `sensor` |
 | `SENSOR_MODE` | センサーモード | `String(255)` | モード名（ストリップマップ・スポットライトなど） | `mode` |
-| `SENSOR_TYPE` | センサー種別 | `String(64)` | `光学`・`SAR` など | `kind` |
+| `SENSOR_TYPE` | センサー種別 | `String(64)` | `光学`・`SAR`・`IR` など（衛星の `SENSOR_TYPE` と同じ読み方。空なら衛星の種別） | `kind` |
 | `MAX_OFF_NADIR` | 最大オフナディア角 | `Double` | 角度の上限（度） | `maxOffNadir` |
 | `MIN_OFF_NADIR` | 最小オフナディア角 | `Double` | 角度の下限（度） | `minOffNadir` |
 | `SWATH` | 観測幅 | `Double` | 観測幅（`swathUnit`） | `swath` |
@@ -260,7 +260,7 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | `STATUS` | 状態 | `String(16)` | `有効`・`停止`・`完了` | `status` |
 | `PRIORITY` | 優先度 | `Integer` | 1〜1000（小さいほど高い） | `priority` |
 | `BOOST` | 繰り上げ量 | `Integer` | 未撮像のときの繰り上げ（100 単位） | `boost` |
-| `KIND` | 種別 | `String(16)` | `任意`・`光学`・`SAR` | `kind` |
+| `KIND` | 種別 | `String(16)` | `任意` か衛星の種別（`satelliteKinds` の名前。既定 `光学`・`SAR`・`IR`） | `kind` |
 | `SERIES` | 衛星シリーズ | `String(1000)` | シリーズ（カンマ区切り。空なら問わない） | `series` |
 | `SATELLITES` | 衛星 | `String(1000)` | 個別に指定する衛星（カンマ区切り） | `satellites` |
 | `SENSOR_MODES` | センサーモード | `String(1000)` | センサー・モード（カンマ区切り） | `modes` |

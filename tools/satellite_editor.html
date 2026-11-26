@@ -299,6 +299,11 @@ dialog.modal.busy button { pointer-events: none; opacity: .6; }
    "none",
    "サインインなし"
   ]
+ ],
+ "kindNames": [
+  "光学",
+  "SAR",
+  "IR"
  ]
 }
 </script>
@@ -319,7 +324,7 @@ const SAT_INFO = {
   swath: { label: "観測幅", unit: "swath", num: true },
   length: { label: "シーン長", unit: "swath", num: true, hint: "空なら観測幅と同じ" },
   lookSide: { label: "観測方向", list: "lookSides", hint: "右・左・両方（空なら両方）" },
-  kind: { label: "センサー種別", list: "kinds", hint: "光学・SAR など（sarPattern に合えば SAR）" },
+  kind: { label: "センサー種別", list: "kinds", hint: "光学・SAR・IR など（設定の satelliteKinds の名前。match・sarPattern に合えばその種別）" },
   scenesPerPass: { label: "1 パスのシーン数", num: true, int: true },
   minInterval: { label: "最小撮像間隔", unit: "分", num: true },
   maxPerDay: { label: "1 日の上限", num: true, int: true, hint: "0 で制限なし" },
@@ -685,7 +690,7 @@ function sourceOf(kind, entry, i, at, fields, problems) {
 /** 設定ファイルのうち、このツールが使う項目（config.py と同じ読み方）。 */
 function parseConfig(v) {
   const problems = [];
-  const out = { sats: [], sensors: [], inline: [], aliases: [], quotas: [], tracking: null, systems: [], timeZones: [], signIn: [], problems };
+  const out = { sats: [], sensors: [], inline: [], aliases: [], quotas: [], tracking: null, systems: [], timeZones: [], signIn: [], kinds: [], problems };
   if (!isObj(v)) { problems.push(badP("設定はオブジェクトで指定")); return out; }
   const listed = (key) => {
     if (!(key in v)) return [];
@@ -762,6 +767,10 @@ function parseConfig(v) {
     src.label = typeof e.label === "string" && e.label ? `年間撮像上限（${e.label}）` : "年間撮像上限";
     out.quotas.push(src);
   });
+  // 衛星の種別（satelliteKinds、core/plan/kinds.py）: 種別の欄の候補。書かなければ組み込みの 光学・SAR・IR。
+  out.kinds = Array.isArray(v.satelliteKinds) && v.satelliteKinds.length
+    ? v.satelliteKinds.map((k) => (isObj(k) ? k.name : k)).filter((n) => typeof n === "string" && n.trim()).map((n) => n.trim())
+    : [...PC.kindNames];
   out.tracking = trackingOf(v.editTracking, problems);
   for (const e of Array.isArray(v.requestExports) ? v.requestExports : []) if (isObj(e) && typeof e.system === "string" && e.system.trim()) out.systems.push(e.system.trim());
   out.timeZones = timeZoneRules(v, problems);
@@ -1180,7 +1189,8 @@ function buildLists() {
   box.replaceChildren();
   const uniq = (xs) => [...new Set(xs.filter(Boolean))].sort(natural.compare);
   const lists = {
-    kinds: uniq(["光学", "SAR", ...S.sats.map((r) => r.v.kind), ...S.modes.map((m) => text(attr(m.a, m.src.fields.kind)))]),
+    kinds: [...new Set([...(S.cfg ? S.cfg.kinds : PC.kindNames),
+      ...uniq([...S.sats.map((r) => r.v.kind), ...S.modes.map((m) => text(attr(m.a, m.src.fields.kind)))])])],
     lookSides: ["右", "左", "両方"],
     series: uniq(S.sats.map((r) => text(get(r, "series")) || r.v.series)),
     sensors: uniq([...S.modes.map(modeSensor), ...S.sats.map((r) => r.v.sensor)]),

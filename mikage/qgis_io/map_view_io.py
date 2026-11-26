@@ -14,7 +14,8 @@ from typing import Any, Callable, Optional, Sequence
 
 from qgis.core import QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsPointXY, QgsProject, QgsRectangle
 
-from ..core.catalog.api import SAR, CatalogConfig, CatalogRecord, sensor_kind
+from ..core.catalog.api import CatalogConfig, CatalogRecord, sensor_kind
+from ..core.plan.api import kinds
 from ..core.map_view import (
     Directions, bearing_of, fit_box, heading_from_look, off_nadir_of, utm_epsg,
 )
@@ -181,7 +182,8 @@ def directions_of(layer, found: Optional[tuple[CatalogRecord, CatalogConfig]] = 
         if record.azimuth is not None and math.isfinite(record.azimuth):
             toward, toward_from = record.azimuth % 360, "catalog"
         off = off_nadir_of(record.angle, catalog.angle_kind, catalog.orbit_height)
-        radar = sensor_kind(record.sensor or "", ()) == SAR
+        own = kinds().named(sensor_kind(record.sensor or "", ()))
+        radar = own is not None and own.radar
     if toward is None and typed is not None:
         toward, toward_from = typed % 360, "typed"
     heading = None

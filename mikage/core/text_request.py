@@ -45,6 +45,7 @@ from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
 from typing import Any, NamedTuple, Optional, Sequence
 
+from .plan.api import kinds
 from .request.api import PRIORITY_LEVELS, ImagingRequest, day_bounds, jst_day, repeat_of, square_rings
 from .text_assist import Message, TextTask, numbers_in
 from .text_tasks import answer_lines, bare
@@ -426,7 +427,6 @@ PRIORITY_CUES: dict[str, tuple[str, ...]] = {
           "急ぎではあり", "急ぎじゃな", "急ぎでな", "急がな", "急ぎでは無", "いつでも"),
     "最低": ("優先度最低", "優先度は最低", "優先度:最低", "空いていれば", "空きがあれば", "ついでに", "ついでで"),
 }
-_KIND_CUES = {"SAR": ("sar", "レーダ", "合成開口", "radar"), "光学": ("光学", "可視", "optical", "パンクロ", "マルチスペクトル", "カラー画像")}
 _ASCENDING = ("昇交", "アセンディング", "ascending", "北行")
 _DESCENDING = ("降交", "ディセンディング", "descending", "南行")
 _LOOK = re.compile(r"(右|左)\s*(?:側)?\s*(?:観測|ルック|視|向き|look)|(right|left)[- ]?look", re.IGNORECASE)
@@ -463,11 +463,14 @@ def priority_of(text: str) -> Optional[tuple[int, str]]:
 
 
 def kind_of(text: str) -> Optional[str]:
-    t = fold(text)
-    said = [k for k, cues in _KIND_CUES.items() if any(c in t for c in cues)]
+    """
+    The 種別 a text names: one kind (`satelliteKinds`' words: 「レーダーで」 SAR, 「赤外で」 IR), 任意 for two
+    or more (「光学でもSARでも」), None for none.
+    """
+    said = kinds().kinds_in(text, loose=True)
     if len(said) == 1:
         return said[0]
-    return "任意" if len(said) == 2 else None
+    return "任意" if len(said) >= 2 else None
 
 
 def orbit_of(text: str) -> Optional[str]:
@@ -1158,8 +1161,9 @@ def request_draft(raw: str, text: str, today: date, sats: Sequence[Any] = (), pl
             d.checks.append(f"雲量「{bare(got['雲量'])}」は文から読み取れないので未入力")
     if cloud:
         d.values["cloud_no_go"], d.why["cloud_no_go"] = cloud
-        if kind == "SAR":
-            d.checks.append("SAR の依頼に雲量（SAR には効かない）")
+        own = kinds().named(kind) if kind else None
+        if own is not None and own.radar:
+            d.checks.append(f"{own.name} の依頼に雲量（{own.name} には効かない）")
 
     # 依頼者
     if not editing or _CHANGE_REQUESTER.search(t):

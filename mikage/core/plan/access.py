@@ -60,7 +60,7 @@ class PlanOptions:
     end: float
     #: A tighter limit on the off-nadir angle than the satellites' own; None for none.
     maxOffNadir: Optional[float] = None
-    #: `optical`: satellites that are not SAR only in daylight. `none`: day and night.
+    #: `optical`: satellites of a kind that images only in daylight (光学; kinds.py `daylight`) only then. `none`: day and night.
     daylight: str = "optical"
     minSunElevation: float = 10
     #: Seconds between the coarse samples of each orbit.
@@ -531,7 +531,7 @@ def _judge(sat: SatelliteSpec, orbit: Orbit, s: int, ti: int, t: _Prepared, time
         return None
     center = lon_lat_of(t.r)
     sun = sun_elevation(center, time)
-    if options.daylight == "optical" and not sat.sar and sun < options.minSunElevation:
+    if options.daylight == "optical" and sat.daylight and sun < options.minSunElevation:
         return None
     f = frame_of(st.r, st.v)
     distance = norm(st.r)

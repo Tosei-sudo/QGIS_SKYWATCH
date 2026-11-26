@@ -137,7 +137,7 @@ class ResultsPart:
         if any(op.cloud is not None for op in plan["result"].opportunities):
             label = self.context.config.cloud_forecast.label if self.context.config.cloud_forecast else ""
             cols.append(Column("cloud", tr("雲量"), lambda op: "—" if op.cloud is None else f"{js_round(op.cloud, 0)}%",
-                               lambda op: (tr("SAR は雲を通して撮像") if sats[op.satellite].sar else tr("予報の範囲外（16 日先まで）")) if op.cloud is None
+                               lambda op: (tr("{k} は雲を通して撮像").format(k=sats[op.satellite].kind_name) if sats[op.satellite].sar else tr("予報の範囲外（16 日先まで）")) if op.cloud is None
                                else tr("{label} の雲量予報").format(label=label)))
         if options.stations:
             cols.append(Column("downlink", tr("受信見込み"), lambda op: local_text(op.downlink[0]) if op.downlink else tr("1 日以内なし"), downlink_title))

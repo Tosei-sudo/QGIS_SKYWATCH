@@ -154,7 +154,7 @@
         "maxOffNadir": "MAX_OFF_NADIR", "minOffNadir": "MIN_OFF_NADIR",              // 振れる角度（度）
         "swath": "SWATH", "length": "SCENE_LENGTH",                                   // 観測幅・シーン長（length がなければ観測幅と同じ）
         "lookSide": "LOOK_SIDE",                                                      // right・left・both（R・L・右・左も可）
-        "kind": "SENSOR_TYPE",                                                        // sarPattern に合えば SAR（夜間も撮像）
+        "kind": "SENSOR_TYPE",                                                        // satelliteKinds の名前か match に合う種別（SAR は sarPattern も）
         "scenesPerPass": "SCENES_PER_PASS",                                           // 1 パスでパス方向に連続して撮れるシーン数（任意。既定 1）
         "minInterval": "MIN_INTERVAL_MIN",                                            // 1 回撮ってから次に撮れるまでの分（任意。既定 0 = 制約なし）
         "maxPerDay": "MAX_PER_DAY",                                                   // 24 時間に撮れる回数（任意。既定 0 = 制約なし）

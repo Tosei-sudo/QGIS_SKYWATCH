@@ -85,3 +85,28 @@ def test_a_satellite_said_and_the_value_changed_by_hand(plugin):
     card.run_button.click()
     assert dock.sensor_box.currentText() == ""
     assert wait_for(lambda: dock.search_button.isEnabled() and "SENSOR" not in asked_where(fake))
+
+
+def test_ir_said_searches_the_ir_sensors(plugin):
+    """衛星の種別 (`satelliteKinds`, 2026-11-26): 「赤外」 is IR, the sensors of the satellites whose kind attribute says so."""
+    p, iface, fake, tmp_path = plugin
+    from mikage.tests.test_plan import LINE1, LINE2
+    from mikage.tests.test_qgis_requests import SATS
+
+    fake.layers[SATS].add({"NAME": "THERM 1", "TLE": f"{LINE1}\n{LINE2}", "KIND": "熱赤外", "SERIES": "THERM", "RES": 3})
+    images = fake.layers[IMAGES]
+    images.add({"IMAGE_ID": "I9", "ACQ": time.time() * 1000 - DAY, "SENSOR": "THERM 1", "URL": "https://x.example/9.tif"},
+               ring(139.6, 35.2, 139.8, 35.4))
+    box, _loaded = _setup(p, tmp_path, [])
+    dock = p.docks["SatObsImageCatalog"]
+    command = p.feature(Command)
+    assert wait_for(lambda: "THERM 1" in (dock.sensor_values() or []))
+    command.satellites()
+    assert wait_for(lambda: len(command.satellites()) == 3)
+    assert [s.kind_name for s in command.satellites()] == ["光学", "SAR", "IR"]
+    box.submit("昨日の赤外画像を探して")
+    card = box.card
+    assert card.chosen().operation.key == "catalog" and card.sensors.text() == "IR"
+    assert card.sensors_note.text().startswith("→ THERM 1（1 センサー）")
+    card.run_button.click()
+    assert dock.sensor_box.currentText() == "THERM 1"

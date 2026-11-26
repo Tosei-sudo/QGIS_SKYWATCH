@@ -92,7 +92,7 @@ class TestSatelliteCatalogs:
         assert catalog.fields == {"tle": "T"}
         assert catalog.defaults == BUILT_IN_DEFAULTS
         assert catalog.label == "衛星カタログ 3"
-        assert catalog.sar_pattern.search("radar")
+        assert catalog.sar_pattern is None  # The SAR kind's own match (satelliteKinds) then.
         assert problems == [
             "satelliteCatalogs[2] の fields.name は属性名（英数字と _）で指定",
             "satelliteCatalogs[2] の defaults.swath は 0 以上の数で指定",

@@ -34,7 +34,33 @@ DEFAULT_TIMES_GAP = 1.0
 CATEGORIES = ("定点", "臨時")
 ACHIEVES = ("毎回", "期間内1回")
 STATUSES = ("有効", "停止", "完了")
-KINDS = ("任意", "光学", "SAR")
+
+
+class _Kinds:
+    """A request's 種別: 任意 and the satellites' kinds in use (`satelliteKinds`: 光学・SAR・IR by default), read each time."""
+
+    def _now(self) -> tuple:
+        from ..plan.api import request_kinds
+
+        return request_kinds()
+
+    def __iter__(self):
+        return iter(self._now())
+
+    def __len__(self) -> int:
+        return len(self._now())
+
+    def __getitem__(self, i):
+        return self._now()[i]
+
+    def __contains__(self, value) -> bool:
+        return value in self._now()
+
+    def __repr__(self) -> str:
+        return repr(self._now())
+
+
+KINDS = _Kinds()
 LOOK_SIDES = ("任意", "右", "左")
 ORBIT_DIRS = ("任意", "昇交", "降交")
 TIMES_OF_DAY = ("任意", "昼", "夜")

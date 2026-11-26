@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
 from ..util import is_name, is_record, layer_url, text_of
-from .satellites import DEFAULT_SAR, compile_pattern, look_side_of
+from .satellites import compile_pattern, look_side_of
 
 SENSOR_ROLES = (
     "sensor", "mode", "kind", "maxOffNadir", "minOffNadir", "swath", "length", "lookSide",
@@ -29,6 +29,11 @@ class SensorMode:
     sensor: str
     mode: str = ""
     sar: Optional[bool] = None
+    #: Its kind (`satelliteKinds`) when the table says one (with `sar` and `daylight` from it); None: the satellite's.
+    kind_name: Optional[str] = None
+    daylight: Optional[bool] = None
+    #: The kind as the table or the file writes it (text, or yes/no for SAR).
+    raw_kind: Any = None
     maxOffNadir: Optional[float] = None
     minOffNadir: Optional[float] = None
     #: km.
@@ -47,7 +52,20 @@ class SensorMode:
 
     def values(self) -> dict[str, Any]:
         """The values it gives (as the viewer's object, without the absent ones)."""
-        return {k: v for k, v in self.__dict__.items() if v is not None}
+        return {k: v for k, v in self.__dict__.items() if v is not None and k not in _OWN}
+
+    def set_kind(self, kinds: Any = None, sar: Optional[re.Pattern] = None) -> None:
+        """Its kind (`kind_name`, `sar`, `daylight`) from `raw_kind`, as a satellite's (`kinds`: None for those in use)."""
+        from .kinds import kinds as kinds_in_use
+
+        ks, kind = kinds or kinds_in_use(), self.raw_kind
+        own = ks.of_text(kind, sar) if isinstance(kind, str) and kind.strip() else ks.of_flag(kind) if isinstance(kind, bool) else None
+        if own is not None:
+            self.sar, self.kind_name, self.daylight = own.radar, own.name, own.daylight
+
+
+#: SensorMode's values the viewer's object has not.
+_OWN = ("kind_name", "daylight", "raw_kind")
 
 
 @dataclass
@@ -56,11 +74,14 @@ class SensorCatalogConfig:
     label: str
     fields: dict[str, str]
     swath_unit: str = "km"
-    sar_pattern: re.Pattern = DEFAULT_SAR
+    #: `sarPattern` (satellites.SatelliteCatalogConfig.sar_pattern).
+    sar_pattern: Optional[re.Pattern] = None
     modes: list[SensorMode] = field(default_factory=list)
     url: Optional[str] = None
     where: Optional[str] = None
     authcfg: Optional[str] = None
+    #: The kinds (`satelliteKinds`, set with the settings); None: those in use.
+    kinds: Any = None
 
 
 def _number_of(value: Any) -> Optional[float]:
@@ -80,17 +101,19 @@ def _yes(value: Any) -> bool:
     return value is True or (value == 1 and not isinstance(value, bool)) or bool(_YES.match(text_of(value)))
 
 
-def mode_from(get: Callable[[str], Any], scale: float, sar: re.Pattern) -> Optional[SensorMode]:
-    """A mode from named values: numbers checked, sizes turned to km with `scale`. None without a sensor name."""
+def mode_from(get: Callable[[str], Any], scale: float, sar: Optional[re.Pattern] = None, kinds: Any = None) -> Optional[SensorMode]:
+    """
+    A mode from named values: numbers checked, sizes turned to km with `scale`. None without a sensor name.
+    Its kind: as a satellite's (`sar`: the catalog's `sarPattern`; `kinds`: None for those in use).
+    """
     sensor = text_of(get("sensor"))
     if not sensor:
         return None
     mode = SensorMode(sensor=sensor, mode=text_of(get("mode")))
     kind = get("kind")
-    if isinstance(kind, str) and kind.strip():
-        mode.sar = bool(sar.search(kind))
-    elif isinstance(kind, bool):
-        mode.sar = kind
+    if isinstance(kind, (str, bool)):
+        mode.raw_kind = kind
+        mode.set_kind(kinds, sar)
     for key in NUMBER_ROLES:
         v = _number_of(get(key))
         if v is not None:
@@ -175,7 +198,7 @@ def sensor_mode_of(attributes: dict[str, Any], catalog: SensorCatalogConfig) -> 
         name = catalog.fields.get(role)
         return attributes.get(name) if name else None
 
-    return mode_from(get, 0.001 if catalog.swath_unit == "m" else 1, catalog.sar_pattern)
+    return mode_from(get, 0.001 if catalog.swath_unit == "m" else 1, catalog.sar_pattern, catalog.kinds)
 
 
 def _key(text: Optional[str]) -> str:
@@ -203,6 +226,8 @@ def with_modes(sats: list, modes: list[SensorMode]) -> list:
         changes = dict(
             sensor=sat.sensor if sat.sensor is not None else m.sensor,
             sar=m.sar if m.sar is not None else sat.sar,
+            kind_given=m.kind_name or sat.kind_given,
+            daylight_given=m.daylight if m.daylight is not None else sat.daylight_given,
             maxOffNadir=m.maxOffNadir if m.maxOffNadir is not None else sat.maxOffNadir,
             minOffNadir=m.minOffNadir if m.minOffNadir is not None else sat.minOffNadir,
             swath=swath,
