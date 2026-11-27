@@ -326,7 +326,8 @@ class SatellitePassDock(PluginDock):
         """The words of 日照条件 for the kinds in use (光学 only in daylight; SAR・IR always)."""
         for i, sun in ((1, 10), (2, 0)):
             self.daylight.setItemText(i, self.tr("{k}衛星は日中のみ（太陽高度 {s}° 以上）").format(k=daylight_names(), s=sun))
-        self.daylight.setToolTip(self.tr("{k}衛星の撮像できる範囲を、衛星直下の太陽高度がこの値以上の所だけに限定（{a} は常に表示）")
+        self.daylight.setToolTip(self.tr("{k}衛星の撮像できる範囲を、衛星直下の太陽高度がこの値以上の所だけに限定。"
+                                         "衛星カタログに太陽高度の下限がある衛星はその値（{a} は常に表示）")
                                  .format(k=daylight_names(), a=always_names()))
 
     def _config_changed(self) -> None:

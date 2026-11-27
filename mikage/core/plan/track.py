@@ -15,7 +15,7 @@ from typing import Optional, Sequence
 
 from .access import satrec_of
 from .orbit import sun_elevation
-from .satellites import SatelliteSpec, satellite_label
+from .satellites import SatelliteSpec, satellite_label, sun_limit
 from .scene import ground_state_at
 
 #: The longest period drawn, days.
@@ -85,8 +85,12 @@ def reach_angles(sat: SatelliteSpec, max_off_nadir: Optional[float] = None) -> l
 
 def satellite_track(sat: SatelliteSpec, start: float, end: float, step: Optional[float] = None,
                     max_off_nadir: Optional[float] = None, min_sun: Optional[float] = None) -> Optional[SatelliteTrack]:
-    """The track and reach of `sat` from `start` to `end` (ms); None when its TLE cannot be read."""
+    """
+    The track and reach of `sat` from `start` to `end` (ms); None when its TLE cannot be read. `min_sun`: a satellite
+    imaging only in daylight images only where the sun is at least this high (or its own `minSunElevation`); None: always.
+    """
     orbit = satrec_of(sat)
+    low = None if min_sun is None or not sat.daylight else sun_limit(sat, min_sun)
     if isinstance(orbit, str):
         return None
     step_ms = (step if step is not None else step_for(end - start)) * 1000
@@ -106,7 +110,7 @@ def satellite_track(sat: SatelliteSpec, start: float, end: float, step: Optional
         result.track.append(g.lon_lat)
         result.heights.append(g.height * 1000)
         result.ascending.append(g.ascending)
-        result.open.append(min_sun is None or not sat.daylight or sun_elevation(g.lon_lat, t) >= min_sun)
+        result.open.append(low is None or sun_elevation(g.lon_lat, t) >= low)
         for k, (inner, outer) in enumerate(edges):
             inner.append(g.across[2 * k])
             outer.append(g.across[2 * k + 1])

@@ -239,7 +239,8 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
    "mode",
    "resolution",
    "system",
-   "shotsPerPass"
+   "shotsPerPass",
+   "minSunElevation"
   ],
   "sensorCatalogs": [
    "sensor",
@@ -256,7 +257,8 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
    "leadTime",
    "resolution",
    "primary",
-   "shotsPerPass"
+   "shotsPerPass",
+   "minSunElevation"
   ],
   "satelliteAliases": [
    "satellite",
@@ -1311,7 +1313,7 @@ const ROLE_LABELS = {
   keywords: "フリーワード検索の属性（文字列。複数はカンマ区切り）", name: "名前",
   tle: "TLE（2 行まとめて）", tle1: "TLE 1 行目", tle2: "TLE 2 行目", maxOffNadir: "最大オフナディア角", minOffNadir: "最小オフナディア角",
   swath: "観測幅", length: "シーンの長さ", lookSide: "観測方向", kind: "種別", scenesPerPass: "1 パスのシーン数",
-  minInterval: "撮像の最小間隔（分）", maxPerDay: "1 日の上限", shotsPerPass: "1 パスの撮像回数", series: "シリーズ", leadTime: "リードタイム", mode: "モード",
+  minInterval: "撮像の最小間隔（分）", maxPerDay: "1 日の上限", shotsPerPass: "1 パスの撮像回数", minSunElevation: "太陽高度の下限（度）", series: "シリーズ", leadTime: "リードタイム", mode: "モード",
   resolution: "分解能", system: "システム", primary: "既定のモード", satellite: "衛星（衛星カタログの名前か ID）",
   alias: "別名（画像カタログでの名前）", planId: "計画 ID", planName: "計画名", shotTime: "撮像時刻", satelliteId: "衛星 ID",
   target: "目標", offNadir: "オフナディア角", incidence: "入射角", pass: "軌道方向", side: "観測方向", status: "状態",

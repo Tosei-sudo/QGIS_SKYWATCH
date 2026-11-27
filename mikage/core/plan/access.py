@@ -22,7 +22,7 @@ from .orbit import (
     DEG, POLAR_RADIUS, R, Orbit, azimuth_of, dot, ecef_of, frame_of, ground_range,
     lon_lat_of, norm, off_nadir_for, sub, sun_elevation, track_angles, unit, up_of,
 )
-from .satellites import GroundStation, SatelliteSpec, side_for
+from .satellites import GroundStation, SatelliteSpec, side_for, sun_limit
 
 #: Slack (radians) on the horizon test of a group of targets.
 HORIZON_MARGIN = 0.5 * (math.pi / 180)
@@ -62,6 +62,7 @@ class PlanOptions:
     maxOffNadir: Optional[float] = None
     #: `optical`: satellites of a kind that images only in daylight (光学; kinds.py `daylight`) only then. `none`: day and night.
     daylight: str = "optical"
+    #: The lowest sun (degrees) for those of them without their own (`SatelliteSpec.minSunElevation`).
     minSunElevation: float = 10
     #: Seconds between the coarse samples of each orbit.
     step: float = 60
@@ -531,7 +532,7 @@ def _judge(sat: SatelliteSpec, orbit: Orbit, s: int, ti: int, t: _Prepared, time
         return None
     center = lon_lat_of(t.r)
     sun = sun_elevation(center, time)
-    if options.daylight == "optical" and sat.daylight and sun < options.minSunElevation:
+    if options.daylight == "optical" and sat.daylight and sun < sun_limit(sat, options.minSunElevation):
         return None
     f = frame_of(st.r, st.v)
     distance = norm(st.r)
