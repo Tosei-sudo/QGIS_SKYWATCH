@@ -345,7 +345,7 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | `KIND` | 種別 | `String(1000)` | 分類のパス（`船舶 > 貨物船 > コンテナ船`） | `kind` |
 | `ACTIVITY` | 活動 | `String(255)` | 停泊・航行など | `activity` |
 | `PRESENT` | 在不在 | `SmallInteger` | 在 1・消失 0（不可の記録は空） | `present` |
-| `NOTE` | 備考 | `String(4000)` | 備考（AI の結果から取り込んだ印 `[AI:…]` も） | `note` |
+| `NOTE` | 備考 | `String(4000)` | 備考（人が書く欄。AI の結果から取り込んだ記録はその結果の備考だけ。出どころは下の AI の列に入り、備考には書かない） | `note` |
 | `LENGTH_M` | 長さ | `Double` | 長さ（m、2 点以上で測ったとき） | `length` |
 | `HEADING` | 向き | `Double` | 向き（度、北から時計回り） | `heading` |
 | `WIDTH_M` | 幅 | `Double` | 幅（m、3・4 点で測ったとき） | `width` |
@@ -362,6 +362,13 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | `DELETED_AT` | 削除日時 | `Date` | 削除した日時（`softDelete`。空なら有効。この属性がなければ完全に消す） | `deleted` |
 | `UNSEEN_REASON` | 不可の理由 | `String(40)` | 雲・霞などで見えなかったときの理由（「不可」の記録。このとき `PRESENT` は空）。見えた記録は空。無ければ「不可」は使えない（2026-11-19 に追加） | `unseen` |
 | `NAMED_AREA_OBJECTID` | 地名のOBJECTID | `Integer` | 記録の点を含む地名（[`TBL_NAMED_AREA`](#tbl_named_area地名のポリゴン)）の `OBJECTID`。エンタープライズ ジオデータベースの**属性ルール**で入れる（例は [docs/arcgis-setup.md](../arcgis-setup.md#属性ルール記録の地名の-objectid)）。プラグインは書かない（記録を直して保存しても、送るのはほかの属性だけなので値はそのまま）。データ分析で観測記録と地名を結ぶキー。無くても動く | `namedAreaObjectId` |
+| `SOURCE` | 出どころ | `String(20)` | AI の結果から取り込んだ記録の出どころ。`AI検出`（プラグイン・ビューアの物体検出、転記した検出結果、似たものを探す）か `外部AI`（`aiResultSources`）。人が記録したものは空。記録を人が直しても変わらない（2026-11-27 に追加。以下の AI の列も同じ） | `aiSource` |
+| `AI_LAYER` | AI結果のレイヤー | `String(255)` | 取り込んだ結果のある表・レイヤー: 転記先（`detectionOutputs`）・外部 AI（`aiResultSources`）の `label`、転記していない検出結果は検出レイヤーの名前 | `aiLayer` |
+| `AI_RESULT_ID` | AI結果ID | `String(64)` | その表での結果の ID（外部 AI は `fields.id` の属性、なければ `OBJECTID`。転記先は `OBJECTID`。検出レイヤーは地物 ID で、転記するとその記録は転記先の `OBJECTID` に付け替わる）。`AI_LAYER` と 2 つで AI のどの行かが決まり、二重取り込みもこの 2 つで防ぐ | `aiResultId` |
+| `AI_SCORE` | AI確信度 | `Double` | その結果の確信度（0〜1） | `aiScore` |
+| `AI_MODEL` | AIモデル | `String(255)` | 検出したモデル（似たものを探すは「見本照合」） | `aiModel` |
+| `AI_DETECTED_AT` | AI検出日時 | `Date` | 検出した日時 | `aiDetectedAt` |
+| `AI_CONTINUATION` | 継続の判定 | `String(255)` | 前の画像のモノの続き（継続）として取り込んだときの判定: `自動継続`、`自動継続:〈ルール名〉`、`選択継続`（一覧で選んだ）。新しいモノは空 | `aiContinuation` |
 
 ### `TBL_OBSERVATION_AREA`（確認範囲）
 
@@ -381,6 +388,14 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | `DELETED_AT` | 削除日時 | `Date` | 削除した日時 | `deleted` |
 | `UNSEEN_REASON` | 不可の理由 | `String(40)` | 不可範囲の理由（雲・霞など）。空なら確認範囲。無ければ不可範囲は使えない（2026-11-19 に追加） | `unseen` |
 | `SATELLITE` | 衛星名 | `String(255)` | その画像の衛星名（観測記録と同じ）。以前の範囲は空。無くても動く（2026-11-20 に追加） | `satellite` |
+| `SOURCE` | 出どころ | `String(20)` | AI の結果を誤検出にした範囲は `AI誤検出`（AI 学習で必ず背景にする範囲）。人が描いた範囲は空（2026-11-27 に追加。以下の AI の列も同じ） | `aiSource` |
+| `AI_LAYER` | AI結果のレイヤー | `String(255)` | 誤検出にした結果のある表・レイヤー（観測記録と同じ） | `aiLayer` |
+| `AI_RESULT_ID` | AI結果ID | `String(64)` | その表での結果の ID（観測記録と同じ） | `aiResultId` |
+| `AI_SCORE` | AI確信度 | `Double` | その結果の確信度（0〜1） | `aiScore` |
+| `AI_MODEL` | AIモデル | `String(255)` | 検出したモデル | `aiModel` |
+| `AI_DETECTED_AT` | AI検出日時 | `Date` | 検出した日時 | `aiDetectedAt` |
+
+AI の列（`SOURCE` から `AI_DETECTED_AT`、観測記録は `AI_CONTINUATION` まで）がない層には、ドック「AI結果」から取り込めない・誤検出にできない（理由と足す列の名前を出す［E704］）。人の記録はそのまま保存できる。前からある記録の備考の印 `[AI:…]` は読まない（列へ移すときは [docs/arcgis-setup.md](../arcgis-setup.md#観測記録に-ai-の出どころの列を足す)）。
 
 ### `TBL_TAXONOMY`（分類体系）
 

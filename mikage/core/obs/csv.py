@@ -41,12 +41,14 @@ def observations_csv(records: list[Observation], places: Optional[dict] = None, 
     The CSV of observations (with a BOM, for spreadsheets), by thing and in
     flow order; with `places` (record id → its named areas, smallest first)
     the columns 地名・地名の種別・含まれる地名, with `fences` (record id →
-    geofence names) ジオフェンス; 数量 last (2026-11-24: the things a record stands for, empty for 消失・不可).
+    geofence names) ジオフェンス; 数量 (2026-11-24: the things a record stands for, empty for 消失・不可), then the AI
+    result it was made from (2026-11-27: 出どころ…継続の判定, empty for a record a person made).
     """
     levels = depth_columns(records)
     head = ["観測ID", "モノID", "モノ", "種別", *levels, "活動", "有無", "確度", "撮像日時", "画像ID", "画像", "経度", "緯度", "長さ（m）", "向き（度）",
             "幅（m）", "備考", "記録者", "更新者", "登録日時", "更新日時", "削除日時",
-            *(("地名", "地名の種別", "含まれる地名") if places is not None else ()), *(("ジオフェンス",) if fences is not None else ()), "数量"]
+            *(("地名", "地名の種別", "含まれる地名") if places is not None else ()), *(("ジオフェンス",) if fences is not None else ()), "数量",
+            "出どころ", "AI結果のレイヤー", "AI結果ID", "AI確信度", "AIモデル", "AI検出日時", "継続の判定"]
     rows = []
     for o in sorted(records, key=lambda o: (o.object_id, time_key(o), o.created_at)):
         path = path_of(o.kind)
@@ -62,6 +64,10 @@ def observations_csv(records: list[Observation], places: Optional[dict] = None, 
         if fences is not None:
             rows[-1].append("・".join(fences.get(o.id) or []))
         rows[-1].append(quantity_of(o) or "")
+        ai = o.ai
+        rows[-1] += ["", "", "", "", "", "", ""] if ai is None else [
+            ai.source, ai.layer, ai.result_id, "" if ai.score is None else f"{ai.score:.4f}".rstrip("0").rstrip("."), ai.model,
+            _iso(ai.detected_at), ai.continuation]
     return "\ufeff" + "\r\n".join(",".join(_cell(c) for c in r) for r in [head, *rows]) + "\r\n"
 
 

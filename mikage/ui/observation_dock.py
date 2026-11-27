@@ -557,6 +557,12 @@ class ObservationDock(
         f.addRow(self.note_assist.notice)
         f.addRow(self.note_tidy.panel)
         f.addRow(self.note_fields.panel)
+        # 出どころ (2026-11-27): the AI result a record was made from (SOURCE, AI_LAYER…), shown, never typed.
+        self.origin_label = QLabel(tr("出どころ"))
+        self.origin_text = plain_label(QLabel())
+        self.origin_text.setWordWrap(True)
+        self.origin_text.setToolTip(tr("この記録を作った AI の結果（記録を直しても変わらない）"))
+        f.addRow(self.origin_label, self.origin_text)
         actions = QHBoxLayout()
         self.submit_button = self._button(tr("記録（Enter）"), "", lambda: self.submit(True))
         self.absent_button = self._button(tr("消失"), tr("この画像での消失（見当たらず）を記録"), lambda: self.submit(False))

@@ -12,7 +12,7 @@ deleted, an outline moved) is what is recorded.
 """
 from __future__ import annotations
 
-from typing import Callable, Optional, Sequence
+from typing import Callable, Iterable, Optional, Sequence
 
 from qgis.core import QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsFeatureRequest, QgsGeometry, QgsProject, QgsVectorLayer, QgsWkbTypes
 from qgis.PyQt.QtCore import QDateTime
@@ -117,4 +117,22 @@ def detection_results(layer: QgsVectorLayer, image_id: str, kinds_of: Callable[[
             attributes={}, width=_number(f["width_m"]) if "width_m" in extra else None,
             confidence=text_of(_plain(f["confidence"])) if "confidence" in extra else "",
         ), f.id()))
+    return out
+
+
+def sent_moves(layer: QgsVectorLayer, label: str, sent: Iterable[tuple]) -> list[tuple[Optional[int], str, str, str]]:
+    """
+    What a detection layer's features sent to a table (`sent`: feature id, object id, …) make of the records made from
+    them (book.repoint_ai): (検出日時, feature id, the table's label, its object id there).
+    """
+    has_time = layer.fields().indexOf("detected_at") >= 0
+    out = []
+    for fid, oid, *_rest in sent:
+        if oid is None:
+            continue
+        detected = None
+        if has_time:
+            f = layer.getFeature(int(fid))
+            detected = _ms(f["detected_at"]) if f.isValid() else None
+        out.append((detected, str(fid), label, str(int(oid)) if isinstance(oid, float) and oid.is_integer() else str(oid)))
     return out

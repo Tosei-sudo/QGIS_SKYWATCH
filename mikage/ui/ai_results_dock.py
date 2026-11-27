@@ -56,13 +56,13 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ..core.ai.api import DetectModelConfig
-from ..core.ai.api import ACCEPTED, REJECTED_STATE, SURE_SCORE, TO_REVIEW, queue, rejected_tags, rejection_note, review_order, state_of
+from ..core.ai.api import ACCEPTED, REJECTED_STATE, SURE_SCORE, TO_REVIEW, is_rejection, queue, rejected_tags, review_order, state_of
 from ..core.ai_results import (
-    AiResult, AiResultSource, detected_kind, detection_runs, import_entry, kind_for, recorded_tags, result_sources, result_tag, rules_for,
+    AiResult, AiResultSource, detected_kind, import_entry, kind_for, origin_for, recorded_tags, result_sources, result_tag, rules_for,
     same_run, score_text,
 )
 from ..core.obs.api import AUTO, CANDIDATE, Continuation, ContinuationFound as Found, continuations
-from ..core.obs.api import living, outline_of
+from ..core.obs.api import living, of_layer_run, outline_of
 from ..qgis_io.ai_results_io import RESULTS_OF, ROW, add_above, fetch, geometry_of, mark_imported, place_of, results_layer, ring_of
 from ..qgis_io.ai_transfer_io import sent_ids
 from ..qgis_io.catalog_io import CATALOG_URL, images_closed, results_of_closed
@@ -539,16 +539,18 @@ class AiResultsDock(PluginDock):
         book = self._book()
         records = living(book.records) if book is not None else []
         here = [o for o in records if o.image_id == self.image_id]
-        self.imported = recorded_tags(o.note for o in here)
+        # By the AI columns of the records and checked areas (2026-11-27: not their notes).
+        self.imported = recorded_tags(here)
         areas = [a for a in (book.areas if book is not None else []) if a.deleted_at is None and a.image_id == self.image_id]
-        self.rejected = rejected_tags(a.note for a in areas)
-        self._run_marks = [(tag, run, QgsPointXY(o.lon, o.lat)) for o in here for tag, run in detection_runs(o.note)]
+        self.rejected = rejected_tags(areas)
+        tables = self._table_labels()
+        # Those made from a detection layer's feature (not a table's row yet): known by its run and id, and by place in a table.
+        self._run_marks = [(o.ai, QgsPointXY(o.lon, o.lat)) for o in here if o.ai is not None and o.ai.layer not in tables]
         self._run_rejects = []
         for a in areas:
-            runs = [(tag, run) for tag, run in detection_runs(a.note) if tag in self.rejected]
-            if runs and len(a.ring) >= 3:
+            if is_rejection(a) and a.ai.layer not in tables and len(a.ring) >= 3:
                 ring = QgsGeometry.fromPolygonXY([[QgsPointXY(x, y) for x, y, *_rest in a.ring]])
-                self._run_rejects += [(tag, run, ring) for tag, run in runs]
+                self._run_rejects.append((a.ai, ring))
         if expand:
             self._sent = self._sent_maps()
             self._expand_states()
@@ -566,8 +568,15 @@ class AiResultsDock(PluginDock):
                 pass
         return out
 
-    def _aliases(self, row: int) -> list[str]:
-        """The tags a row of a detection layer has in the detectionOutputs tables it was sent to."""
+    def _table_labels(self) -> set[str]:
+        """The labels of the tables results are read from (an AI_LAYER naming none of them is a detection layer)."""
+        try:
+            return {s.label for s in self.sources()}
+        except Exception:  # noqa: BLE001 (none then)
+            return set()
+
+    def _sent_to(self, row: int) -> list[tuple[str, str]]:
+        """The detectionOutputs tables (their labels) and rows a row of a detection layer was sent to."""
         where = self.local_rows.get(row)
         if where is None:
             return []
@@ -576,7 +585,16 @@ class AiResultsDock(PluginDock):
             sent = self._sent.get(layer.id(), [])
         except RuntimeError:
             return []
-        return [result_tag(s.label, ids[str(fid)]) for s, ids in sent if str(fid) in ids]
+        return [(s.label, ids[str(fid)]) for s, ids in sent if str(fid) in ids]
+
+    def _sent_as(self, row: int) -> Optional[tuple[str, str]]:
+        """The table's row a detection layer's row is recorded as (the first it was sent to), None when not sent."""
+        sent = self._sent_to(row)
+        return sent[0] if sent else None
+
+    def _aliases(self, row: int) -> list[str]:
+        """The keys a row of a detection layer has in the detectionOutputs tables it was sent to."""
+        return [result_tag(label, oid) for label, oid in self._sent_to(row)]
 
     def _expand_states(self) -> None:
         """
@@ -585,9 +603,18 @@ class AiResultsDock(PluginDock):
         table (its tag there); a table's row recorded from the layer it came
         from (the layer's tag in the record; before it was sent, its run and place).
         """
+        tables = self._table_labels()
         for row, (source, r) in enumerate(self.rows):
             if r.tag in self.imported or r.tag in self.rejected:
                 continue
+            if source.local:
+                # Recorded from this feature of the layer (its run and id), before it was sent to a table.
+                if any(of_layer_run(ai, r.key, r.detected_at, tables, source.label) for ai, _p in self._run_marks):
+                    self.imported.add(r.tag)
+                    continue
+                if any(of_layer_run(ai, r.key, r.detected_at, tables, source.label) for ai, _ring in self._run_rejects):
+                    self.rejected.add(r.tag)
+                    continue
             aliases = self._aliases(row)
             if any(a in self.imported for a in aliases):
                 self.imported.add(r.tag)
@@ -605,12 +632,12 @@ class AiResultsDock(PluginDock):
             if point:
                 # About SAME_POINT_M around (degrees; latitude kept).
                 box.grow(SAME_POINT_M / 111_000)
-            if any(same_run(r.detected_at, run) and box.contains(p) and (point or g.contains(QgsGeometry.fromPointXY(p)))
-                   for tag, run, p in self._run_marks if tag in self.imported):
+            if any(same_run(r.detected_at, ai.detected_at) and box.contains(p) and (point or g.contains(QgsGeometry.fromPointXY(p)))
+                   for ai, p in self._run_marks):
                 self.imported.add(r.tag)
                 continue
             inside = g.pointOnSurface() if not point else g
-            if any(same_run(r.detected_at, run) and ring.contains(inside) for _tag, run, ring in self._run_rejects):
+            if any(same_run(r.detected_at, ai.detected_at) and ring.contains(inside) for ai, ring in self._run_rejects):
                 self.rejected.add(r.tag)
 
     def state(self, row: int) -> str:
@@ -670,12 +697,15 @@ class AiResultsDock(PluginDock):
             local_total += len(found_here)
             source = local_source(layer)
             read += [(source, r, (layer, fid)) for r, fid in found_here if r.score is None or r.score >= least]
+        self.rows = [(source, r) for source, r, _w in read]
+        self.local_rows = {row: where for row, (_s, _r, where) in enumerate(read) if isinstance(where, tuple)}
+        # Recorded or rejected (by the AI columns of the records and areas) before the order: the decided go last.
+        self._expand_states()
         if self.order.currentData() == ORDERS[0]:
             # For review: what to look at first, least sure first.
             read = [read[i] for i in review_order([r for _s, r, _w in read], self.imported, self.rejected, self.sure.value())]
-        self.rows = [(source, r) for source, r, _w in read]
-        self.local_rows = {row: where for row, (_s, _r, where) in enumerate(read) if isinstance(where, tuple)}
-        self._expand_states()
+            self.rows = [(source, r) for source, r, _w in read]
+            self.local_rows = {row: where for row, (_s, _r, where) in enumerate(read) if isinstance(where, tuple)}
         per_source: list[tuple[AiResultSource, list[AiResult], list[int]]] = []
         for index, (source, _results, _error) in enumerate(found):
             rows = [row for row, (_s, _r, where) in enumerate(read) if not isinstance(where, tuple) and where == index]
@@ -930,6 +960,11 @@ class AiResultsDock(PluginDock):
             else:
                 self.status.setText(_tr("画像 {id} が観測記録の画像一覧になし（画像を開いて）").format(id=image_id or ""))
             return []
+        missing = book.ai_missing()
+        if missing:
+            self.status.setText(_tr("{s} には AI の結果を記録できない（管理者に連絡: 列 {c} を追加）［E704］").format(
+                s=book.store.label, c="・".join(missing)))
+            return []
         self._refresh_imported()
         levels = {c.label for c in book.confidences()}
         entries, done_rows, skipped, wrong = [], [], 0, 0
@@ -948,7 +983,7 @@ class AiResultsDock(PluginDock):
             if place is None:
                 skipped += 1
                 continue
-            entry = import_entry(r, source, place[0], place[1], place[2], place[3], also=self._aliases(row))
+            entry = import_entry(r, source, place[0], place[1], place[2], place[3], sent=self._sent_as(row))
             if not source.local:
                 # Another system's result is placed by the file's own georeferencing: its pixel too (not the image as moved now).
                 if own is None:
@@ -961,7 +996,7 @@ class AiResultsDock(PluginDock):
             if entry.carry is not None:
                 c = self.continued[row]
                 how = c.tag if c.pick is not None and c.pick.object_id == entry.carry.object_id else "選択継続"
-                entry.note = f"{entry.note} [{how}]"
+                entry.ai = replace(entry.ai, continuation=how)
             entries.append(entry)
             done_rows.append(row)
         if not entries:
@@ -1064,18 +1099,23 @@ class AiResultsDock(PluginDock):
         if not image_id or not any(i.id == image_id for i in book.images):
             self.status.setText(_tr("画像 {id} が観測記録の画像一覧になし（画像を開いて）").format(id=image_id or ""))
             return []
+        missing = book.ai_missing(areas=True)
+        if missing:
+            self.status.setText(_tr("{s} には AI の誤検出を記録できない（管理者に連絡: 確認範囲の列 {c} を追加）［E704］").format(
+                s=book.area_store.label, c="・".join(missing)))
+            return []
         self._refresh_imported()
         specs, tags = [], []
         for row in rows:
             if not (0 <= row < len(self.rows)):
                 continue
-            _source, r = self.rows[row]
+            source, r = self.rows[row]
             if r.tag in self.rejected or r.tag in self.imported:
                 continue
             ring = rejection_ring(r)
             if ring is None:
                 continue
-            specs.append((ring, "", rejection_note(r, self._aliases(row))))
+            specs.append((ring, "", "", origin_for(r, source, self._sent_as(row), rejected=True)))
             tags.append(r.tag)
         if not specs:
             self.status.setText(_tr("誤検出にする結果なし（取込済・誤検出済か、位置なし）") if rows else _tr("結果を選択"))

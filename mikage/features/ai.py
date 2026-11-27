@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from qgis.core import QgsProject
 
+from ..core.ai_results import result_sources
 from ..processing_provider import train_algorithm
 from ..ui.ai_results_dock import AiResultsDock
 from ..ui.segment_tool import SegmentTool
@@ -96,10 +97,26 @@ class Ai(Feature):
         host = self.host
         if host.transfer_dialog is None:
             host.transfer_dialog = TransferDialog(self.context, lambda text: self.iface.messageBar().pushInfo(tr("検出結果を DB へ転記"), text),
-                                                  self.window())
+                                                  self.window(), repoint=self.repoint_sent)
         host.transfer_dialog.prepare(self.iface.activeLayer())
         host.transfer_dialog.show()
         host.transfer_dialog.raise_()
+
+    def repoint_sent(self, layer, output, moves: list) -> None:
+        """
+        The records (and 誤検出 checked areas) made from a detection layer's features before they were sent, pointed at the
+        table's rows (2026-11-27: so a record names the row in the database).
+        """
+        dock = self.ports.observations()
+        if dock is None or getattr(dock, "book", None) is None:
+            return
+        sources = result_sources(self.context.config)
+        tables = {s.label for s in sources}
+        # The table as the dock 「AI結果」 names it (「（転記先）」 when an aiResultSources entry has its label).
+        label = next((s.label for s in sources if s.detections and s.url == output.url), output.label)
+        moves = [(at, fid, label, oid) for at, fid, _label, oid in moves]
+        name = layer.name()
+        dock.do(tr("転記先の ID に付け替え"), lambda b: b.repoint_ai(moves, tables, name))
 
     def unload(self) -> None:
         host = self.host

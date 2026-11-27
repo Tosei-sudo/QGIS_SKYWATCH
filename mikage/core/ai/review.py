@@ -6,10 +6,11 @@ training data (core/ai/train via qgis_io/train_io).
 - A result judged right is recorded as an observation (観測記録), so it is
   a labelled object for 「AI 学習（物体検出）」 as any record is.
 - A result judged wrong (誤検出) is recorded as a small checked area
-  (確認範囲, every kind) around it, its note saying so with the result's
-  tag (`AI誤検出: ship 0.42 [AI:検出@…#3]`): nothing is there. Training
-  reads such an area as a hard negative, a window of background around
-  what the model mistook, not left to chance as other checked areas are.
+  (確認範囲, every kind) around it, its AI columns naming the result with
+  SOURCE 「AI誤検出」 (core/obs/ai_origin.py; not its note, 2026-11-27):
+  nothing is there. Training reads such an area as a hard negative, a window
+  of background around what the model mistook, not left to chance as other
+  checked areas are.
 
 Deleting that checked area takes the judgement back.
 
@@ -19,12 +20,10 @@ results without a score come after those with one.
 """
 from __future__ import annotations
 
-from typing import Iterable, Optional, Sequence
+from typing import Any, Iterable, Sequence
 
-from ..ai_results import AiResult, recorded_tags, score_text
-
-#: What the note of a checked area made from a wrong result starts with.
-REJECTED = "AI誤検出"
+from ..ai_results import AiResult, recorded_tags
+from ..obs.api import AI_REJECTED as REJECTED  # noqa: F401 (read from here too)
 #: Results at or above this score need no look (確認不要) by default.
 SURE_SCORE = 0.8
 #: A wrong result's checked area reaches this share of its size around it, and at least `REJECT_MARGIN_M` metres.
@@ -40,20 +39,15 @@ TO_REVIEW = "review"
 SURE = "sure"
 
 
-def rejection_note(result: AiResult, also: Sequence[str] = ()) -> str:
-    """The note of the checked area recording a result as wrong (`also`: its tags elsewhere, a table it was sent to)."""
-    parts = [REJECTED + ":", result.cls or "", score_text(result.score), result.tag, *also]
-    return " ".join(p for p in parts if p)
+def is_rejection(area: Any) -> bool:
+    """Whether a checked area records a wrong AI result (a hard negative): its SOURCE is 「AI誤検出」."""
+    ai = getattr(area, "ai", None)
+    return ai is not None and ai.rejected
 
 
-def is_rejection(note: Optional[str]) -> bool:
-    """Whether a checked area's note says it records a wrong AI result (a hard negative)."""
-    return bool(note) and note.lstrip().startswith(REJECTED) and bool(recorded_tags([note]))
-
-
-def rejected_tags(notes: Iterable[str]) -> set[str]:
-    """The tags of results recorded as wrong (in the notes of living checked areas)."""
-    return recorded_tags(n for n in notes if is_rejection(n))
+def rejected_tags(areas: Iterable[Any]) -> set[str]:
+    """The keys of results recorded as wrong (by the AI columns of living checked areas)."""
+    return recorded_tags(a for a in areas if is_rejection(a))
 
 
 def state_of(result: AiResult, accepted: set[str], rejected: set[str], sure: float) -> str:

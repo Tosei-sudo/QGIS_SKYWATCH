@@ -163,8 +163,9 @@ def test_this_images_list_shows_who_recorded_and_only_ones_own(plugin):
     dock.render()
     table = dock.table
     heads = [table.horizontalHeaderItem(c).text() for c in range(table.columnCount())]
-    assert heads[5:7] == ["記録者", "更新"]
-    assert sorted(_texts(table, 5)) == ["田中", "鈴木（更新 田中）"]
+    # 出どころ (2026-11-27) before them: empty for what a person recorded.
+    assert heads[5:8] == ["出どころ", "記録者", "更新"]
+    assert sorted(_texts(table, 6)) == ["田中", "鈴木（更新 田中）"] and set(_texts(table, 5)) == {""}
     assert dock.mine_only.isVisible() and dock.mine_only.text() == "自分の記録のみ"
     dock.mine_only.setChecked(True)
     assert _texts(table, 0) == ["自分のモノ"]

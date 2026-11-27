@@ -126,7 +126,7 @@ def labels_from_book(records, areas, taxonomy: Sequence[Taxon], depth: int = 0, 
         if any(shape.contains(p) for p in groups.get(a.image_id, [])):
             out.skip("数量 2 以上の記録がある確認範囲")
             continue
-        out.areas.append(Area(shape, WGS84, a.image_id or None, is_rejection(a.note)))
+        out.areas.append(Area(shape, WGS84, a.image_id or None, is_rejection(a)))
     return out
 
 

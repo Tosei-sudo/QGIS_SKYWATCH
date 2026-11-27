@@ -545,6 +545,10 @@ FROM g;
 --    数量（2026-11-24）: QUANTITY はその記録が表す見えたモノの数。在の記録は TBL_OBSERVATION の QUANTITY（空は 1:
 --    1 つずつの記録と、足す前の記録）、消失・不可の記録は 0。台数・隻数などは COUNT(*) でなく SUM(QUANTITY) で数える。
 --    TBL_OBSERVATION に QUANTITY を足してから作る（docs/arcgis-setup.md「観測記録に数量の列を足す」）。
+--    出どころ（2026-11-27）: SOURCE は AI の結果から取り込んだ記録の出どころ（AI検出・外部AI）、人の記録は空。
+--    SOURCE_LABEL は空なら「人」。AI_LAYER・AI_RESULT_ID でどの AI の結果（転記先・外部 AI の表の行）かが分かり、
+--    AI_SCORE・AI_MODEL・AI_DETECTED_AT はその結果の確信度・モデル・検出日時、AI_CONTINUATION は継続の判定。
+--    TBL_OBSERVATION に AI の列を足してから作る（docs/arcgis-setup.md「観測記録に AI の出どころの列を足す」）。
 -- ---------------------------------------------------------------------------------------------
 CREATE OR REPLACE VIEW VW_OBS_RECORD AS
 WITH clock AS (
@@ -581,6 +585,14 @@ SELECT
     o.IMAGE_TIME,
     o.SATELLITE,
     NVL(TO_CHAR(o.SATELLITE), '（衛星不明）')                          AS SATELLITE_LABEL,
+    o.SOURCE,
+    NVL(TO_CHAR(o.SOURCE), '人')                                       AS SOURCE_LABEL,
+    o.AI_LAYER,
+    o.AI_RESULT_ID,
+    o.AI_SCORE,
+    o.AI_MODEL,
+    o.AI_DETECTED_AT,
+    o.AI_CONTINUATION,
     o.SEEN_AT,
     o.JST_DAY - 9 / 24                                                 AS SEEN_DATE,
     TO_CHAR(o.JST_DAY, 'YYYY-MM')                                      AS SEEN_MONTH,

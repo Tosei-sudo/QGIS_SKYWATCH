@@ -15,11 +15,14 @@ taken from the entry's roles; `"aiResults": false` leaves one out. A result
 the person's own detection layer sent there is listed once (as the layer's,
 which they may still be correcting).
 
-A result recorded as an observation carries a tag in its note
-(`[AI:<source>#<object id>]`), so the same result is not recorded twice.
-A detection layer's result already sent to a table carries the table's tag
-too; one recorded from the layer before it was sent is known in the table by
-its run (`検出@<detected at>`) and its place (`run_of`).
+A result recorded as an observation (or as wrong, a checked area) names it
+in its AI columns (core/obs/ai_origin.py: SOURCE, AI_LAYER, AI_RESULT_ID…;
+the note is the person's, 2026-11-27), so the same result is not recorded
+twice: its key (`result_tag`, `[AI:<source>#<id>]`) is made from them. A
+detection layer's result already sent to a table names the table's row; one
+recorded from the layer before it was sent names the layer's feature and its
+run (検出日時), and is known in the table by its run and its place, until the
+sending points it at the row (book.repoint_ai).
 """
 from __future__ import annotations
 
@@ -29,6 +32,8 @@ from dataclasses import dataclass, field
 from typing import Any, Iterable, Optional, Sequence
 
 from .esri import quote
+from .obs.api import AI_DETECTED, AI_EXTERNAL, AI_REJECTED, AiOrigin
+from .obs.api import score_text as score_text
 from .obs.continuation import CANDIDATE_METRES, CONTINUE_METRES, KIND_LEVELS, Rule, Rules, old_rules
 from .util import is_name, is_number, is_record, is_url, layer_url, ms_of, text_of
 
@@ -50,7 +55,6 @@ RESULT_ROLES = {
 }
 
 _LAYER = re.compile(r"/(FeatureServer|MapServer)/\d+/?$", re.IGNORECASE)
-_TAG = re.compile(r"\[AI:([^\]#]*)#([^\]]*)\]")
 
 
 @dataclass
@@ -399,40 +403,35 @@ def result_of(source: AiResultSource, feature: dict[str, Any], oid_field: str) -
 
 
 def result_tag(source: str, key: str) -> str:
-    """What a recorded result's note carries."""
+    """A result's key: where it is (a table's label, a detection layer's run) and its id there."""
     return f"[AI:{source.replace(']', '').replace('#', '')}#{str(key).replace(']', '')}]"
 
 
-def recorded_tags(notes: Iterable[str]) -> set[str]:
-    """The tags of results already recorded (in the notes of living records)."""
+def recorded_tags(items: Iterable[Any]) -> set[str]:
+    """The keys of the results records (or checked areas) were made from, by their AI columns (AI_LAYER, AI_RESULT_ID)."""
     out: set[str] = set()
-    for note in notes:
-        for m in _TAG.finditer(note or ""):
-            out.add(f"[AI:{m.group(1)}#{m.group(2)}]")
-    return out
-
-
-_RUN = re.compile(r"^検出@(-?\d+)$")
-
-
-def detection_runs(note: str) -> list[tuple[str, Optional[int]]]:
-    """
-    The tags in a note of results of the plugin's own detection layers
-    (`[AI:検出@<detected at, ms>#<feature id>]`), with the run's time (None
-    when the run had none).
-    """
-    out: list[tuple[str, Optional[int]]] = []
-    for m in _TAG.finditer(note or ""):
-        if not m.group(1).startswith("検出@"):
-            continue
-        run = _RUN.match(m.group(1))
-        out.append((f"[AI:{m.group(1)}#{m.group(2)}]", int(run.group(1)) if run else None))
+    for x in items:
+        ai = getattr(x, "ai", None)
+        if ai is not None and ai.layer and ai.result_id:
+            out.add(result_tag(ai.layer, ai.result_id))
     return out
 
 
 def same_run(detected_at: Optional[int], run: Optional[int]) -> bool:
     """Whether a table's result may be of a run (its 検出日時; to the second: a database may keep no less)."""
     return detected_at is None or run is None or abs(detected_at - run) < 1000
+
+
+def origin_for(result: "AiResult", source: "AiResultSource", sent: Optional[tuple[str, str]] = None,
+               rejected: bool = False) -> AiOrigin:
+    """
+    The AI columns of a record made from a result (`rejected`: of the checked area recording it as wrong):
+    its source and id there; `sent`: the table (its label) and the row a detection layer's feature was sent to.
+    """
+    layer, key = sent if sent else (source.label, result.key)
+    kind = AI_REJECTED if rejected else AI_DETECTED if (source.local or source.detections) else AI_EXTERNAL
+    return AiOrigin(source=kind, layer=layer, result_id=str(key), score=result.score, model=result.model,
+                    detected_at=result.detected_at)
 
 
 def kind_for(result: AiResult, source: AiResultSource) -> str:
@@ -443,10 +442,6 @@ def kind_for(result: AiResult, source: AiResultSource) -> str:
         return source.kinds[result.cls]
     lower = result.cls.lower()
     return next((v for k, v in source.kinds.items() if k.lower() == lower), result.cls)
-
-
-def score_text(score: Optional[float]) -> str:
-    return "" if score is None else f"{score:.2f}"
 
 
 @dataclass
@@ -466,28 +461,22 @@ class ImportEntry:
     width: Optional[float] = None
     #: Where it is in the image's file (file, pixel x, pixel y), when found before (None: found from the image as it lies now).
     pixel: Optional[tuple] = None
-
-
-def source_head(source: AiResultSource) -> str:
-    """How a recorded result's note names where it came from."""
-    return "AI検出" if source.local else f"AI検出（{source.label}）" if source.detections else f"外部AI {source.label}"
+    #: The result it is made from (its AI columns: SOURCE, AI_LAYER, AI_RESULT_ID…).
+    ai: Optional[AiOrigin] = None
 
 
 def import_entry(result: AiResult, source: AiResultSource, lon: float, lat: float, length: Optional[float] = None,
-                 width: Optional[float] = None, also: Sequence[str] = ()) -> ImportEntry:
+                 width: Optional[float] = None, sent: Optional[tuple[str, str]] = None) -> ImportEntry:
     """
-    A result as an observation: its point, 種別, 活動, 確度, the note with what
-    the AI said and the tag (and `also`: the tags it has elsewhere, a table it
-    was sent to).
+    A result as an observation: its point, 種別, 活動, 確度, the result in the
+    AI columns (`sent`: the table and row a detection layer's feature was sent
+    to), and as its note only what the result's own note says (the note is the person's).
     """
-    said = " ".join(x for x in (result.cls, score_text(result.score), result.model) if x)
-    head = source_head(source)
-    note = " ".join(x for x in (head + (f": {said}" if said else ""), result.note, result.tag, *also) if x)
     return ImportEntry(
         lon=lon, lat=lat, object=result.name, kind=kind_for(result, source),
-        activity=result.activity or source.activity, confidence=result.confidence or source.confidence, note=note,
+        activity=result.activity or source.activity, confidence=result.confidence or source.confidence, note=result.note,
         length=result.length if result.length is not None else length, heading=result.heading,
-        width=result.width if result.width is not None else width,
+        width=result.width if result.width is not None else width, ai=origin_for(result, source, sent),
     )
 
 

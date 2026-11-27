@@ -111,8 +111,9 @@ class TestWrite:
         out = render(items_of(rs, [BAY, PORT], fences), ExportContext(s.format(), ExportFilter(), day(20), places=True, fences=True))
         head, first, second = out.text.lstrip("﻿").strip().split("\r\n")
         # 数量 (2026-11-24) last: the columns before it stay where they were.
-        assert head.endswith("削除日時,地名,地名の種別,含まれる地名,ジオフェンス,数量")
-        assert first.endswith(",横須賀港,港,横須賀港・東京湾,湾内,1") and second.endswith(",,,,,")  # 消失: no 数量
+        # The AI columns (2026-11-27) after it: empty for a record a person made.
+        assert head.endswith("削除日時,地名,地名の種別,含まれる地名,ジオフェンス,数量,出どころ,AI結果のレイヤー,AI結果ID,AI確信度,AIモデル,AI検出日時,継続の判定")
+        assert first.endswith(",横須賀港,港,横須賀港・東京湾,湾内,1,,,,,,,") and second.endswith(",,,,,")  # 消失: no 数量
 
     def test_csv_by_columns_with_levels_maps_formats_affixes_and_file_values(self):
         s, problems = settings({"formats": [{"name": "集計", "delimiter": ";", "dateFormat": "%Y/%m/%d %H:%M", "timeZone": "Asia/Tokyo", "columns": [

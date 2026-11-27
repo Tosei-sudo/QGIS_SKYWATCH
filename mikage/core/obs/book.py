@@ -18,6 +18,7 @@ import threading
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Iterable, Mapping, Optional, Sequence
 
+from .ai_origin import AiOrigin, of_layer_run
 from .areas import CheckedArea, area_contains, area_label, box_ring, covering_areas, new_area_id
 from .drafts import Draft, PrefsDrafts
 from .flows import (
@@ -31,7 +32,7 @@ from .model import (
 from .report import ReportContext, ReportOptions, ReportSelection, report_html, select_for_report
 from .satellites import clean as clean_satellite
 from .scope import RecordQuery, grown, merged
-from .stores import AreaStore, ObservationStore, TaxonomyStore, quantity_supported, satellite_supported, unseen_supported
+from .stores import AreaStore, ObservationStore, TaxonomyStore, ai_missing, quantity_supported, satellite_supported, unseen_supported
 from .taxonomy import (
     MemberHit, SpecField, Taxon, activities_at, find, find_member, kind_of, move_taxon, name_label_of, normalize, path_of, place_taxon,
     remove_taxon, rewrite, segment_name, taxonomy_of, update_taxon, with_kinds, within,
@@ -841,6 +842,14 @@ class ObservationBook:
         """Whether the store keeps 数量 (its layer has QUANTITY: a local one does; an Esri one once read, 2026-11-24)."""
         return quantity_supported(self.store)
 
+    def ai_missing(self, areas: bool = False, ask: bool = False) -> list[str]:
+        """
+        The AI columns (SOURCE, AI_LAYER…, 2026-11-27) the store's layer (`areas`: the checked areas') lacks: no AI result
+        is recorded there, nor one as wrong. [] for a local store; an Esri layer's as read (`ask`: asked first, as a save
+        would, off the screen's thread), else [].
+        """
+        return ai_missing(self.area_store if areas else self.store, ask)
+
     def keeps_unseen(self) -> bool:
         """Whether 「不可」 records can be kept (the store's layer has the 不可の理由 attribute)."""
         return unseen_supported(self.store)
@@ -1153,6 +1162,10 @@ class ObservationBook:
         if info is None:
             self._say("画像なし。取り込む画像を開いてから取り込み")
             return None
+        missing = self.ai_missing(ask=True) if any(getattr(e, "ai", None) is not None for e in entries) else []
+        if missing:
+            self._say(f"{self.store.label} には AI の結果を記録できない（管理者に連絡: 列 {'・'.join(missing)} を追加）［E704］")
+            return None
         made: dict[str, tuple[str, str]] = {}
         rows: list[Observation] = []
         # The things already in the image, and those continued in this save: each once.
@@ -1170,13 +1183,15 @@ class ObservationBook:
                                     heading=_text(e.heading if e.heading is not None else source.heading),
                                     width=_text(_width_of(e) if _width_of(e) is not None else source.width))
                 record = self.record_from(info, e.lon, e.lat, None, source, values, True)
+                # The AI result it was made from (its columns, not the note; 2026-11-27).
+                record = replace(record, ai=getattr(e, "ai", None))
                 here.add(record.object_id)
                 carried += 1
                 rows.append(record)
                 continue
             values = FormValues(object=e.object, kind=e.kind, activity=e.activity, confidence=e.confidence, note=e.note,
                                 length=_text(e.length), heading=_text(e.heading), width=_text(_width_of(e)))
-            record = self.record_from(info, e.lon, e.lat, None, None, values, True)
+            record = replace(self.record_from(info, e.lon, e.lat, None, None, values, True), ai=getattr(e, "ai", None))
             pixel = getattr(e, "pixel", None)
             if pixel:
                 # Where the entry is in the file, found before (an AI result of another system: by the file's own place).
@@ -1569,14 +1584,23 @@ class ObservationBook:
         self._say(f"{area_label(area)}を記録{f'（範囲内で記録のない前後の画像のモノ {missing} 件）' if missing else ''}")
         return area
 
-    def add_areas(self, rings: Sequence[tuple[Sequence[Sequence[float]], str, str]], image: Optional[str] = None) -> Optional[list[CheckedArea]]:
-        """Records several checked areas on an image in one save: each (outline, kind, note), as add_area takes them."""
+    def add_areas(self, rings: Sequence[tuple], image: Optional[str] = None) -> Optional[list[CheckedArea]]:
+        """
+        Records several checked areas on an image in one save: each (outline, kind, note), as add_area takes them, and
+        (outline, kind, note, AiOrigin) for one recording an AI result as wrong (誤検出).
+        """
         info = self._image(image)
         if info is None:
             return None
+        missing = self.ai_missing(areas=True, ask=True) if any(len(spec) > 3 and spec[3] is not None for spec in rings) else []
+        if missing:
+            self._say(f"{self.area_store.label} には AI の誤検出を記録できない（管理者に連絡: 列 {'・'.join(missing)} を追加）［E704］")
+            return None
         now = now_ms()
         made = []
-        for ring, kind, note in rings:
+        for spec in rings:
+            ring, kind, note = spec[0], spec[1], spec[2]
+            ai: Optional[AiOrigin] = spec[3] if len(spec) > 3 else None
             points = [[float(p[0]), float(p[1])] for p in ring]
             if len(points) < 3:
                 continue
@@ -1584,7 +1608,7 @@ class ObservationBook:
                 points.append(list(points[0]))
             made.append(CheckedArea(id=new_area_id(), image_id=info.id, image_name=info.name, image_time=info.time, ring=points,
                                     kind=kind_of(path_of(kind)), note=note.strip(), created_at=now, updated_at=now, deleted_at=None,
-                                    recorded_by=self.observer(), satellite=info.satellite))
+                                    recorded_by=self.observer(), satellite=info.satellite, ai=ai))
         if not made:
             return []
         try:
@@ -1597,6 +1621,45 @@ class ObservationBook:
             self.areas = [*self.areas, *made]
         self._say(f"確認範囲 {len(made)} 件を記録")
         return made
+
+    def repoint_ai(self, moves: Sequence[tuple[Optional[int], str, str, str]], tables: Iterable[str] = (), layer: str = "") -> int:
+        """
+        The records (and 誤検出 checked areas) made from features of a detection layer before they were sent to a
+        `detectionOutputs` table, pointed at the table's rows: each move (検出日時, feature id, the table's label, its
+        OBJECTID there). `tables`: the labels of the tables (an origin naming one is a row already); `layer`: the
+        detection layer's name (a run without a time). One save each; how many were pointed (2026-11-27).
+        """
+        tables = set(tables)
+        now = now_ms()
+
+        def moved(items: Iterable[Any]) -> list:
+            out = []
+            for x in items:
+                if x.deleted_at is not None or x.ai is None:
+                    continue
+                to = next(((label, oid) for at, fid, label, oid in moves if of_layer_run(x.ai, fid, at, tables, layer)), None)
+                if to is not None:
+                    out.append(replace(x, ai=replace(x.ai, layer=to[0], result_id=str(to[1])), updated_at=now))
+            return out
+
+        records, areas = moved(self.records), moved(self.areas)
+        done = 0
+        if records and not self.ai_missing(ask=True):
+            saved = self._save_records(records, "")
+            done += len(saved or [])
+        if areas and not self.ai_missing(areas=True, ask=True):
+            try:
+                self.area_store.save(areas)
+            except Exception as error:  # noqa: BLE001
+                self._say(f"{self.area_store.label} への確認範囲の保存に失敗: {_error_text(error)}")
+            else:
+                kept = {a.id: a for a in self._kept_areas(areas)}
+                with self.lock:
+                    self.areas = [kept.get(a.id, a) for a in self.areas]
+                done += len(kept)
+        if done:
+            self._say(f"転記先の ID に付け替え: {done} 件")
+        return done
 
     def add_box_area(self, box: Sequence[float], kind: str = "", note: str = "") -> Optional[CheckedArea]:
         return self.add_area(box_ring(box), kind, note)

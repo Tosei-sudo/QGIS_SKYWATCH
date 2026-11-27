@@ -22,7 +22,7 @@ if TYPE_CHECKING:  # the door (core/door.py): each name is imported from its mod
     from .pixel_boxes import box_properties, collection, feature, METRE_DIGITS, PixelBox as PixelRect, turned_box, upright_box
     from .model_config import DetectModelConfig, detector_spec, DetectorSpec, OnnxSignature, OnnxValue, SamModelConfig
     from .review import (
-        ACCEPTED, is_rejection, queue, reject_margin, REJECT_POINT_M, REJECTED_STATE, rejected_tags, rejection_note, review_order,
+        ACCEPTED, is_rejection, queue, reject_margin, REJECT_POINT_M, REJECTED_STATE, rejected_tags, review_order,
         state_of, SURE_SCORE, TO_REVIEW,
     )
     from .sam import part_at, sam_hwc, sam_mask, SAM_MEAN, sam_prompt, sam_scale, SAM_STD, sam_tensor, SamPoint
@@ -51,7 +51,7 @@ __all__ = [
     "is_point_box", "is_rejection", "Item", "kind_path", "load_dataset", "load_model", "make_group", "mask_outline",
     "mask_shape", "METRES_PER_DEGREE", "missing_fields", "missing_files", "new_model", "nms", "normalize", "object_size",
     "offset", "OnnxSignature", "OnnxValue", "parse_class_map", "parse_lengths", "part_at", "PixelBox", "Plan", "queue",
-    "Reader", "reject_margin", "REJECT_POINT_M", "REJECTED_STATE", "rejected_tags", "rejection_note", "review_order",
+    "Reader", "reject_margin", "REJECT_POINT_M", "REJECTED_STATE", "rejected_tags", "review_order",
     "ring_area", "Rules", "sam_hwc", "sam_mask", "SAM_MEAN", "sam_prompt", "sam_scale", "SAM_STD", "sam_tensor",
     "SamModelConfig", "SamPoint", "save_dataset", "Shape", "signature_of", "split", "state_of", "status_of", "SURE_SCORE",
     "Target", "target_of", "threshold_mask", "TILE_SIZES", "tiles_of", "TO_REVIEW", "train", "TrainError", "TrainOptions",

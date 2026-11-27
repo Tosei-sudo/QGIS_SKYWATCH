@@ -56,6 +56,10 @@ def observation_layers(records: Iterable[Observation], areas: Iterable[CheckedAr
         LayerField("heading_deg", "double", "向き（度）"), LayerField("width_m", "double", "幅（m）"), LayerField("pixel_x", "double", "画素X"), LayerField("pixel_y", "double", "画素Y"),
         LayerField("image_file", "string", "画像ファイル"), LayerField("note", "string", "備考"), LayerField("recorded_by", "string", "記録者"), LayerField("created_at", "date", "登録日時"),
         LayerField("updated_at", "date", "更新日時"),
+        # The AI result it was made from (2026-11-27).
+        LayerField("source", "string", "出どころ"), LayerField("ai_layer", "string", "AI結果のレイヤー"), LayerField("ai_result_id", "string", "AI結果ID"),
+        LayerField("ai_score", "double", "AI確信度"), LayerField("ai_model", "string", "AIモデル"), LayerField("ai_detected_at", "date", "AI検出日時"),
+        LayerField("ai_continuation", "string", "継続の判定"),
     ], [((o.lon, o.lat), {
         **_level_values(o.kind, depth), "obs_id": o.id, "object_id": o.object_id, "object": o.object_name, "kind": o.kind,
         "activity": o.activity, "present": "不可" if o.unseen else "あり" if o.present else "なし", "unseen": o.unseen,
@@ -63,6 +67,9 @@ def observation_layers(records: Iterable[Observation], areas: Iterable[CheckedAr
         "recorded_by": o.recorded_by or "", "image_time": o.image_time, "image_id": o.image_id, "image": o.image_name,
         "satellite": o.satellite or "", "length_m": o.length, "heading_deg": o.heading, "width_m": o.width, "pixel_x": o.pixel_x, "pixel_y": o.pixel_y,
         "image_file": o.image_file or "", "note": o.note, "created_at": o.created_at, "updated_at": o.updated_at,
+        "source": o.ai.source if o.ai else "", "ai_layer": o.ai.layer if o.ai else "", "ai_result_id": o.ai.result_id if o.ai else "",
+        "ai_score": o.ai.score if o.ai else None, "ai_model": o.ai.model if o.ai else "", "ai_detected_at": o.ai.detected_at if o.ai else None,
+        "ai_continuation": o.ai.continuation if o.ai else "",
     }) for o in rows], time_field="image_time")
     out = [points]
     outlines = []

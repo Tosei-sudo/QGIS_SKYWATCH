@@ -19,6 +19,7 @@ from qgis.PyQt.QtWidgets import (
 
 from ..core.ai.api import TRANSFER_ROLES, DetectionOutput, Plan, Target, missing_fields, target_of
 from ..qgis_io import ai_transfer_io
+from ..qgis_io.detection_results import sent_moves
 from ..qgis_io.tasks import run_task
 from . import last_inputs
 from .fit import fit_text
@@ -29,11 +30,14 @@ def _tr(text: str) -> str:
 
 
 class TransferDialog(QDialog):
-    def __init__(self, context, say: Callable[[str], None], parent=None):
+    def __init__(self, context, say: Callable[[str], None], parent=None,
+                 repoint: Optional[Callable[[QgsVectorLayer, DetectionOutput, list], None]] = None):
         super().__init__(parent)
         fit_text(self)
         self.context = context
         self.say = say
+        #: The records made from the features sent, pointed at the table's rows (book.repoint_ai; 2026-11-27).
+        self.repoint = repoint
         #: The target layers' descriptions, read once each (by URL).
         self.targets: dict[str, Target] = {}
         self.layers: list[QgsVectorLayer] = []
@@ -221,8 +225,11 @@ class TransferDialog(QDialog):
             sent, added, updated, failures = result
             try:
                 ai_transfer_io.mark_sent(layer, output.url, sent)
+                moves = sent_moves(layer, output.label, sent) if self.repoint is not None else []
             except RuntimeError:  # the layer was removed meanwhile
-                pass
+                moves = []
+            if moves:
+                self.repoint(layer, output, moves)
             self._finish(output, added, updated, failures)
 
         def failed(message: str) -> None:
