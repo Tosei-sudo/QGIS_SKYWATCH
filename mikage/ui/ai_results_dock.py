@@ -65,7 +65,7 @@ from ..core.obs.api import AUTO, CANDIDATE, Continuation, ContinuationFound as F
 from ..core.obs.api import living, outline_of
 from ..qgis_io.ai_results_io import RESULTS_OF, ROW, add_above, fetch, geometry_of, mark_imported, place_of, results_layer, ring_of
 from ..qgis_io.ai_transfer_io import sent_ids
-from ..qgis_io.catalog_io import CATALOG_URL
+from ..qgis_io.catalog_io import CATALOG_URL, images_closed, results_of_closed
 from ..qgis_io.detection_results import detection_layers, detection_results, image_ids_of, is_detection_layer, local_source
 from ..qgis_io.obs_images import IMAGE_ID, background_layer, image_layers, observed_image
 from ..qgis_io.pixel_place import original_placement, pixel_in
@@ -179,6 +179,14 @@ class AiResultsDock(PluginDock):
         self._again.setSingleShot(True)
         self._again.setInterval(200)
         self._again.timeout.connect(lambda: self.image_id and self.show_results())
+        #: The result layers of images closed, taken out a moment later (not while the project removes the images).
+        self._going: list[str] = []
+        #: Those images (not shown again meanwhile as a layer of theirs is chosen).
+        self._closed: set[str] = set()
+        self._close_later = QTimer(self)
+        self._close_later.setSingleShot(True)
+        self._close_later.setInterval(0)
+        self._close_later.timeout.connect(self._remove_closed)
 
         head = QHBoxLayout()
         self.image_label = plain_label(QLabel())
@@ -324,7 +332,7 @@ class AiResultsDock(PluginDock):
             # An image the plugin's detection has results of.
             own = raster_image_id(layer)
             image_id = own if own and own in self._detected_ids() else None
-        if image_id and image_id != self.image_id:
+        if image_id and image_id != self.image_id and image_id not in self._closed:
             self.load(image_id)
 
     def _watch(self, layer: QgsVectorLayer) -> None:
@@ -357,6 +365,60 @@ class AiResultsDock(PluginDock):
         if gone & shown:
             self.local_rows = {}
             self._again.start()
+        self._images_going(gone)
+
+    def _images_going(self, gone: set[str]) -> None:
+        """
+        Images closed (their layers removed from the project, by hand or
+        otherwise) take the result layers this dock drew for them with them
+        (tsudo 2026-11-27 「画像をアンロードしたらそこから読み込んだやつも消して
+        ほしい」), as 「前の画像を閉じる」 does: not while another layer of the
+        same image stays open, nor one with changes not saved yet. The plugin's
+        own 「物体検出（AI）」 layers stay (not read by this dock: their results
+        may not be saved anywhere else). The image shown: nothing listed until
+        another is opened or chosen.
+        """
+        project = QgsProject.instance()
+        rasters = [i for i in gone if isinstance(project.mapLayer(i), QgsRasterLayer)]
+        closed = images_closed(rasters, project) if rasters else set()
+        if not closed:
+            return
+        self._going += [i for i in results_of_closed(rasters, project, detections=False) if i not in gone]
+        self._closed |= closed
+        self._close_later.start()
+        if self._image_before in closed:
+            self._image_before = None
+        if self.image_id in closed:
+            self._forget(self.image_id)
+
+    def _remove_closed(self) -> None:
+        going, self._going = self._going, []
+        self._closed = set()
+        project = QgsProject.instance()
+        there = [i for i in dict.fromkeys(going) if project.mapLayer(i) is not None]
+        if there:
+            project.removeMapLayers(there)
+
+    def _forget(self, image_id: str) -> None:
+        """The image shown closed: its rows no longer listed (its layers go with it)."""
+        if self._task is not None:
+            try:
+                self._task.cancel()
+            except RuntimeError:
+                pass
+            self._task = None
+        self._again.stop()
+        self.image_id = None
+        self.rows, self.local_rows, self.continued = [], {}, {}
+        self.layers = []
+        self.hidden = 0
+        self._syncing = True
+        try:
+            self.list.clear()
+        finally:
+            self._syncing = False
+        self._render_head()
+        self.status.setText(_tr("画像 {id} を閉じたため、その結果の表示を終了").format(id=image_id))
 
     def _render_head(self) -> None:
         if self.image_id:
@@ -1071,6 +1133,7 @@ class AiResultsDock(PluginDock):
             except RuntimeError:
                 pass
         self._again.stop()
+        self._close_later.stop()
         for layer_id in list(self.watched):
             self._unwatch(layer_id)
         project = QgsProject.instance()
