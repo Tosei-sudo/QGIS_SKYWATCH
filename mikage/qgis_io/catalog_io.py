@@ -705,28 +705,37 @@ def image_id_of(layer: QgsMapLayer) -> str:
     return str(layer.customProperty(IMAGE_ID) or "") or file_name(layer)
 
 
-def results_of_closed(layer_ids: Sequence[str], project: Optional[QgsProject] = None) -> list[str]:
+def images_closed(layer_ids: Sequence[str], project: Optional[QgsProject] = None) -> set[str]:
+    """The ids of the images of these layers that no other image layer left open shows (all of their layers go)."""
+    project = project or QgsProject.instance()
+    closing = set(layer_ids)
+    layers = list(project.mapLayers().values())
+    images = {image_id_of(layer) for layer in layers if layer.id() in closing} - {""}
+    if images:
+        images -= {image_id_of(layer) for layer in layers if isinstance(layer, QgsRasterLayer) and layer.id() not in closing}
+    return images
+
+
+def results_of_closed(layer_ids: Sequence[str], project: Optional[QgsProject] = None, detections: bool = True) -> list[str]:
     """
     The AI results that go with images closed (「前の画像を閉じる」): the
     layers the 「AI結果」 dock draws for them (external AI results, fetched
-    again when the image opens again) and the plugin's 「物体検出（AI）」
-    layers of those images only. Not while another layer of the same image
-    stays open, not a layer with changes not saved yet, not one with results
-    of other images too; other AI layers (AI 抽出, 分類, 変化抽出) are not
-    results of the dock's and stay.
+    again when the image opens again) and, with `detections`, the plugin's
+    「物体検出（AI）」 layers of those images only. Not while another layer of
+    the same image stays open, not a layer with changes not saved yet, not
+    one with results of other images too; other AI layers (AI 抽出, 分類,
+    変化抽出) are not results of the dock's and stay.
     """
     from .ai_results_io import RESULTS_OF
     from .detection_results import image_ids_of, is_detection_layer
 
     project = project or QgsProject.instance()
     closing = set(layer_ids)
-    layers = list(project.mapLayers().values())
-    images = {image_id_of(layer) for layer in layers if layer.id() in closing} - {""}
-    images -= {image_id_of(layer) for layer in layers if isinstance(layer, QgsRasterLayer) and layer.id() not in closing}
+    images = images_closed(layer_ids, project)
     if not images:
         return []
     out = []
-    for layer in layers:
+    for layer in project.mapLayers().values():
         if layer.id() in closing or not isinstance(layer, QgsVectorLayer):
             continue
         if layer.isEditable() and layer.isModified():
@@ -735,7 +744,7 @@ def results_of_closed(layer_ids: Sequence[str], project: Optional[QgsProject] = 
         if of is not None:
             if str(of) in images:
                 out.append(layer.id())
-        elif is_detection_layer(layer):
+        elif detections and is_detection_layer(layer):
             ids = image_ids_of(layer)
             if ids and set(ids) <= images:
                 out.append(layer.id())

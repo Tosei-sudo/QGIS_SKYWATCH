@@ -231,6 +231,62 @@ def test_the_results_go_just_above_their_image_in_its_group(plugin):
     assert [n.name() for n in root.children()][:2] == ["外部AI結果 船舶検出（IMG2）", "IMG2"]
 
 
+def test_closing_the_image_takes_its_result_layers_with_it(plugin):
+    """
+    tsudo 2026-11-27 「外部AIの結果ドック、画像をアンロードしたらそこから
+    読み込んだやつも消してほしい」: an image taken out of the project by hand
+    (削除 in the layer list) takes the result layers the dock drew for it, as
+    「前の画像を閉じる」 does: not while another file of the image stays open,
+    nor a layer with edits not saved; the plugin's own detection stays. The
+    list is emptied; opening the image again shows them again (from the cache).
+    """
+    from qgis.PyQt.QtWidgets import QApplication
+
+    from mikage.tests.test_qgis_close_previous import detection
+
+    p, iface, tmp_path = plugin
+    dock = p.api.ai_results
+    project = QgsProject.instance()
+    # A record of two files, and the plugin's own detection of the image.
+    first = open_catalog_image(tmp_path, "IMG1")
+    second = QgsRasterLayer(geotiff(tmp_path / "IMG1-2.tif", "2026-10-01T01:00:00Z", west=139.8), "IMG1-2")
+    second.setCustomProperty(IMAGE_ID, "IMG1")
+    second.setCustomProperty(CATALOG_URL, CATALOG)
+    project.addMapLayer(second)
+    own = project.addMapLayer(detection("物体検出（船舶）", "IMG1"))
+    iface.setActiveLayer(first)
+    assert wait_for(lambda: dock.image_id == "IMG1" and len(result_layers()) == 2 and len(dock.rows) == 4)
+
+    # One file closed: the other still shows the image.
+    project.removeMapLayer(second.id())
+    QApplication.processEvents()
+    assert len(result_layers()) == 2 and dock.image_id == "IMG1" and len(dock.rows) == 4
+    # The last one: its results go (a moment later), the detection stays, nothing listed.
+    project.removeMapLayer(first.id())
+    assert dock.image_id is None and dock.rows == [] and dock.list.topLevelItemCount() == 0
+    # The layer QGIS chooses next as the image goes, the detection of it, does not show the image again.
+    iface.setActiveLayer(own)
+    assert wait_for(lambda: result_layers() == [])
+    QApplication.processEvents()
+    assert result_layers() == [] and dock.image_id is None
+    assert project.mapLayer(own.id()) is own
+    assert dock.status.text() == "画像 IMG1 を閉じたため、その結果の表示を終了"
+    assert dock.image_label.text().startswith("画像を開くか")
+
+    # Opened again: shown again, from the cache.
+    again = open_catalog_image(tmp_path, "IMG1")
+    assert wait_for(lambda: dock.image_id == "IMG1" and len(result_layers()) == 2)
+    # A results layer being edited, changes not saved: kept.
+    edited = result_layers()[0]
+    assert edited.startEditing()
+    edited.changeAttributeValue(next(edited.getFeatures()).id(), edited.fields().indexOf("class"), "boat")
+    assert edited.isModified()
+    project.removeMapLayer(again.id())
+    assert wait_for(lambda: len(result_layers()) == 1)
+    assert result_layers() == [edited]
+    edited.rollBack()
+
+
 def test_a_result_near_a_thing_of_the_image_before_is_recorded_as_it(plugin):
     p, iface, tmp_path = plugin
     dock = p.api.ai_results
