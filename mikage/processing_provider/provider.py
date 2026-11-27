@@ -21,6 +21,7 @@ from .geodesic_algorithms import GeodesicBufferAlgorithm, GeodesicCentroidAlgori
 from .moving_match_algorithm import MovingMatchAlgorithm
 from .ortho_algorithm import SimpleOrthoAlgorithm
 from .pansharpen_algorithm import PanSharpenAlgorithm
+from .pixel_box_algorithm import PixelBoxAlgorithm
 from .train_algorithm import TrainAlgorithm
 from ..core.roles import ALGORITHM_FEATURES
 
@@ -46,7 +47,7 @@ class SatObsProvider(QgsProcessingProvider):
         for algorithm in (PanSharpenAlgorithm(), ChangeAlgorithm(), AlignAlgorithm(), ClassifyAlgorithm(), SimpleOrthoAlgorithm(),
                           GeodesicBufferAlgorithm(), GeodesicCentroidAlgorithm(), MovingMatchAlgorithm(), CloudCoverAlgorithm(),
                           DetectAlgorithm(), TrainAlgorithm(), DatasetAlgorithm(), PointsToBoxesAlgorithm(),
-                          DatasetPointsToBoxesAlgorithm(), AppendAlgorithm()):
+                          DatasetPointsToBoxesAlgorithm(), PixelBoxAlgorithm(), AppendAlgorithm()):
             feature = ALGORITHM_FEATURES.get(algorithm.name())
             if feature is None or allowed(feature):
                 self.addAlgorithm(algorithm)
