@@ -183,12 +183,13 @@ class TestOutputs:
         rows = self.rows()
         text = observations_csv(rows).lstrip("﻿")
         head, *lines = text.strip().split("\r\n")
-        assert head.endswith(",数量")
-        assert [line.rsplit(",", 1)[1] for line in lines] == ["30", "1", ""]
+        # 数量, then the AI columns (2026-11-27) after it.
+        assert head.endswith(",数量,出どころ,AI結果のレイヤー,AI結果ID,AI確信度,AIモデル,AI検出日時,継続の判定")
+        assert [line.split(",")[-8] for line in lines] == ["30", "1", ""]
         s = settings_for(None)
         out = render(items_of(rows), ExportContext(s.format("標準（JSON）"), ExportFilter(), day(20)))
         data = json.loads(out.text)
-        assert [d["QUANTITY"] for d in data] == [30, 1, None] and list(data[0])[-1] == "QUANTITY"
+        assert [d["QUANTITY"] for d in data] == [30, 1, None] and list(data[0])[-8:-6] == ["QUANTITY", "SOURCE"]
         points = observation_layers(rows, [])[0]
         assert [f.name for f in points.fields if f.name == "quantity"] == ["quantity"]
         assert [values["quantity"] for _g, values in points.features] == [30, 1, None]

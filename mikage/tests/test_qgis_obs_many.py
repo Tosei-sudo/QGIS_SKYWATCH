@@ -432,7 +432,8 @@ def test_finds_cars_like_the_sample_and_records_them_from_ai_results(plugin, tmp
     saved = results.import_rows([0, 1, 2, 3])
     assert len(saved) == 4
     assert {(o.kind, o.activity, o.confidence, o.length, o.width) for o in saved} == {("車両 > 乗用車", "駐車", "推定", 6.6, 2.75)}
-    assert all("見本照合" in o.note for o in saved)
+    # The result's own note (what the 見本 was) only; where it came from in the AI columns.
+    assert [(o.ai.source, o.ai.model, o.note) for o in saved] == [("AI検出", "見本照合", "見本: 乗用車")] * 4
     assert len(results.reject_rows([4])) == 1
     wrong = results.rows[4][1]
     # Searched again: learnt from the five 見本 and the one wrong; those checked are not found again (the cars left

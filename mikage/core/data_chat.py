@@ -76,10 +76,12 @@ NOTES: dict[str, tuple[str, tuple[Col, ...]]] = {
         Col("id", "記録ID"), Col("imageId", "画像ID"), Col("imageTime", "撮像日時"), Col("objectId", "モノID"),
         Col("objectName", "モノの名前（艦名など。空が多い）"), Col("kind", "種別のパス", read=True, path=True),
         Col("activity", "活動", read=True), Col("present", "在不在（1=在 0=消失 NULL=見えなかった）"),
-        Col("note", "備考（AI の結果から取り込んだ記録は '[AI:' を含む）"), Col("length", "長さ(m)"), Col("heading", "向き(度)"),
+        Col("note", "備考"), Col("length", "長さ(m)"), Col("heading", "向き(度)"),
         Col("satellite", "衛星", read=True), Col("confidence", "確度", read=True), Col("recordedBy", "記録者", read=True),
         Col("created", "記録した日時"), Col("unseen", "見えなかった理由"),
-        Col("quantity", "数量（この 1 行が表すモノの数。NULL は 1。台数・隻数などは件数でなく SUM(COALESCE(この列, 1))）"))),
+        Col("quantity", "数量（この 1 行が表すモノの数。NULL は 1。台数・隻数などは件数でなく SUM(COALESCE(この列, 1))）"),
+        Col("aiSource", "出どころ（AI の結果から取り込んだ記録だけ値がある。NULL は人が記録）", ("AI検出", "外部AI")),
+        Col("aiScore", "AI の確信度(0〜1)"), Col("aiModel", "AI のモデル", read=True))),
     "namedArea": ("地名", (
         Col("name", "地名", read=True), Col("kind", "種類", read=True), Col("active", "有効（0 は使わない）"), Col("id", "管理番号"))),
     "catalog": ("画像カタログ（1 行 = 1 画像）", (

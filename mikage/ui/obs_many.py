@@ -680,7 +680,7 @@ class ManyPanel(QGroupBox):
         # from the last search among them); and the places checked as wrong (誤検出 in 「AI結果」).
         alike = [o for o in records if o.id != sample.record_id and o.kind == sample.kind and o.length and o.heading is not None
                  and ALIKE_SIZE[0] <= o.length / sample.length <= ALIKE_SIZE[1]]
-        wrong = [_centre(a.ring) for a in book.image_areas() if is_rejection(a.note) and a.ring]
+        wrong = [_centre(a.ring) for a in book.image_areas() if is_rejection(a) and a.ring]
         canvas = self.dock.canvas
         try:
             pictures = prepare(layer, canvas.extent(), canvas.mapSettings().destinationCrs(), sample, records, alike=alike, wrong=wrong)

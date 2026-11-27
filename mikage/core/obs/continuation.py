@@ -67,7 +67,7 @@ class Rule:
     condition it has holds (one not set is not looked at). A rule has at
     least one of where: near, center_in_record, record_in_ai, overlap.
     """
-    #: Its name (the 継続 column and the note's 「[自動継続:…]」); '' for one named by its conditions (text).
+    #: Its name (the 継続 column and AI_CONTINUATION 「自動継続:…」); '' for one named by its conditions (text).
     label: str = ""
     #: Within this (m) of the thing, or half the longer length.
     near: Optional[float] = None
@@ -85,7 +85,7 @@ class Rule:
     heading_gap: Optional[float] = None
     #: The AI's score at least this, when it has one.
     min_score: Optional[float] = None
-    #: The judgement before rules could be set (old_rules): its note says only 「[自動継続]」.
+    #: The judgement before rules could be set (old_rules): AI_CONTINUATION says only 「自動継続」.
     default: bool = False
 
     @property
@@ -209,9 +209,9 @@ class Continuation:
 
     @property
     def tag(self) -> str:
-        """What the note of the thing continued without asking says: 「自動継続」, with the rule's name when it has one."""
+        """What AI_CONTINUATION of the thing continued without asking says: 「自動継続」, with the rule's name when it has one."""
         rule = self.pick.rule if self.pick is not None else None
-        return f"自動継続:{rule.text.replace(']', '')}" if rule is not None and not rule.default else "自動継続"
+        return f"自動継続:{rule.text}" if rule is not None and not rule.default else "自動継続"
 
 
 def class_relation(mine: str, theirs: str, known: Optional[Sequence[Taxon]] = None) -> str:

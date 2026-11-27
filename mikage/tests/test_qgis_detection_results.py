@@ -23,6 +23,7 @@ from qgis.core import (  # noqa: E402
 )
 from qgis.PyQt.QtCore import QDateTime, QVariant  # noqa: E402
 
+from mikage.core.obs.ai_origin import AiOrigin  # noqa: E402
 from mikage.core.obs.flows import living  # noqa: E402
 from mikage.qgis_io import settings  # noqa: E402
 from mikage.tests.qgis_fakes import FakeIface, wait_for  # noqa: E402
@@ -125,7 +126,7 @@ def test_a_detection_run_is_listed_and_recorded_once(plugin):
     [o] = dock.import_rows([0])
     assert (o.image_id, o.kind, o.object_name) == ("d1.tif", "船舶", "船舶")
     ms = QDateTime.fromString("2026-11-07T01:00:00Z", "yyyy-MM-ddTHH:mm:ssZ").toMSecsSinceEpoch()
-    assert o.note == f"AI検出: boat 0.90 港湾モデル [AI:検出@{ms}#1]"
+    assert o.note == "" and o.ai == AiOrigin("AI検出", layer.name(), "1", 0.9, "港湾モデル", ms)
     assert 95 < o.length < 105 and 15 < o.width < 22
     assert QgsGeometry.fromPolygonXY([[QgsPointXY(139.70, 35.60), QgsPointXY(139.70, 35.60018), QgsPointXY(139.7011, 35.60018),
                                        QgsPointXY(139.7011, 35.60), QgsPointXY(139.70, 35.60)]]).contains(QgsGeometry.fromPointXY(QgsPointXY(o.lon, o.lat)))
@@ -164,7 +165,7 @@ def test_a_ship_detected_again_on_the_next_image_continues(plugin):
     assert list(dock.continued) == [0] and dock.continued[0].tier == "auto"
     saved = dock.import_rows([0, 1])
     assert [(o.object_id == ship.object_id, o.object_name) for o in saved] == [(True, "船舶"), (False, "船舶")]
-    assert saved[0].note.endswith("[自動継続]")
+    assert saved[0].ai.continuation == "自動継続" and saved[1].ai.continuation == ""
     assert [o.image_id for o in living(book.records) if o.object_id == ship.object_id] == ["d1.tif", "d2.tif"]
     # Choosing the image shows its detection again.
     iface.setActiveLayer(QgsProject.instance().mapLayersByName("d1")[0])
@@ -196,4 +197,4 @@ def test_a_real_detection_run_is_recorded(plugin):
     assert wait_for(lambda: len(dock.rows) == 16)
     assert dock.image_id == "square.tif" and {r.kind for _s, r in dock.rows} == {"bright"}
     saved = dock.import_rows(list(range(16)))
-    assert len(saved) == 16 and all(o.image_id == "square.tif" and o.note.startswith("AI検出: bright") for o in saved)
+    assert len(saved) == 16 and all(o.image_id == "square.tif" and o.ai.source == "AI検出" and o.note == "" for o in saved)

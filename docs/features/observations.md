@@ -84,6 +84,13 @@
 - 出力: エクスポートの項目 `quantity`（標準（CSV）の最後の列「数量」・標準（JSON）の `QUANTITY`。消失・不可は空）、通報の項目 `quantity`（既定の通報文には入れない）、「レイヤーとして追加」の「数量」、ダッシュボードの `VW_OBS_RECORD.QUANTITY` などの数量の列（[ダッシュボード](../arcgis-dashboards.md)）、データチャットにも列の説明を渡す（「何台」は件数でなく数量の合計で答える）
 - Esri のレイヤーに `QUANTITY` がなければ「数量」の欄を出さず、送らない（読み込んでから判断。点検では「注意」）。前の版の MIKAGE が記録を直しても、送らない属性なので数量は消えない。列の足し方は [docs/arcgis-setup.md](../arcgis-setup.md#観測記録に数量の列を足す)
 
+### 出どころ（AI から取り込んだ記録）
+
+2026-11-27 から、ドック「AI結果」から取り込んだ記録は、どの AI のどの結果から来たかを列（`SOURCE`・`AI_LAYER`・`AI_RESULT_ID`・`AI_SCORE`・`AI_MODEL`・`AI_DETECTED_AT`・`AI_CONTINUATION`）に持つ。備考は人の欄で、AI のことは書かない（[取り込んだ記録の出どころ](ai.md#取り込んだ記録の出どころ)）。
+
+- 一覧の「備考」の右の「出どころ」列に `AI検出 0.87`・`外部AI 0.65`（誤検出の確認範囲は `AI誤検出 0.42`）。人の記録は空。指すとモデル・確信度・レイヤーと ID・継続の判定
+- 記録を開くと、入力欄の「備考」の下に「出どころ」の行（AI の記録だけ。直せない。記録を直しても変わらない）
+
 ### モノの名前（個体だけが名前で決まる）
 
 2026-11-18 から、名前でモノを決めるのは**個体**だけ。分類体系でその分類（か上位の分類）に「個体名の呼称」（`nameLabel`。艦名・機番など）がある種別のモノが個体。
@@ -278,7 +285,7 @@
 | `file` | パスの文字列か `{ "path", "encoding": "utf-8"・"utf-8-sig"・"cp932", "append" }`。パスに `{name}`・`{now:%Y%m%d}`（`{now:%Y%m%d@UTC}` も可）。その文字コードで書けない文字（cp932 の —・é・絵文字など）はファイルだけ ? にして画面に出す | なし |
 | `columns` | 通報テーブルに書く記録の値 `{ "属性名": 項目 }`（項目は `fields` と同じ書き方。属性が文字列でなければ、使った項目の値そのもの） | なし |
 
-項目（`source`）: `id`・`imageId`・`imageName`・`imageTime`・`satellite`（衛星名）・`quantity`（数量。消失・不可は空）・`objectId`・`objectName`・`kind`（`level` で階層。1 が最上位、-1 が最下位）・`activity`・`present`（あり／なし。`map` で `{ "true": "在", "false": "消失" }`）・`confidence`・`note`・`lon`・`lat`・`length`・`heading`・`width`（`digits` で小数の桁）・`recordedBy`・`updatedBy`・`created`・`updated`・`area`・`rule`・`manual`・`report`（フォーマットの名前）・`reportedAt`・`reportedBy`・`index`（何件目）・`count`（件数）・`score`（重要度スコア）・`similar`（似た記録の件数）・`place`（いちばん小さい地名）・`placeKind`（その種類）・`places`（含む地名すべて、小さい順）・`country`（国コード）・`countryName`（国名）。英語: `confidence.en`・`area.en`・`place.en`・`placeKind.en`・`places.en`・`countryName.en`・`note.en`（備考の英訳。[文章の手伝い](#文章の手伝い小さな生成-aitextassist)の `translate` で、通報の画面の「備考を英訳」で作る。作るまで空）。当てはまったものの属性: `country.属性名`・`place.属性名`・`places.属性名`・`area.属性名`・`rule.属性名`・`confidence.キー`（下の「[項目の書き方](#通報の項目の書き方度分秒複数の値代わりの項目属性)」）。
+項目（`source`）: `id`・`imageId`・`imageName`・`imageTime`・`satellite`（衛星名）・`quantity`（数量。消失・不可は空）・`aiSource`・`aiLayer`・`aiResultId`・`aiScore`・`aiModel`・`aiDetectedAt`・`aiContinuation`（AI から取り込んだ記録の[出どころ](ai.md#取り込んだ記録の出どころ)。人の記録は空）・`objectId`・`objectName`・`kind`（`level` で階層。1 が最上位、-1 が最下位）・`activity`・`present`（あり／なし。`map` で `{ "true": "在", "false": "消失" }`）・`confidence`・`note`・`lon`・`lat`・`length`・`heading`・`width`（`digits` で小数の桁）・`recordedBy`・`updatedBy`・`created`・`updated`・`area`・`rule`・`manual`・`report`（フォーマットの名前）・`reportedAt`・`reportedBy`・`index`（何件目）・`count`（件数）・`score`（重要度スコア）・`similar`（似た記録の件数）・`place`（いちばん小さい地名）・`placeKind`（その種類）・`places`（含む地名すべて、小さい順）・`country`（国コード）・`countryName`（国名）。英語: `confidence.en`・`area.en`・`place.en`・`placeKind.en`・`places.en`・`countryName.en`・`note.en`（備考の英訳。[文章の手伝い](#文章の手伝い小さな生成-aitextassist)の `translate` で、通報の画面の「備考を英訳」で作る。作るまで空）。当てはまったものの属性: `country.属性名`・`place.属性名`・`places.属性名`・`area.属性名`・`rule.属性名`・`confidence.キー`（下の「[項目の書き方](#通報の項目の書き方度分秒複数の値代わりの項目属性)」）。
 
 #### 通報の項目の書き方（度分秒・複数の値・代わりの項目・属性）
 
@@ -405,7 +412,7 @@
 | `dateFormat` | 日時の書式 | `iso` |
 | `digits` | 経度・緯度の小数の桁（長さ・向き・幅は 1 桁） | `7` |
 
-項目（`source`）: `id`・`objectId`・`objectName`・`kind`・`activity`・`present`（CSV は あり／なし、JSON は true／false。不可の記録は空）・`unseen`（不可の理由。見えた記録は空）・`confidence`・`imageTime`・`imageId`・`imageName`・`satellite`（衛星名）・`quantity`（数量。消失・不可は空）・`lon`・`lat`・`length`・`heading`・`width`・`pixelX`・`pixelY`（画像ファイルの画素位置）・`imageFile`・`note`・`recordedBy`・`updatedBy`・`created`・`updated`・`deleted`・`place`・`placeKind`・`places`・`geofences`・`latLon`・`dms`・`mgrs`・`utm`・`geometry`・`index`（何件目）・`count`・`exportedAt`・`exportedBy`・`periodStart`・`periodEnd`・`periodBasis`・`areaName`・`format`。
+項目（`source`）: `id`・`objectId`・`objectName`・`kind`・`activity`・`present`（CSV は あり／なし、JSON は true／false。不可の記録は空）・`unseen`（不可の理由。見えた記録は空）・`confidence`・`imageTime`・`imageId`・`imageName`・`satellite`（衛星名）・`quantity`（数量。消失・不可は空）・`aiSource`・`aiLayer`・`aiResultId`・`aiScore`・`aiModel`・`aiDetectedAt`・`aiContinuation`（AI から取り込んだ記録の[出どころ](ai.md#取り込んだ記録の出どころ)。標準（CSV）では「数量」の後の「出どころ」〜「継続の判定」、標準（JSON）では `SOURCE`〜`AI_CONTINUATION`。`aiScore` は `digits` がなければ小数 4 桁まで）・`lon`・`lat`・`length`・`heading`・`width`・`pixelX`・`pixelY`（画像ファイルの画素位置）・`imageFile`・`note`・`recordedBy`・`updatedBy`・`created`・`updated`・`deleted`・`place`・`placeKind`・`places`・`geofences`・`latLon`・`dms`・`mgrs`・`utm`・`geometry`・`index`（何件目）・`count`・`exportedAt`・`exportedBy`・`periodStart`・`periodEnd`・`periodBasis`・`areaName`・`format`。
 
 ```jsonc
 "observationExports": {

@@ -72,12 +72,13 @@ from .taxonomy import kind_of, path_of, within
 SOURCES = (
     "id", "imageId", "imageName", "imageTime", "objectId", "objectName", "kind", "activity", "present", "confidence", "note",
     "lon", "lat", "length", "heading", "width", "recordedBy", "updatedBy", "created", "updated", "satellite", "quantity",
+    "aiSource", "aiLayer", "aiResultId", "aiScore", "aiModel", "aiDetectedAt", "aiContinuation",
     "area", "rule", "manual", "report", "reportedAt", "reportedBy", "index", "count", "score", "similar",
     "place", "placeKind", "places", "country", "countryName",
     "confidence.en", "area.en", "place.en", "placeKind.en", "places.en", "countryName.en", "note.en",
 )
-TIME_SOURCES = ("imageTime", "created", "updated", "reportedAt")
-NUMBER_SOURCES = ("lon", "lat", "length", "heading", "width", "score")
+TIME_SOURCES = ("imageTime", "created", "updated", "reportedAt", "aiDetectedAt")
+NUMBER_SOURCES = ("lon", "lat", "length", "heading", "width", "score", "aiScore")
 #: Written in degrees, minutes and seconds by a `format` (dms, dm, or a pattern of coords.format_angle).
 ANGLE_SOURCES = ("lat", "lon")
 #: Several names in one value, between them `join` (else ・, or ", " in English).
@@ -1596,7 +1597,10 @@ def raw_value(f: AlertField, item: AlertItem, index: int, report: AlertFormat, a
         "objectName": o.object_name, "activity": o.activity, "present": o.present, "confidence": o.confidence,
         "note": o.note, "lon": o.lon, "lat": o.lat, "length": o.length, "heading": o.heading, "width": o.width,
         "recordedBy": o.recorded_by, "updatedBy": o.updated_by, "created": o.created_at, "updated": o.updated_at,
-        "satellite": o.satellite or "", "quantity": quantity_of(o) or None, "area": joined(item.areas), "rule": joined(item.rules), "report": report.name, "reportedAt": at.now,
+        "satellite": o.satellite or "", "quantity": quantity_of(o) or None,
+        "aiSource": o.ai.source if o.ai else "", "aiLayer": o.ai.layer if o.ai else "", "aiResultId": o.ai.result_id if o.ai else "",
+        "aiScore": o.ai.score if o.ai else None, "aiModel": o.ai.model if o.ai else "", "aiDetectedAt": o.ai.detected_at if o.ai else None,
+        "aiContinuation": o.ai.continuation if o.ai else "", "area": joined(item.areas), "rule": joined(item.rules), "report": report.name, "reportedAt": at.now,
         "reportedBy": at.user, "index": index + 1, "count": at.count, "manual": item.manual, "score": item.score,
         "similar": item.similar if item.score is not None else None,
         "place": place.name if place else "", "placeKind": place.kind if place else "",

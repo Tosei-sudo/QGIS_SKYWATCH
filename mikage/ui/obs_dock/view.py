@@ -14,7 +14,7 @@ from qgis.PyQt.QtWidgets import QHeaderView, QTableWidgetItem
 
 from ...core.obs.api import (
     area_label, local_time, CarryOver, flow_of, heading_text, time_key, km_text, is_mine, my_names, Observation, state_text,
-    unseen_label, kind_of, member_names, quantity_mark, quantity_of,
+    unseen_label, kind_of, member_names, origin_label, origin_text, quantity_mark, quantity_of,
 )
 from ...core import edit_stamp
 from ..obs_overlay import UNSEEN_COLOR
@@ -201,7 +201,7 @@ class ViewPart:
         tr = self.tr
         book = self.book
         areas = book.image_areas(deleted=self.deleted_check.isChecked())
-        self._set_head(tr("モノ"), tr("種別"), tr("活動"), tr("長さ（× 幅）・向き"), tr("備考"), tr("記録者"), tr("更新"), "",
+        self._set_head(tr("モノ"), tr("種別"), tr("活動"), tr("長さ（× 幅）・向き"), tr("備考"), tr("出どころ"), tr("記録者"), tr("更新"), "",
                        rows=len(here) + len(carried) + len(areas))
         mine = self.my_names() if self.mine_only.isChecked() else None
 
@@ -217,11 +217,12 @@ class ViewPart:
             buttons = self._small((tr("復元"), tr("削除した記録を復元"), lambda o=o: self.restore([o]))) if gone else \
                 self._small((tr("流れ"), tr("このモノの流れ（帯グラフ・表・地図の軌跡）を一覧の下に表示。もう一度押すと閉じる"),
                              lambda o=o: self.toggle_flow(o.object_id), o.object_id == self.chosen))
-            self._row([o.object_name + quantity_mark(o), o.kind, o.activity if o.present else tr(state_text(o)), measure(o), o.note, self._made_by(o),
-                       local_time(o.updated_at), ""],
+            self._row([o.object_name + quantity_mark(o), o.kind, o.activity if o.present else tr(state_text(o)), measure(o), o.note,
+                       origin_label(o.ai), self._made_by(o), local_time(o.updated_at), ""],
                       None if gone else (lambda o=o: self._open_row(o, editing=o)),
                       style="deleted" if gone else "unseen" if o.unseen else "", buttons=buttons, records=[] if gone else [o], reported=o.id in self.reported,
                       waiting=o.id in waiting, key=f"o:{o.id}")
+            self._origin_tip(o.ai)
         inside_ids = {id(c) for c in inside}
         hidden_ids = {id(c) for c in hidden or []}
         for c in carried:
@@ -231,7 +232,7 @@ class ViewPart:
             side = tr("前") if c.side == "before" else tr("後")
             self._row([s.object_name + quantity_mark(s), s.kind, f"{s.activity}（{side}の画像 {local_time(s.image_time)}）", measure(s),
                        tr("不可範囲内（記録なし）") if id(c) in hidden_ids else tr("確認範囲内（記録なし）") if id(c) in inside_ids else "",
-                       s.recorded_by, "", ""],
+                       "", s.recorded_by, "", ""],
                       lambda s=s: self._open_row(s, source=s),
                       style="unseen" if id(c) in hidden_ids else "inside" if id(c) in inside_ids else "ghost", buttons=buttons, key=f"c:{s.object_id}")
         taxa = self._once("taxonomy", book.taxonomy) if self.class_filter else []
@@ -245,12 +246,19 @@ class ViewPart:
             buttons = self._small((tr("復元"), tr("削除した{what}を復元").format(what=what), lambda a=a: self.restore_areas([a]))) if gone else \
                 self._small((tr("削除"), tr("この不可範囲を削除（中の「不可」の記録も削除）") if a.unseen else tr("この確認範囲を削除"),
                              lambda a=a: self.remove_areas([a])))
-            self._row([area_label(a), a.kind, "", "", a.note, a.recorded_by, local_time(a.updated_at), ""], lambda a=a: self._fit_area(a),
-                      style="deleted" if gone else "unseen" if a.unseen else "area", buttons=buttons, key=f"a:{a.id}")
+            self._row([area_label(a), a.kind, "", "", a.note, origin_label(a.ai), a.recorded_by, local_time(a.updated_at), ""],
+                      lambda a=a: self._fit_area(a), style="deleted" if gone else "unseen" if a.unseen else "area", buttons=buttons, key=f"a:{a.id}")
+            self._origin_tip(a.ai)
         self._end_rows()
         if self.table.rowCount() == 0:
             self._row([tr("自分の記録なし。「自分の記録のみ」を外すと全員の記録を表示") if mine else
                        tr("該当する記録なし（大分類の絞り込み中）") if self.class_filter else tr("記録なし。「クリック記録」を押して地図をクリック")])
+
+    def _origin_tip(self, ai) -> None:
+        """The 出どころ cell of the row just added says all of it when pointed at (the model, the score, the result's id)."""
+        item = self.table.item(self._filled - 1, 5) if ai is not None else None
+        if item is not None:
+            item.setToolTip(origin_text(ai))
 
     def _made_by(self, o: Observation) -> str:
         """「記録者」 of a row: who made the record, and who changed it last when someone else did."""

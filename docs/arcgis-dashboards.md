@@ -107,7 +107,7 @@ ArcGIS Enterprise の Dashboards で、MIKAGE が書く Esri のテーブルを�
 | リスト「モノ」 | `VW_OBS_THING` | 並べ替え `LAST_SEEN_AT` の新しい順。行に `THING_NAME`・`LEAF_KIND`・最後に見た日と場所・`SEEN_COUNT` 回、`LAST_QUANTITY` が 2 以上なら「×n」（まとめて記録したモノの最後の数量）。選ぶと下の記録を `OBJECT_ID` で絞り、地図をその位置へ |
 | マップ | Web マップ（`VW_OBS_THING` を `AGE_CLASS` で色分け、`VW_OBS_RECORD` を小さな点で） | モノを選ぶと、その記録の点だけが残り、動いた跡が見える |
 | 系列グラフ「見た日」 | `VW_OBS_RECORD` | カテゴリ `SEEN_DATE`（週）、分割 `ACTIVITY`。モノの選択で絞られる |
-| テーブル「記録」 | `VW_OBS_RECORD` | 列 `SEEN_AT`・`IMAGE_NAME`・`ACTIVITY`・`PRESENT_LABEL`・`QUANTITY`・`PLACE_LABEL`・`NOTE`・`OBSERVER` |
+| テーブル「記録」 | `VW_OBS_RECORD` | 列 `SEEN_AT`・`IMAGE_NAME`・`ACTIVITY`・`PRESENT_LABEL`・`QUANTITY`・`PLACE_LABEL`・`NOTE`・`SOURCE_LABEL`・`OBSERVER` |
 
 - 数量（2026-11-24）: 1 件で「車両 ×30」のようにまとめて記録したモノは、1 行のまま `LAST_QUANTITY`（最後の数量）・`MAX_QUANTITY`（いちばん多かった数量）を持つ。インジケーター「モノの数」は行の数（まとめたものも 1）なので、台数を出したいときは `LAST_QUANTITY` の合計のインジケーターを並べる
 - モノの名前・分類は最後に書かれたもの。プラグインは「同じ系統でより細かい分類」があればそちらを使うので、分類が「船舶」だけの画像が最後だと、ここでは粗い分類になる
@@ -215,7 +215,7 @@ ArcGIS Enterprise の Dashboards で、MIKAGE が書く Esri のテーブルを�
 | `VW_PLAN_QUOTA_USAGE` | 年間上限の行（今年度） | なし | `TBL_IMAGING_QUOTA`・`VW_PLAN_SHOT` | `CONSUMED`・`PENDING_SCENES`・`REMAINING`・`USED_PCT`・`YEAR_PCT`・`PACE`・`RUNS_OUT_DATE`・`QUOTA_STATE` | P3 |
 | `VW_PLAN_QUOTA_MONTH` | 年間上限 × 今年度の月 | なし | `VW_PLAN_QUOTA_USAGE`・`VW_PLAN_SHOT` | `USED_SCENES`・`CUM_CONSUMED`（累計）・`PACE_LINE` | P3 |
 | `VW_PLAN_FIXED_POINT` | 有効な定点の依頼 | ポリゴン | `TBL_IMAGING_REQUEST`・`VW_PLAN_HISTORY` | `LAST_CAPTURED_DATE`・`EVERY_DAYS`・`LATE_TURNS`・`GAP_CLASS`・直近 30 日の日数 | P4 |
-| `VW_OBS_RECORD` | 削除していない観測記録 | ポイント | `TBL_OBSERVATION`・`TBL_NAMED_AREA` | `ROOT_KIND`・`KIND_2`・`LEAF_KIND`・`SEEN_AT`・`SEEN_DATE`・`SEEN_MONTH`・`DAYS_AGO`・`PLACE_LABEL`・`PLACE_STATE`・`UNSEEN_REASON`・`LOOKED`・`SATELLITE`・`SATELLITE_LABEL`（空なら「（衛星不明）」）・`QUANTITY`（見えたモノの数。空は 1、消失・不可は 0） | O1・O2・O3・N1・N2・N3 |
+| `VW_OBS_RECORD` | 削除していない観測記録 | ポイント | `TBL_OBSERVATION`・`TBL_NAMED_AREA` | `ROOT_KIND`・`KIND_2`・`LEAF_KIND`・`SEEN_AT`・`SEEN_DATE`・`SEEN_MONTH`・`DAYS_AGO`・`PLACE_LABEL`・`PLACE_STATE`・`UNSEEN_REASON`・`LOOKED`・`SATELLITE`・`SATELLITE_LABEL`（空なら「（衛星不明）」）・`QUANTITY`（見えたモノの数。空は 1、消失・不可は 0）・`SOURCE`・`SOURCE_LABEL`（AI から取り込んだ記録は「AI検出」「外部AI」、ほかは「人」）・`AI_LAYER`・`AI_RESULT_ID`・`AI_SCORE`・`AI_MODEL`・`AI_DETECTED_AT`・`AI_CONTINUATION` | O1・O2・O3・N1・N2・N3 |
 | `VW_OBS_THING` | モノ（`OBJECT_ID`） | ポイント（最後の記録） | `VW_OBS_RECORD` | `THING_NAME`・`LAST_SEEN_AT`・`FIRST_SEEN_AT`・`SEEN_COUNT`・`IMAGE_COUNT`・`IN_LAST_MONTH`・`AGE_CLASS`・`LAST_NAMED_AREA_OBJECTID`・`LAST_UNSEEN_AT`・`LAST_UNSEEN_REASON`・`UNSEEN_COUNT`・`LAST_QUANTITY`・`MAX_QUANTITY` | O1 |
 | `VW_OBS_IMAGE_WORK` | 分担の 1 行 | なし | `TBL_ASSIGNMENT`・`VW_OBS_RECORD`・`TBL_OBSERVATION_AREA` | `MY_RECORDS`・`IMAGE_RECORDS`・`IMAGE_AREAS`・`UNSEEN_AREAS`・`SATELLITE`（その画像の記録・範囲の衛星名）・`HOURS`・`DONE_EMPTY` | O3 |
 | `VW_ALERT_LOG` | 通報記録の 1 行 | なし | `TBL_ALERT_LOG`・`VW_OBS_RECORD` | 通報した記録の地名・モノ・分類、`REPORTED_DATE`・`DAYS_AGO`・`MANUAL_LABEL` | N2 |

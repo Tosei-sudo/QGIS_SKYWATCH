@@ -20,6 +20,7 @@ from typing import Any, Optional
 
 from ..listed_image import ListedImage, rings_of  # noqa: F401 (read from here too)
 from ..util import is_number, is_record, layer_url, words
+from .ai_origin import AiOrigin, origin_of
 from .areas import AreaStoreConfig, area_store_of
 from .taxonomy import DEFAULT_SPEC_FIELDS, SpecField, Taxon, TaxonomyTableConfig, from_kinds, spec_fields_of, taxonomy_of, taxonomy_table_of
 
@@ -77,6 +78,14 @@ class Observation:
     #: 2026-11-24). None stands for 1 (a record of one thing, an older record); never set below 2, nor on a 消失 or
     #: 不可 record (quantity_of).
     quantity: Optional[int] = None
+    #: The AI result it was made from (SOURCE, AI_LAYER, AI_RESULT_ID…, core/obs/ai_origin.py; tsudo 2026-11-27);
+    #: None for a record a person made.
+    ai: Optional[AiOrigin] = None
+
+    def __post_init__(self) -> None:
+        if self.ai is not None and not isinstance(self.ai, AiOrigin):
+            # As kept in JSON (a draft, a record kept while offline).
+            self.ai = origin_of(self.ai)
 
 
 #: The record's attributes by role, the names used when the settings do not map them.
@@ -101,6 +110,14 @@ DEFAULT_OBSERVATION_FIELDS: dict[str, str] = {
     "satellite": "SATELLITE",
     #: 数量 (2026-11-24): optional, like SATELLITE; empty stands for 1 (older records too).
     "quantity": "QUANTITY",
+    #: 出どころ (2026-11-27): the AI result a record was made from (core/obs/ai_origin.py); empty for a person's record.
+    "aiSource": "SOURCE",
+    "aiLayer": "AI_LAYER",
+    "aiResultId": "AI_RESULT_ID",
+    "aiScore": "AI_SCORE",
+    "aiModel": "AI_MODEL",
+    "aiDetectedAt": "AI_DETECTED_AT",
+    "aiContinuation": "AI_CONTINUATION",
     "confidence": "CONFIDENCE",
     "recordedBy": "OBSERVER",
     "updatedBy": "UPDATED_BY",

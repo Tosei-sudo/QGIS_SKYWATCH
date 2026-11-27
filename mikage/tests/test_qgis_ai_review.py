@@ -20,6 +20,7 @@ APP = start_app()
 from qgis.core import QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsGeometry, QgsPointXY, QgsProject, QgsRectangle  # noqa: E402
 
 from mikage.core.ai.review import is_rejection  # noqa: E402
+from mikage.core.obs.ai_origin import AiOrigin  # noqa: E402
 from mikage.core.obs.areas import CheckedArea  # noqa: E402
 from mikage.core.obs.flows import living  # noqa: E402
 from mikage.core.obs.model import Observation, default_taxonomy  # noqa: E402
@@ -55,7 +56,10 @@ def test_the_least_sure_first_and_the_judgements_kept(plugin, monkeypatch):
 
     dock.reject_rows([0])
     [area] = [a for a in book.areas if a.deleted_at is None]
-    assert is_rejection(area.note) and area.note.startswith("AI誤検出: boat 0.30 [AI:検出@") and area.kind == "" and area.image_id == "d1.tif"
+    # The wrong result in the area's AI columns (SOURCE 「AI誤検出」), the note left to the person (2026-11-27).
+    assert is_rejection(area) and area.note == "" and area.kind == "" and area.image_id == "d1.tif"
+    assert (area.ai.source, area.ai.layer, area.ai.result_id, area.ai.score, area.ai.model) == ("AI誤検出", layer.name(), "2", 0.3, "港湾モデル")
+    assert area.ai.detected_at is not None
     ring = QgsGeometry.fromPolygonXY([[QgsPointXY(x, y) for x, y in area.ring]])
     wrong = ship_box(139.65, 35.62)
     wrong.transform(QgsCoordinateTransform(QgsCoordinateReferenceSystem("EPSG:3857"), WGS84, QgsProject.instance()))
@@ -93,7 +97,7 @@ def test_the_least_sure_first_and_the_judgements_kept(plugin, monkeypatch):
     assert dock.import_rows([1]) == [] and "誤検出" in dock.status.text()
     saved = dock.import_all(confirm=False)
     assert len(saved) == 2 and len(living(book.records)) == 3
-    assert all("0.30" not in o.note for o in saved)
+    assert all(o.ai.score != 0.3 and o.note == "" for o in saved)
 
 
 def test_training_opens_on_the_image_and_the_trained_model(plugin, monkeypatch):
@@ -118,8 +122,8 @@ def test_training_opens_on_the_image_and_the_trained_model(plugin, monkeypatch):
 def test_a_rejection_is_a_window_of_background_in_training():
     ring = [[139.0, 35.0], [139.001, 35.0], [139.001, 35.001], [139.0, 35.001], [139.0, 35.0]]
     far = [[139.01, 35.01], [139.011, 35.01], [139.011, 35.011], [139.01, 35.011], [139.01, 35.01]]
-    areas = [CheckedArea("a1", "img", "img", None, ring, "", "AI誤検出: boat 0.30 [AI:検出@1#2]", 0, 0),
-             CheckedArea("a2", "img", "img", None, far, "", "港の確認", 0, 0)]
+    areas = [CheckedArea("a1", "img", "img", None, ring, "", "", 0, 0, ai=AiOrigin("AI誤検出", "検出", "2", 0.3)),
+             CheckedArea("a2", "img", "img", None, far, "", "港の確認 AI誤検出", 0, 0)]
     record = Observation("r1", "img", "img", None, "o1", "", "船舶", "", True, "", 139.0005, 35.0105, 0, 0, length=20.0)
     gathered = labels_from_book([record], areas, default_taxonomy())
     assert [a.hard for a in gathered.areas] == [True, False]

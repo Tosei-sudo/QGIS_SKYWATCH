@@ -13,7 +13,7 @@ from qgis.PyQt.QtWidgets import QLabel, QLineEdit, QToolButton, QWidget
 
 from ...core.obs.api import (
     FormValues, local_time, MatchCandidate, js_round, UNSEEN, Observation, unseen_label, find, kind_of, member_names,
-    member_specs_at, name_label_of, path_of, quantity_of, read_quantity, spec_text, specs_at,
+    member_specs_at, name_label_of, origin_text, path_of, quantity_of, read_quantity, spec_text, specs_at,
 )
 from ...core.util import read_number
 from ..docks import plain_tip
@@ -52,6 +52,11 @@ class FormPart:
         if not known:
             self._fit_activity()
         self.note_input.setText(editing.note if editing else "")
+        # The AI result the record came from (a record changed keeps it; a thing carried over by hand is the person's).
+        origin = origin_text(editing.ai) if editing is not None else ""
+        self.origin_text.setText(origin)
+        for w in (self.origin_label, self.origin_text):
+            w.setVisible(bool(origin))
         self._fill_confidence((known.confidence or "") if known else last.confidence)
         # 数量: a group's (継続 too, from the record carried over); a new record is of one thing until typed.
         many = quantity_of(known) if known else 1

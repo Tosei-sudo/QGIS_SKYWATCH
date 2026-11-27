@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from ..util import is_record
+from .ai_origin import AiOrigin, origin_of
 from .taxonomy import kind_of, path_of, within
 
 #: The area's attributes by role, the names used when the settings do not map them.
@@ -33,6 +34,13 @@ DEFAULT_AREA_FIELDS: dict[str, str] = {
     "unseen": "UNSEEN_REASON",
     #: 衛星名 (2026-11-20), as the records': optional.
     "satellite": "SATELLITE",
+    #: A result judged wrong (誤検出, 2026-11-27): SOURCE 「AI誤検出」 and the result (core/obs/ai_origin.py); empty for others.
+    "aiSource": "SOURCE",
+    "aiLayer": "AI_LAYER",
+    "aiResultId": "AI_RESULT_ID",
+    "aiScore": "AI_SCORE",
+    "aiModel": "AI_MODEL",
+    "aiDetectedAt": "AI_DETECTED_AT",
 }
 _FEATURE_LAYER = re.compile(r"/FeatureServer/\d+$", re.IGNORECASE)
 _NAME = re.compile(r"^[\w.]+$", re.ASCII)
@@ -58,6 +66,17 @@ class CheckedArea:
     unseen: str = ""
     #: 衛星名 of its image, as the records' (Observation.satellite); '' when not known.
     satellite: str = ""
+    #: The AI result it records as wrong (誤検出: source AI_REJECTED), None for an area a person drew.
+    ai: Optional[AiOrigin] = None
+
+    def __post_init__(self) -> None:
+        if self.ai is not None and not isinstance(self.ai, AiOrigin):
+            self.ai = origin_of(self.ai)
+
+    @property
+    def rejection(self) -> bool:
+        """Whether it records an AI result as wrong (a hard negative for training)."""
+        return self.ai is not None and self.ai.rejected
 
 
 @dataclass

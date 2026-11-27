@@ -19,6 +19,7 @@ from qgis.PyQt.QtCore import QDateTime  # noqa: E402
 
 from mikage.core.ai.review import ACCEPTED, REJECTED_STATE  # noqa: E402
 from mikage.core.esri import EsriClient  # noqa: E402
+from mikage.core.obs.ai_origin import AiOrigin  # noqa: E402
 from mikage.core.obs.flows import living  # noqa: E402
 from mikage.qgis_io import ai_transfer_io, settings  # noqa: E402
 from mikage.qgis_io.context import PluginContext  # noqa: E402
@@ -92,19 +93,28 @@ def test_a_detection_sent_to_the_table_is_reviewed_by_others_once(plugin):
     ms = QDateTime.fromString(AT, "yyyy-MM-ddTHH:mm:ssZ").toMSecsSinceEpoch()
     # Before sending: one recorded, one recorded as wrong (from the layer).
     [first] = dock.import_rows([0])
-    assert first.note == f"AI検出: boat 0.90 港湾モデル [AI:検出@{ms}#1]"
-    assert len(dock.reject_rows([3])) == 1
+    # Its AI columns name the layer's feature and run (the note is the person's, 2026-11-27).
+    assert first.note == "" and first.ai == AiOrigin("AI検出", layer.name(), "1", 0.9, "港湾モデル", ms)
+    [wrong] = dock.reject_rows([3])
+    assert (wrong.ai.source, wrong.ai.layer, wrong.ai.result_id) == ("AI誤検出", layer.name(), "4")
 
     send(p, iface, layer)
     assert len(table.rows) == 4
     oid = {r["attributes"]["CONFIDENCE"]: str(r["attributes"][table.oid]) for r in table.rows}
+    # Sent: what was recorded from the layer now names the table's row (kept so, read again too).
+    assert wait_for(lambda: book.record(first.id).ai.layer == "検出DB")
+    assert book.record(first.id).ai == AiOrigin("AI検出", "検出DB", oid[0.9], 0.9, "港湾モデル", ms)
+    [moved] = [a for a in book.areas if a.id == wrong.id]
+    assert (moved.ai.layer, moved.ai.result_id, moved.ai.source) == ("検出DB", oid[0.6], "AI誤検出")
+    book.reload()
+    assert book.record(first.id).ai.result_id == oid[0.9]
     # Read again: the table's rows are the person's own layer's, listed once (as the layer's).
     dock.load("d1.tif", again=True)
     assert wait_for(lambda: dock.hidden == 4)
     assert [s.local for s, _r in dock.rows] == [True] * 4 and "転記先の 4 件は自分の検出レイヤーで表示" in dock.status.text()
-    # Recorded from the layer after it was sent: the note has the table's tag too.
+    # Recorded from the layer after it was sent: it names the table's row at once.
     [second] = dock.import_rows([1])
-    assert second.note == f"AI検出: boat 0.80 港湾モデル [AI:検出@{ms}#2] [AI:検出DB#{oid[0.8]}]"
+    assert second.note == "" and second.ai == AiOrigin("AI検出", "検出DB", oid[0.8], 0.8, "港湾モデル", ms)
 
     # Someone else (no detection layer): the table's rows, the classes as the model's kinds.
     QgsProject.instance().takeMapLayer(layer)  # kept, to come back
@@ -116,7 +126,8 @@ def test_a_detection_sent_to_the_table_is_reviewed_by_others_once(plugin):
     assert dock.state(by_score[0.7]) not in (ACCEPTED, REJECTED_STATE)
     assert dock.import_rows([by_score[0.9], by_score[0.8], by_score[0.6]]) == []
     [third] = dock.import_rows([by_score[0.7]])
-    assert third.note == f"AI検出（検出DB）: boat 0.70 港湾モデル [AI:検出DB#{oid[0.7]}]" and third.kind == "船舶"
+    assert third.note == "" and third.kind == "船舶"
+    assert (third.ai.source, third.ai.layer, third.ai.result_id, third.ai.score, third.ai.model) == ("AI検出", "検出DB", oid[0.7], 0.7, "港湾モデル")
     assert len(living(book.records)) == 3
 
     # The one who detected it, with the layer again: recorded from the table, 取込済 in the layer's row too.

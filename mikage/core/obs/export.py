@@ -56,12 +56,14 @@ RECORD_SOURCES = (
     "id", "objectId", "objectName", "kind", "activity", "present", "unseen", "confidence", "imageTime", "imageId", "imageName",
     "satellite", "lon", "lat", "length", "heading", "width", "pixelX", "pixelY", "imageFile", "note", "recordedBy", "updatedBy", "created",
     "updated", "deleted", "quantity", "place", "placeKind", "places", "geofences", "latLon", "dms", "mgrs", "utm", "geometry", "index",
+    # The AI result the record was made from (2026-11-27).
+    "aiSource", "aiLayer", "aiResultId", "aiScore", "aiModel", "aiDetectedAt", "aiContinuation",
 )
 #: Of the file, the same for every record.
 FILE_SOURCES = ("count", "exportedAt", "exportedBy", "periodStart", "periodEnd", "periodBasis", "areaName", "format")
 SOURCES = RECORD_SOURCES + FILE_SOURCES
-TIME_SOURCES = ("imageTime", "created", "updated", "deleted", "exportedAt", "periodStart", "periodEnd")
-NUMBER_SOURCES = ("lon", "lat", "length", "heading", "width", "pixelX", "pixelY")
+TIME_SOURCES = ("imageTime", "created", "updated", "deleted", "exportedAt", "periodStart", "periodEnd", "aiDetectedAt")
+NUMBER_SOURCES = ("lon", "lat", "length", "heading", "width", "pixelX", "pixelY", "aiScore")
 #: The sources that need the named areas or the geofences read.
 PLACE_SOURCES = ("place", "placeKind", "places")
 FENCE_SOURCES = ("geofences",)
@@ -167,6 +169,9 @@ STANDARD_COLUMNS = (
     ("CREATED_AT", "created"), ("UPDATED_AT", "updated"), ("DELETED_AT", "deleted"),
     # 数量 (2026-11-24): last, so the columns before it stay where they were.
     ("QUANTITY", "quantity"),
+    # The AI result it was made from (2026-11-27), after it.
+    ("SOURCE", "aiSource"), ("AI_LAYER", "aiLayer"), ("AI_RESULT_ID", "aiResultId"), ("AI_SCORE", "aiScore"), ("AI_MODEL", "aiModel"),
+    ("AI_DETECTED_AT", "aiDetectedAt"), ("AI_CONTINUATION", "aiContinuation"),
 )
 PLACE_COLUMNS = (("PLACE", "place"), ("PLACE_KIND", "placeKind"), ("PLACES", "places"))
 FENCE_COLUMNS = (("GEOFENCES", "geofences"),)
@@ -490,6 +495,9 @@ def raw_value(item: Optional[ExportItem], col: ExportColumn, index: int, ctx: Ex
         "unseen": o.unseen,
         "confidence": o.confidence or "", "imageTime": o.image_time, "imageId": o.image_id, "imageName": o.image_name,
         "satellite": o.satellite or "", "quantity": quantity_of(o) or None,
+        "aiSource": o.ai.source if o.ai else "", "aiLayer": o.ai.layer if o.ai else "", "aiResultId": o.ai.result_id if o.ai else "",
+        "aiScore": o.ai.score if o.ai else None, "aiModel": o.ai.model if o.ai else "", "aiDetectedAt": o.ai.detected_at if o.ai else None,
+        "aiContinuation": o.ai.continuation if o.ai else "",
         "lon": o.lon, "lat": o.lat, "length": o.length, "heading": o.heading, "width": o.width, "note": o.note,
         "pixelX": o.pixel_x, "pixelY": o.pixel_y, "imageFile": o.image_file or "",
         "recordedBy": o.recorded_by or "", "updatedBy": o.updated_by or "", "created": o.created_at, "updated": o.updated_at,
@@ -517,6 +525,9 @@ def shaped(value: Any, col: ExportColumn, ctx: ExportContext, as_text: bool) -> 
             value = None
         elif col.format:
             value = printf(col.format, value)
+        elif s == "aiScore" and col.digits is None:
+            # The AI's score as it said it (to 4 places, no zeros added: 0.87), not to 1 place as a length.
+            value = round(value, 4)
         else:
             digits = col.digits if col.digits is not None else (ctx.format.digits if s in ("lon", "lat") else 1)
             value = round(value, digits) if not as_text else to_fixed(value, digits)

@@ -310,6 +310,9 @@ OBSERVATION_FIELDS = {
     "OBJECT_NAME": S, "KIND": S, "ACTIVITY": S, "PRESENT": F, "NOTE": {"type": S, "length": 4000}, "LENGTH_M": D, "HEADING": D,
     "WIDTH_M": D, "PIXEL_X": D, "PIXEL_Y": D, "IMAGE_FILE": S, "SATELLITE": S, "QUANTITY": I, "CONFIDENCE": S, "OBSERVER": S, "UPDATED_BY": S, "CREATED_AT": T, "UPDATED_AT": T, "DELETED_AT": T, "PROJECT": S,
     "NAMED_AREA_OBJECTID": I, "UNSEEN_REASON": {"type": S, "length": 40},
+    # The AI result a record was made from (core/obs/ai_origin.py, 2026-11-27).
+    "SOURCE": {"type": S, "length": 20}, "AI_LAYER": S, "AI_RESULT_ID": {"type": S, "length": 64}, "AI_SCORE": D, "AI_MODEL": S,
+    "AI_DETECTED_AT": T, "AI_CONTINUATION": S,
 }
 #: As the enterprise geodatabase's attribute rule does (docs/arcgis-setup.md): the OBJECTID of the smallest named area holding the record.
 OBSERVATION_RULES = [{"field": "NAMED_AREA_OBJECTID", "smallestContaining": "Alerts/3"}]
@@ -325,7 +328,10 @@ AREA_CATEGORY_FIELDS = {"CATEGORY_ID": {"type": S, "length": 64}, "CATEGORY_NAME
                         "NOTE": {"type": S, "length": 1000}}
 AREA_FIELDS = {"AREA_ID": {"type": S, "length": 64}, "IMAGE_ID": S, "IMAGE_NAME": S, "IMAGE_TIME": T, "KIND": S,
                "NOTE": {"type": S, "length": 4000}, "OBSERVER": S, "CREATED_AT": T, "UPDATED_AT": T, "DELETED_AT": T,
-               "UNSEEN_REASON": {"type": S, "length": 40}, "SATELLITE": S}
+               "UNSEEN_REASON": {"type": S, "length": 40}, "SATELLITE": S,
+               # A result judged wrong (誤検出, 2026-11-27).
+               "SOURCE": {"type": S, "length": 20}, "AI_LAYER": S, "AI_RESULT_ID": {"type": S, "length": 64}, "AI_SCORE": D, "AI_MODEL": S,
+               "AI_DETECTED_AT": T}
 TAXONOMY_FIELDS = {"PATH": {"type": S, "length": 1000}, "LEVELS": S, "NAME_LABEL": S, "MEMBERS": {"type": S, "length": 8000},
                    "SPECS": {"type": S, "length": 16000}, "PHOTOS": {"type": S, "length": 8000}, "ACTIVITIES": {"type": S, "length": 2000},
                    "SORT_ORDER": I}

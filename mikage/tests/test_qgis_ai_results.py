@@ -17,6 +17,7 @@ APP = start_app()
 from qgis.core import QgsGeometry, QgsPointXY, QgsProject, QgsRasterLayer, QgsSettings, QgsWkbTypes  # noqa: E402
 
 from mikage.core.esri import EsriClient  # noqa: E402
+from mikage.core.obs.ai_origin import AiOrigin  # noqa: E402
 from mikage.core.obs.flows import living  # noqa: E402
 from mikage.qgis_io import settings  # noqa: E402
 from mikage.qgis_io.ai_results_io import RESULTS_OF  # noqa: E402
@@ -131,7 +132,20 @@ def test_results_of_the_image_are_shown_and_recorded_once(plugin):
     assert len(saved) == 1
     o = saved[0]
     assert (o.image_id, o.kind, o.activity, o.confidence, o.object_name) == ("IMG1", "船舶", "停泊", "推定", "船舶")
-    assert o.note == "外部AI 船舶検出: ship 0.90 [AI:船舶検出#d-1]"
+    # Where it came from in its own columns, the note left empty for the person (2026-11-27).
+    assert o.note == "" and o.ai == AiOrigin("外部AI", "船舶検出", "d-1", 0.9)
+    # The observations' list says so in 出どころ (all of it when pointed at), the form in a line of its own.
+    obs = p.api.observation_dock
+    obs.render()
+    [row] = [r for r in range(obs.table.rowCount()) if obs.table.item(r, 5) and obs.table.item(r, 5).text()]
+    assert obs.table.horizontalHeaderItem(5).text() == "出どころ" and obs.table.item(row, 5).text() == "外部AI 0.90"
+    assert obs.table.item(row, 5).toolTip() == "外部AI（確信度 0.90・船舶検出 #d-1）"
+    obs.open_form(o.lon, o.lat, editing=o)
+    assert obs.origin_text.isVisibleTo(obs.form) and obs.origin_text.text() == "外部AI（確信度 0.90・船舶検出 #d-1）"
+    obs.close_form()
+    obs.open_form(139.75, 35.65)
+    assert not obs.origin_text.isVisibleTo(obs.form)
+    obs.close_form()
     # The point inside the polygon, its long side (about 100 m) as the length.
     assert QgsGeometry.fromPolygonXY([[QgsPointXY(*xy) for xy in box(139.70, 35.60, 0.0011, 0.00018)["rings"][0]]]).contains(
         QgsGeometry.fromPointXY(QgsPointXY(o.lon, o.lat)))
@@ -305,7 +319,7 @@ def test_a_result_near_a_thing_of_the_image_before_is_recorded_as_it(plugin):
     assert "継続 1 件" in dock.status.text()
     saved = dock.import_rows([0, 1])
     assert [(o.object_id == ship.object_id, o.object_name) for o in saved] == [(False, "船舶"), (True, "船舶")]
-    assert saved[1].note.endswith("[AI:船舶検出#d-4] [自動継続]")
+    assert (saved[1].ai.result_id, saved[1].ai.continuation, saved[1].note) == ("d-4", "自動継続", "")
     assert dock.list.topLevelItem(1).text(6) == "継続: 船舶" and dock.status.text() == "2 件を観測記録に取り込み（継続 1 件）"
     assert [o.image_id for o in living(book.records) if o.object_id == ship.object_id] == ["IMG1", "IMG2"]
 
@@ -323,7 +337,7 @@ def test_the_thing_to_continue_can_be_chosen_or_left_new(plugin):
     # Left new: chosen in the 継続 column.
     dock.list.itemWidget(dock.list.topLevelItem(1), 6).setCurrentIndex(0)
     [o] = dock.import_rows([1])
-    assert o.object_name == "船舶" and o.object_id != ship.object_id and "継続" not in o.note
+    assert o.object_name == "船舶" and o.object_id != ship.object_id and o.ai.continuation == ""
 
 
 INSIDE_AI = {"rules": [{"label": "AIの範囲の中", "recordInAi": True, "kind": "related"}], "candidateRadius": 0}
@@ -347,7 +361,7 @@ def test_a_rule_of_the_settings_file_decides_what_continues(plugin):
     assert widget.currentText().startswith("継続: 船舶（AIの範囲の中・")
     assert widget.toolTip() == "自動で継続（ルール「AIの範囲の中」に当てはまる）"
     saved = dock.import_rows([1])
-    assert saved[0].object_id == ship.object_id and saved[0].note.endswith("[AI:船舶検出#d-4] [自動継続:AIの範囲の中]")
+    assert saved[0].object_id == ship.object_id and saved[0].ai.continuation == "自動継続:AIの範囲の中"
 
 
 @pytest.mark.parametrize("plugin", [{"top": {"aiContinuation": False}}], indirect=True)

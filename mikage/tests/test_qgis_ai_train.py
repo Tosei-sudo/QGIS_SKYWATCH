@@ -23,6 +23,7 @@ from qgis.core import (  # noqa: E402
 )
 
 from mikage.core.ai.train.trainer import load_model  # noqa: E402
+from mikage.core.obs.ai_origin import AiOrigin  # noqa: E402
 from mikage.core.obs.areas import CheckedArea  # noqa: E402
 from mikage.core.obs.model import Observation, default_taxonomy  # noqa: E402
 from mikage.core.obs.taxonomy import Taxon  # noqa: E402
@@ -321,7 +322,7 @@ def test_a_wrong_result_of_the_review_is_trained_as_background(provider, tmp_pat
     QgsProject.instance().addMapLayer(layer)
     records = [record(i, "train.tif", x, y) for i, (x, y) in enumerate(centres)]
     ring = [list(lonlat(x, y)) for x, y in ((290, 290), (330, 290), (330, 330), (290, 330), (290, 290))]
-    provider.set_book(lambda: Book(records, [CheckedArea("a1", "train.tif", "train.tif", None, ring, "", "AI誤検出: 船舶 0.40 [AI:検出@1#7]", 0, 0)]))
+    provider.set_book(lambda: Book(records, [CheckedArea("a1", "train.tif", "train.tif", None, ring, "", "", 0, 0, ai=AiOrigin("AI誤検出", "検出", "7", 0.4))]))
 
     class Feedback(QgsProcessingFeedback):
         said: list = []

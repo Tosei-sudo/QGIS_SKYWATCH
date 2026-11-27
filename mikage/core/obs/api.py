@@ -35,6 +35,7 @@ from ..door import lazy
 # What the rest of the plugin imports of 観測記録 (its door, docs/architecture.md R2).
 if TYPE_CHECKING:  # the door (core/door.py): each name is imported from its module when first taken
     from . import place_cache, record_import, taxonomy_import
+    from .ai_origin import AI_DETECTED, AI_EXTERNAL, AI_REJECTED, AiOrigin, of_layer_run, origin_label, origin_text, score_text
     from .alert_mail import build_mail
     from .alerts import (
         AlertSettings, AREA_USES, area_use_of, DEFAULT_COUNTRY_FIELDS, DEFAULT_PLACE_FIELDS, load_geofences, load_named_areas, LogRow,
@@ -156,6 +157,10 @@ def record_out(o: Observation) -> dict[str, Any]:
         "pixelX": o.pixel_x, "pixelY": o.pixel_y, "imageFile": o.image_file or "", "satellite": o.satellite or "",
         "quantity": quantity_of(o) or None,
         "updatedBy": o.updated_by or "", "createdAt": _iso(o.created_at), "updatedAt": _iso(o.updated_at), "deletedAt": _iso(o.deleted_at),
+        # The AI result it was made from (2026-11-27); all empty for a record a person made.
+        "aiSource": o.ai.source if o.ai else "", "aiLayer": o.ai.layer if o.ai else "", "aiResultId": o.ai.result_id if o.ai else "",
+        "aiScore": o.ai.score if o.ai else None, "aiModel": o.ai.model if o.ai else "",
+        "aiDetectedAt": _iso(o.ai.detected_at) if o.ai else None, "aiContinuation": o.ai.continuation if o.ai else "",
     }
 
 
@@ -559,6 +564,7 @@ class ObservationApi:
 
 
 __all__ = [
+    "AI_DETECTED", "AI_EXTERNAL", "AI_REJECTED", "AiOrigin", "of_layer_run", "origin_label", "origin_text", "score_text",
     "AlertLogRepository", "AssignmentRepository", "AREA_USES", "area_use_of", "DEFAULT_COUNTRY_FIELDS", "DEFAULT_PLACE_FIELDS",
     "USE_BOTH", "USE_INTEREST", "USE_PLACE",
     "activities_at", "ALIAS_FIELD", "AlertSettings", "ANGLES_ALL", "ANGLES_NEAR", "area_label", "area_out", "areas_at", "Assignment", "BASES",

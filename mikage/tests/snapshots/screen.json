@@ -2041,6 +2041,8 @@
     "            QPushButton 「末尾に追加」",
     "            QPushButton 「取消」",
     "            QPushButton 「閉じる」",
+    "          QLabel 「出どころ」",
+    "          QLabel",
     "          QPushButton 「記録（Enter）」",
     "          QPushButton 「消失」",
     "          QToolButton 「不可」",

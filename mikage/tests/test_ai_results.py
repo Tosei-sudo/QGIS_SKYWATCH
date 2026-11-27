@@ -3,10 +3,14 @@ External AI results without QGIS (core/ai_results.py): the settings, the
 query of one image, a feature read as a result, what it is recorded as, and
 several recorded at once (ObservationBook.add_many).
 """
+from dataclasses import replace
+from types import SimpleNamespace
+
 from mikage.core.ai_results import (
-    ai_result_source_of, image_where, import_entry, kind_for, recorded_tags, result_of, result_tag,
+    AiResult, AiResultSource, ai_result_source_of, image_where, import_entry, kind_for, recorded_tags, result_of, result_tag,
 )
 from mikage.core.config import parse_config
+from mikage.core.obs.ai_origin import AI_DETECTED, AI_EXTERNAL, AiOrigin
 from mikage.core.obs.book import FormValues
 from mikage.tests.test_obs_book import book  # noqa: F401 (the fixture)
 
@@ -60,9 +64,16 @@ def test_a_feature_as_a_result_and_what_it_is_recorded_as():
     assert kind_for(r, s) == "船舶 > 支援船"
     e = import_entry(r, s, 139.7, 35.6, 120.5)
     assert (e.kind, e.length, e.object) == ("船舶 > 支援船", 120.5, "")
-    assert e.note == "外部AI 外部AI: Ship 0.87 [AI:外部AI#7]"
-    assert recorded_tags(["前の記録", e.note, "x [AI:別#1] y"]) == {"[AI:外部AI#7]", "[AI:別#1]"}
+    # Where it came from in its AI columns; the note is the person's (only the result's own note, none here: 2026-11-27).
+    assert e.note == ""
+    assert e.ai == AiOrigin(source=AI_EXTERNAL, layer="外部AI", result_id="7", score=0.87, model="", detected_at=None)
+    records = [SimpleNamespace(ai=None, note="前の記録 [AI:古い#1]"), SimpleNamespace(ai=e.ai), SimpleNamespace(ai=AiOrigin(AI_DETECTED, "別", "1"))]
+    assert recorded_tags(records) == {"[AI:外部AI#7]", "[AI:別#1]"}
     assert result_tag("a]#b", "1") == "[AI:ab#1]"
+    # The result's own note is the record's.
+    with_note = ai_result_source_of({"label": "外部AI", "url": URL, "fields": {"imageId": "IMAGE_ID", "note": "NOTE"}}, [], 0)
+    noted = result_of(with_note, {"attributes": {"OBJECTID": 8, "IMAGE_ID": "A", "NOTE": "船首に損傷"}}, "OBJECTID")
+    assert import_entry(noted, with_note, 139.7, 35.6).note == "船首に損傷"
 
 
 def test_several_results_recorded_at_once_are_things_of_their_class(book):  # noqa: F811
@@ -140,16 +151,30 @@ def test_the_detection_tables_are_read_back_unless_left_out():
     r = result_of(db, {"attributes": {"OBJECTID": 7, "IMAGE_ID": "IMG1", "CLASS": "boat", "CONFIDENCE": 0.8, "MODEL": "港湾モデル",
                                       "DETECTED_AT": 1794013200000}, "geometry": {"x": 139.7, "y": 35.6}}, "OBJECTID")
     assert (r.key, r.tag, r.detected_at) == ("7", "[AI:検出DB#7]", 1794013200000)
-    note = import_entry(r, db, 139.7, 35.6, also=["[AI:検出@1#2]"]).note
-    assert note == "AI検出（検出DB）: boat 0.80 港湾モデル [AI:検出DB#7] [AI:検出@1#2]"
-    assert recorded_tags([note]) == {"[AI:検出DB#7]", "[AI:検出@1#2]"}
+    e = import_entry(r, db, 139.7, 35.6)
+    assert e.note == "" and e.ai == AiOrigin(source=AI_DETECTED, layer="検出DB", result_id="7", score=0.8, model="港湾モデル",
+                                              detected_at=1794013200000)
 
 
-def test_a_detection_layers_tags_name_its_run():
-    from mikage.core.ai_results import detection_runs, same_run
+def test_a_detection_layers_feature_is_named_by_its_layer_and_run_until_it_is_sent():
+    from mikage.core.ai_results import same_run
+    from mikage.core.obs.ai_origin import of_layer_run
 
-    assert detection_runs("AI検出: boat [AI:検出@1794013200000#3] [AI:検出DB#7] [AI:検出@layer_1#2]") == [
-        ("[AI:検出@1794013200000#3]", 1794013200000), ("[AI:検出@layer_1#2]", None)]
+    layer = AiResultSource(label="検出結果 yolo", url="", fields={"imageId": "image_id"}, local=True)
+    r = AiResult(source="検出@1794013200000", oid=3, key="3", image_id="A", cls="boat", score=0.5, model="yolo", detected_at=1794013200000,
+                 name="", kind="", activity="", length=None, heading=None, note="", geometry=None, attributes={})
+    ai = import_entry(r, layer, 139.7, 35.6).ai
+    assert (ai.source, ai.layer, ai.result_id, ai.detected_at) == (AI_DETECTED, "検出結果 yolo", "3", 1794013200000)
+    # The same feature of the same run (to the second), whatever the layer is called now; not a table's row.
+    assert of_layer_run(ai, "3", 1794013200400) and of_layer_run(ai, 3, 1794013200000, layer="改名")
+    assert not of_layer_run(ai, "3", 1794013202000) and not of_layer_run(ai, "4", 1794013200000)
+    assert not of_layer_run(ai, "3", 1794013200000, tables={"検出結果 yolo"})
+    # A run without a time: the layer's name.
+    timeless = replace(ai, detected_at=None)
+    assert of_layer_run(timeless, "3", None, layer="検出結果 yolo") and not of_layer_run(timeless, "3", None, layer="別")
+    # Sent to a table before it was recorded: the table's row.
+    sent = import_entry(r, layer, 139.7, 35.6, sent=("検出DB", "120")).ai
+    assert (sent.layer, sent.result_id) == ("検出DB", "120")
     # To the second (a database may keep no less), and either unknown.
     assert same_run(1794013200000, 1794013200999) and not same_run(1794013202000, 1794013200000)
     assert same_run(None, 5) and same_run(5, None)

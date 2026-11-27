@@ -20,6 +20,7 @@ from ..esri import DELETE_BATCH, ConflictError, EsriClient, EsriError, TooManyEr
 from ..gpkg import AREAS, OBSERVATIONS, PHOTOS, TAXONOMY, GeoPackage, datetime_ms, datetime_text, encode_point, encode_polygon
 from ..together import read_together
 from ..util import is_number, js_string, ms_of
+from .ai_origin import AREA_ROLES, RECORD_ROLES, origin_values, read_origin
 from .areas import AreaStoreConfig, CheckedArea
 from .flows import now_ms, time_key
 from .model import Observation, ObservationStoreConfig, kept_quantity
@@ -117,6 +118,38 @@ def _quantity_of(v: Any) -> Optional[int]:
     return kept_quantity(_number_of(v))
 
 
+def ai_missing(store: Any, ask: bool = False) -> list[str]:
+    """
+    The AI columns (SOURCE, AI_LAYER…, 2026-11-27) a store's layer lacks: an
+    AI result is not recorded there (the import says which to add). [] for
+    the local ones; an Esri layer as read, else [] (`ask`: its fields are
+    asked first, as a save would; [] when they cannot be, the save says why).
+    """
+    can = getattr(store, "missing_ai", None)
+    return list(can(ask)) if callable(can) else []
+
+
+def _missing_of(layer: "_EsriLayer", fields: dict[str, str], roles: dict, ask: bool) -> list[str]:
+    types = layer.known_types()
+    if types is None and ask:
+        try:
+            types, _oid = layer.ready()
+        except Exception:  # noqa: BLE001 (the save that follows says why)
+            types = None
+    return [] if types is None else [fields[r] for r in roles if fields[r] not in types]
+
+
+def _local_origin(row: dict[str, Any], roles: dict) -> Any:
+    return read_origin(row.get, {}, roles, lambda v: "" if v is None else str(v), _number_of, datetime_ms)
+
+
+def _local_origin_values(ai: Any, roles: dict) -> dict[str, Any]:
+    values = origin_values(ai, {}, roles)
+    if values.get("AI_DETECTED_AT") is not None:
+        values["AI_DETECTED_AT"] = datetime_text(values["AI_DETECTED_AT"])
+    return values
+
+
 def _marked(items: list, now: Optional[int]) -> list:
     now = now_ms() if now is None else now
     return [replace(x, deleted_at=now, updated_at=now) for x in items]
@@ -152,6 +185,7 @@ class LocalObservationStore:
                 confidence=r.get("CONFIDENCE") or "", recorded_by=r.get("OBSERVER") or "", updated_by=r.get("UPDATED_BY") or "",
                 pixel_x=r.get("PIXEL_X"), pixel_y=r.get("PIXEL_Y"), image_file=r.get("IMAGE_FILE") or "",
                 satellite=r.get("SATELLITE") or "", quantity=_quantity_of(r.get("QUANTITY")) if not unseen and r.get("PRESENT") != 0 else None,
+                ai=_local_origin(r, RECORD_ROLES),
             ))
         return out
 
@@ -163,6 +197,7 @@ class LocalObservationStore:
             "PIXEL_X": o.pixel_x, "PIXEL_Y": o.pixel_y, "IMAGE_FILE": o.image_file or None, "SATELLITE": o.satellite or None,
             "QUANTITY": o.quantity, "NOTE": o.note, "OBSERVER": o.recorded_by, "UPDATED_BY": o.updated_by, "CREATED_AT": datetime_text(o.created_at),
             "UPDATED_AT": datetime_text(o.updated_at), "DELETED_AT": datetime_text(o.deleted_at), "geom": encode_point(o.lon, o.lat),
+            **_local_origin_values(o.ai, RECORD_ROLES),
         } for o in records])
 
     def remove(self, records: list[Observation], now: Optional[int] = None) -> list[Observation]:
@@ -178,6 +213,9 @@ class LocalObservationStore:
 
     def keeps_quantity(self) -> bool:
         return True
+
+    def missing_ai(self, ask: bool = False) -> list[str]:
+        return []
 
     def clear(self, deleted_only: bool = False) -> int:
         """Removes the records for good (only the deleted ones when asked); how many."""
@@ -209,7 +247,7 @@ class LocalAreaStore:
                 image_time=datetime_ms(r.get("IMAGE_TIME")), ring=g[0], kind=r.get("KIND") or "", note=r.get("NOTE") or "",
                 created_at=created, updated_at=datetime_ms(r.get("UPDATED_AT")) or created,
                 deleted_at=datetime_ms(r.get("DELETED_AT")), recorded_by=r.get("OBSERVER") or "",
-                unseen=(r.get("UNSEEN_REASON") or "").strip(), satellite=r.get("SATELLITE") or "",
+                unseen=(r.get("UNSEEN_REASON") or "").strip(), satellite=r.get("SATELLITE") or "", ai=_local_origin(r, AREA_ROLES),
             ))
         return out
 
@@ -219,6 +257,7 @@ class LocalAreaStore:
             "KIND": a.kind, "NOTE": a.note, "OBSERVER": a.recorded_by, "CREATED_AT": datetime_text(a.created_at),
             "UPDATED_AT": datetime_text(a.updated_at), "DELETED_AT": datetime_text(a.deleted_at), "STORE": self.of,
             "UNSEEN_REASON": a.unseen or None, "SATELLITE": a.satellite or None, "geom": encode_polygon([a.ring]),
+            **_local_origin_values(a.ai, AREA_ROLES),
         } for a in areas])
 
     def remove(self, areas: list[CheckedArea], now: Optional[int] = None) -> list[CheckedArea]:
@@ -231,6 +270,9 @@ class LocalAreaStore:
 
     def keeps_satellite(self) -> bool:
         return True
+
+    def missing_ai(self, ask: bool = False) -> list[str]:
+        return []
 
     def clear(self, deleted_only: bool = False) -> int:
         """Removes this store's checked areas for good (only the deleted ones when asked); how many."""
@@ -418,6 +460,7 @@ class EsriObservationStore:
             f["pixelX"]: o.pixel_x, f["pixelY"]: o.pixel_y, f["imageFile"]: o.image_file or None, f["satellite"]: o.satellite or None,
             f["quantity"]: o.quantity, f["confidence"]: o.confidence or "", f["recordedBy"]: o.recorded_by or "", f["updatedBy"]: o.updated_by or "",
             f["created"]: o.created_at, f["updated"]: o.updated_at, f["deleted"]: o.deleted_at, f["unseen"]: o.unseen or None,
+            **origin_values(o.ai, f, RECORD_ROLES),
         }
         if o.unseen and f["unseen"] not in types:
             # Without it the record would read back as 在 (PRESENT empty): not saved.
@@ -438,6 +481,10 @@ class EsriObservationStore:
     def keeps_quantity(self) -> bool:
         """Whether the layer (as read) has the 数量 attribute."""
         return self._layer.has(self.config.fields["quantity"])
+
+    def missing_ai(self, ask: bool = False) -> list[str]:
+        """The AI columns the layer lacks (as read; `ask`: asked first when not read yet)."""
+        return _missing_of(self._layer, self.config.fields, RECORD_ROLES, ask)
 
     def _record_of(self, feature: dict[str, Any], oid: str) -> Optional[Observation]:
         f = self.config.fields
@@ -464,6 +511,7 @@ class EsriObservationStore:
             satellite=_text(a.get(f["satellite"])), quantity=_quantity_of(a.get(f["quantity"])) if not unseen else None,
             recorded_by=_text(a.get(f["recordedBy"])), updated_by=_text(a.get(f["updatedBy"])), lon=float(x), lat=float(y),
             created_at=created, updated_at=ms_of(a.get(f["updated"])) or created, deleted_at=ms_of(a.get(f["deleted"])),
+            ai=read_origin(a.get, f, RECORD_ROLES, _text, _number_of, ms_of),
         )
 
     def as_kept(self, records: list[Observation]) -> list[Observation]:
@@ -480,7 +528,7 @@ class EsriObservationStore:
         blank = {name: value for role, name, value in (
             ("length", "length", None), ("heading", "heading", None), ("width", "width", None), ("pixelX", "pixel_x", None),
             ("pixelY", "pixel_y", None), ("imageFile", "image_file", ""), ("satellite", "satellite", ""), ("quantity", "quantity", None),
-            ("confidence", "confidence", ""),
+            ("confidence", "confidence", ""), ("aiSource", "ai", None),
         ) if f[role] not in types}
         return [replace(o, **blank) for o in records] if blank else records
 
@@ -775,6 +823,7 @@ class EsriAreaStore:
             f["id"]: a.id, f["imageId"]: a.image_id, f["imageName"]: a.image_name, f["imageTime"]: a.image_time,
             f["kind"]: a.kind, f["note"]: a.note, f["recordedBy"]: a.recorded_by or "", f["created"]: a.created_at,
             f["updated"]: a.updated_at, f["deleted"]: a.deleted_at, f["unseen"]: a.unseen or None, f["satellite"]: a.satellite or None,
+            **origin_values(a.ai, f, AREA_ROLES),
         }
         if a.unseen and f["unseen"] not in types:
             # Without it the area would read back as a 確認範囲 (everything there recorded): not saved.
@@ -792,12 +841,21 @@ class EsriAreaStore:
         """Whether the layer (as read) has the 衛星名 attribute."""
         return self._layer.has(self.config.fields["satellite"])
 
+    def missing_ai(self, ask: bool = False) -> list[str]:
+        """The AI columns the layer lacks (as read; `ask`: asked first when not read yet)."""
+        return _missing_of(self._layer, self.config.fields, AREA_ROLES, ask)
+
     def as_kept(self, areas: list[CheckedArea]) -> list[CheckedArea]:
-        """The areas as the layer keeps them: 衛星名 left out when it has no such attribute (a layer made before 2026-11-20)."""
+        """
+        The areas as the layer keeps them: 衛星名 left out when it has no such attribute (a layer made before 2026-11-20),
+        the AI result without SOURCE (before 2026-11-27).
+        """
         types = self._layer.known_types()
-        if types is None or self.config.fields["satellite"] in types:
+        if types is None:
             return areas
-        return [replace(a, satellite="") if a.satellite else a for a in areas]
+        blank = {name: value for role, name, value in (("satellite", "satellite", ""), ("aiSource", "ai", None))
+                 if self.config.fields[role] not in types}
+        return [replace(a, **blank) for a in areas] if blank else areas
 
     scoped = True
 
@@ -842,7 +900,7 @@ class EsriAreaStore:
                 image_time=ms_of(a.get(f["imageTime"])), ring=rings[0], kind=_text(a.get(f["kind"])), note=_text(a.get(f["note"])),
                 recorded_by=_text(a.get(f["recordedBy"])), created_at=created, updated_at=ms_of(a.get(f["updated"])) or created,
                 deleted_at=ms_of(a.get(f["deleted"])), unseen=_text(a.get(f["unseen"])).strip(),
-                satellite=_text(a.get(f["satellite"])),
+                satellite=_text(a.get(f["satellite"])), ai=read_origin(a.get, f, AREA_ROLES, _text, _number_of, ms_of),
             ))
         return out
 

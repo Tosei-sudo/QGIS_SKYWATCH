@@ -244,6 +244,53 @@ COMMIT;
 - ダッシュボードのビュー（`tools/arcgis/dashboard_views_oracle.sql`）は `QUANTITY` を読むので、列を足してからビューを作り直す（[ダッシュボード](arcgis-dashboards.md)）
 - 台数・隻数を ArcGIS 側で数えるときは、件数（`COUNT(*)`）でなく `SUM(NVL(QUANTITY, 1))`（消失・不可の記録は除く）。ビュー `VW_OBS_RECORD.QUANTITY` は消失・不可を 0 にしてあるので、そのまま合計すればよい
 
+## 観測記録に AI の出どころの列を足す
+
+AI の結果から取り込んだ記録の出どころ（2026-11-27 に追加）は、備考でなく列に入る。`TBL_OBSERVATION` に `SOURCE`・`AI_LAYER`・`AI_RESULT_ID`・`AI_SCORE`・`AI_MODEL`・`AI_DETECTED_AT`・`AI_CONTINUATION`、`TBL_OBSERVATION_AREA` に `SOURCE` から `AI_DETECTED_AT` まで（型は[テーブル定義](admin/esri-tables.md#tbl_observation観測記録)）。プラグインを新しくして `create_tables.py` をもう一度実行すると足される（参照で公開しているなら続けて `publish_service.py publish` で上書き公開）。
+
+- 列を足すまで、ドック「AI結果」の取り込みと誤検出は止まる（「列 … を追加」と出る［E704］）。人の記録・確認範囲はそのまま保存できる
+- 備考は人の欄になり、プラグインは AI の印（`[AI:…]`・`[自動継続]` など）を書かず、読まない。**前からある AI の記録**は、印を列へ移さないと「取込済」「誤検出」にならず（同じ結果をもう一度取り込める）、誤検出の範囲も AI 学習で必ず背景にする範囲として扱われない。移すときは下の SQL（Oracle。ほかの DBMS は正規表現の関数を読み替える）を一度流す
+- ダッシュボードのビュー `VW_OBS_RECORD` は `SOURCE` などを読むので、列を足してからビューを作り直す（[ダッシュボード](arcgis-dashboards.md)）
+
+```sql
+-- 観測記録: 印 [AI:〈レイヤー〉#〈ID〉] の 1 つ目を出どころに。継続の判定も
+UPDATE TBL_OBSERVATION SET
+    SOURCE = CASE WHEN NOTE LIKE '外部AI %' THEN '外部AI' ELSE 'AI検出' END,
+    AI_LAYER = REGEXP_SUBSTR(NOTE, '\[AI:([^]#]*)#([^]]*)\]', 1, 1, NULL, 1),
+    AI_RESULT_ID = REGEXP_SUBSTR(NOTE, '\[AI:([^]#]*)#([^]]*)\]', 1, 1, NULL, 2),
+    AI_CONTINUATION = REGEXP_SUBSTR(NOTE, '\[(自動継続[^]]*|選択継続)\]', 1, 1, NULL, 1)
+WHERE SOURCE IS NULL AND REGEXP_LIKE(NOTE, '\[AI:[^]#]*#[^]]*\]');
+
+-- プラグイン内の検出（印が [AI:検出@〈ミリ秒〉#〈地物ID〉]）: 検出日時を入れ、転記先の印もあればそちらを出どころに
+UPDATE TBL_OBSERVATION SET
+    AI_DETECTED_AT = DATE '1970-01-01' + TO_NUMBER(REGEXP_SUBSTR(AI_LAYER, '^検出@(-?[0-9]+)$', 1, 1, NULL, 1)) / 86400000,
+    AI_LAYER = NVL(REGEXP_SUBSTR(NOTE, '\[AI:([^]#]*)#([^]]*)\]', 1, 2, NULL, 1), '（検出レイヤー）'),
+    AI_RESULT_ID = NVL(REGEXP_SUBSTR(NOTE, '\[AI:([^]#]*)#([^]]*)\]', 1, 2, NULL, 2), AI_RESULT_ID)
+WHERE AI_LAYER LIKE '検出@%';
+
+-- 確認範囲: 誤検出（備考が「AI誤検出:」で始まり印があるもの）
+UPDATE TBL_OBSERVATION_AREA SET
+    SOURCE = 'AI誤検出',
+    AI_LAYER = REGEXP_SUBSTR(NOTE, '\[AI:([^]#]*)#([^]]*)\]', 1, 1, NULL, 1),
+    AI_RESULT_ID = REGEXP_SUBSTR(NOTE, '\[AI:([^]#]*)#([^]]*)\]', 1, 1, NULL, 2)
+WHERE SOURCE IS NULL AND NOTE LIKE 'AI誤検出%' AND REGEXP_LIKE(NOTE, '\[AI:[^]#]*#[^]]*\]');
+
+UPDATE TBL_OBSERVATION_AREA SET
+    AI_DETECTED_AT = DATE '1970-01-01' + TO_NUMBER(REGEXP_SUBSTR(AI_LAYER, '^検出@(-?[0-9]+)$', 1, 1, NULL, 1)) / 86400000,
+    AI_LAYER = NVL(REGEXP_SUBSTR(NOTE, '\[AI:([^]#]*)#([^]]*)\]', 1, 2, NULL, 1), '（検出レイヤー）'),
+    AI_RESULT_ID = NVL(REGEXP_SUBSTR(NOTE, '\[AI:([^]#]*)#([^]]*)\]', 1, 2, NULL, 2), AI_RESULT_ID)
+WHERE AI_LAYER LIKE '検出@%';
+
+-- （任意）備考から印を消す。「AI検出: ship 0.87 …」の説明は残る
+UPDATE TBL_OBSERVATION SET NOTE = TRIM(REGEXP_REPLACE(NOTE, '\s*\[(AI:[^]]*|自動継続[^]]*|選択継続)\]', ''))
+WHERE SOURCE IS NOT NULL;
+UPDATE TBL_OBSERVATION_AREA SET NOTE = TRIM(REGEXP_REPLACE(NOTE, '\s*\[AI:[^]]*\]', ''))
+WHERE SOURCE = 'AI誤検出';
+COMMIT;
+```
+
+確信度・モデルは前からある記録では空のまま（備考の説明文から確実には読み取れないため）。編集の記録（エディター トラッキング・監査ログ）を残している層では、この SQL の更新は記録されない。
+
 ## うまくいかないとき
 
 | 出たこと | すること |
