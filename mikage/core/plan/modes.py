@@ -11,11 +11,11 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
 from ..util import is_name, is_record, layer_url, text_of
-from .satellites import compile_pattern, look_side_of
+from .satellites import compile_pattern, look_side_of, sun_of
 
 SENSOR_ROLES = (
     "sensor", "mode", "kind", "maxOffNadir", "minOffNadir", "swath", "length", "lookSide",
-    "scenesPerPass", "minInterval", "maxPerDay", "leadTime", "resolution", "primary", "shotsPerPass",
+    "scenesPerPass", "minInterval", "maxPerDay", "leadTime", "resolution", "primary", "shotsPerPass", "minSunElevation",
 )
 NUMBER_ROLES = ("maxOffNadir", "minOffNadir", "swath", "length", "scenesPerPass", "minInterval", "maxPerDay", "leadTime", "resolution",
                 "shotsPerPass")
@@ -49,6 +49,8 @@ class SensorMode:
     primary: Optional[bool] = None
     #: 1 パスの撮像回数 (satellites.SatelliteSpec.shotsPerPass).
     shotsPerPass: Optional[float] = None
+    #: 太陽高度の下限 (satellites.SatelliteSpec.minSunElevation; may be below 0).
+    minSunElevation: Optional[float] = None
 
     def values(self) -> dict[str, Any]:
         """The values it gives (as the viewer's object, without the absent ones)."""
@@ -118,6 +120,7 @@ def mode_from(get: Callable[[str], Any], scale: float, sar: Optional[re.Pattern]
         v = _number_of(get(key))
         if v is not None:
             setattr(mode, key, v * scale if key in ("swath", "length") else v)
+    mode.minSunElevation = sun_of(get("minSunElevation"))
     side = text_of(get("lookSide"))
     if side:
         mode.lookSide = look_side_of(side)
@@ -238,6 +241,7 @@ def with_modes(sats: list, modes: list[SensorMode]) -> list:
             maxPerDay=math.floor(m.maxPerDay + 0.5) if m.maxPerDay is not None else sat.maxPerDay,
             leadTime=m.leadTime if m.leadTime is not None else sat.leadTime,
             shotsPerPass=max(0, math.floor(m.shotsPerPass + 0.5)) if m.shotsPerPass is not None else sat.shotsPerPass,
+            minSunElevation=m.minSunElevation if m.minSunElevation is not None else sat.minSunElevation,
         )
         if m.mode:
             changes["mode"] = m.mode

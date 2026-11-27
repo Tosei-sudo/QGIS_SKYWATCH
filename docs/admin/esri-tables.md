@@ -208,6 +208,7 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | `SHOTS_PER_PASS` | 1パスの撮像回数 | `Integer` | 1 回のパス（同じ軌道方向の半周）で撮れる回数の上限（空・0 で制限なし。撮像間隔だけで離す） | `shotsPerPass` |
 | `SERIES` | シリーズ | `String(255)` | 衛星シリーズ（空なら名前の末尾の番号を除いたもの） | `series` |
 | `LEAD_TIME_H` | 発注リードタイム | `Double` | 撮像の何時間前までに発注するか（時間、既定 0） | `leadTime` |
+| `MIN_SUN_ELEVATION` | 太陽高度の下限 | `Double` | 日中のみ撮る種別（既定では光学）の衛星が撮れる、対象の場所の太陽高度の下限（度、−18〜90。薄明でも撮れる衛星は負の値）。空なら共通の値（撮像計画ドックの「太陽高度（以上）」、毎日の撮像計画ファイル出力・上限シミュレーションは 10°）。SAR・IR など夜も撮る種別には効かない | `minSunElevation` |
 | `SENSOR` | センサー | `String(255)` | 使うセンサー（`TBL_SENSOR_MODE` の `SENSOR`） | `sensor` |
 | `SENSOR_MODE` | センサーモード | `String(255)` | この行のモード（モードごとに行を分けるとき） | `mode` |
 | `RESOLUTION_M` | 分解能 | `Double` | 分解能（m） | `resolution` |
@@ -232,6 +233,7 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | `MAX_PER_DAY` | 1日の上限 | `Integer` | 1 日の上限 | `maxPerDay` |
 | `SHOTS_PER_PASS` | 1パスの撮像回数 | `Integer` | 1 パスの撮像回数の上限 | `shotsPerPass` |
 | `LEAD_TIME_H` | 発注リードタイム | `Double` | 発注の期限（時間前） | `leadTime` |
+| `MIN_SUN_ELEVATION` | 太陽高度の下限 | `Double` | 太陽高度の下限（度、−18〜90） | `minSunElevation` |
 | `RESOLUTION_M` | 分解能 | `Double` | 分解能（m） | `resolution` |
 | `IS_DEFAULT` | 既定モード | `SmallInteger` | そのセンサーのふだんのモードなら 1（`はい`・`true` などの文字も可） | `primary` |
 
@@ -933,15 +935,15 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
       "fields": { "name": "SAT_NAME", "id": "NORAD_ID", "tle1": "TLE_LINE1", "tle2": "TLE_LINE2", "maxOffNadir": "MAX_OFF_NADIR",
                   "minOffNadir": "MIN_OFF_NADIR", "swath": "SWATH", "length": "SCENE_LENGTH", "lookSide": "LOOK_SIDE", "kind": "SENSOR_TYPE",
                   "scenesPerPass": "SCENES_PER_PASS", "minInterval": "MIN_INTERVAL_MIN", "maxPerDay": "MAX_PER_DAY",
-                  "shotsPerPass": "SHOTS_PER_PASS", "series": "SERIES", "leadTime": "LEAD_TIME_H", "sensor": "SENSOR", "mode": "SENSOR_MODE",
-                  "resolution": "RESOLUTION_M", "system": "SAT_SYSTEM" } }
+                  "shotsPerPass": "SHOTS_PER_PASS", "series": "SERIES", "leadTime": "LEAD_TIME_H", "minSunElevation": "MIN_SUN_ELEVATION",
+                  "sensor": "SENSOR", "mode": "SENSOR_MODE", "resolution": "RESOLUTION_M", "system": "SAT_SYSTEM" } }
   ],
   "sensorCatalogs": [
     { "url": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/2",                         // TBL_SENSOR_MODE
       "fields": { "sensor": "SENSOR", "mode": "SENSOR_MODE", "kind": "SENSOR_TYPE", "maxOffNadir": "MAX_OFF_NADIR", "minOffNadir": "MIN_OFF_NADIR",
                   "swath": "SWATH", "length": "SCENE_LENGTH", "lookSide": "LOOK_SIDE", "scenesPerPass": "SCENES_PER_PASS",
                   "minInterval": "MIN_INTERVAL_MIN", "maxPerDay": "MAX_PER_DAY", "shotsPerPass": "SHOTS_PER_PASS", "leadTime": "LEAD_TIME_H",
-                  "resolution": "RESOLUTION_M", "primary": "IS_DEFAULT" } }
+                  "minSunElevation": "MIN_SUN_ELEVATION", "resolution": "RESOLUTION_M", "primary": "IS_DEFAULT" } }
   ],
   "satelliteAliases": { "url": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/3",       // TBL_SATELLITE_ALIAS
                         "fields": { "satellite": "SAT_NAME", "alias": "ALIAS" } },

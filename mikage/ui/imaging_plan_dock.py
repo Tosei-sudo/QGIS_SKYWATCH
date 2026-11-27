@@ -192,6 +192,8 @@ class ImagingPlanDock(
         self.min_sun.setDecimals(1)
         self.min_sun.setValue(10)
         self.min_sun.setSuffix("°")
+        self.min_sun.setToolTip(self.tr("日中のみ撮る衛星が撮れる、対象の場所の太陽高度の下限。"
+                                        "衛星カタログ・センサーモードに太陽高度の下限がある衛星はその値を使う"))
         options.addRow(self.tr("太陽高度（以上）"), self.min_sun)
         self.min_incidence = self._angle(self.tr("下限"))
         self.max_incidence = self._angle(self.tr("上限"))

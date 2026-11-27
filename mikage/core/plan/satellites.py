@@ -16,6 +16,7 @@ from ..util import is_name, is_number, is_record, is_url, layer_url
 SATELLITE_ROLES = (
     "name", "id", "tle", "tle1", "tle2", "maxOffNadir", "minOffNadir", "swath", "length", "lookSide", "kind",
     "scenesPerPass", "minInterval", "maxPerDay", "series", "leadTime", "sensor", "mode", "resolution", "system", "shotsPerPass",
+    "minSunElevation",
 )
 DEFAULT_KEYS = ("maxOffNadir", "minOffNadir", "swath", "scenesPerPass", "minInterval", "maxPerDay", "leadTime", "shotsPerPass")
 
@@ -25,6 +26,9 @@ BUILT_IN_DEFAULTS: dict[str, float] = {
     "shotsPerPass": 0,
 }
 _LAYER = re.compile(r"/(FeatureServer|MapServer)/\d+/?$", re.IGNORECASE)
+#: The range of a satellite's own lowest sun (`minSunElevation`, degrees; as the imaging plan's input): below −18°
+#: the sky is dark anyway.
+SUN_RANGE = (-18.0, 90.0)
 
 
 @dataclass
@@ -190,6 +194,9 @@ class SatelliteSpec:
     kind_given: str = ""
     #: Whether it images only in daylight when known (daylight); None: as its kind does.
     daylight_given: Optional[bool] = None
+    #: 太陽高度の下限 (degrees; tsudo 2026-11-27 「太陽高度の限界値を、衛星ごとに持たせたい」): the lowest sun at the
+    #: target it images in, when it images only in daylight (`daylight`); None: the plan's (sun_limit).
+    minSunElevation: Optional[float] = None
 
     @property
     def kind_name(self) -> str:
@@ -209,6 +216,18 @@ class SatelliteSpec:
 
         own = kinds().named(self.kind_name)
         return own.daylight if own is not None else not self.sar
+
+
+def sun_of(value: Any) -> Optional[float]:
+    """A satellite's or a mode's `minSunElevation` (degrees, kept within SUN_RANGE); None when it gives none."""
+    blank = isinstance(value, bool) or (isinstance(value, str) and not value.strip())
+    n = None if blank else _number(value)
+    return None if n is None else min(SUN_RANGE[1], max(SUN_RANGE[0], n))
+
+
+def sun_limit(sat: SatelliteSpec, common: float) -> float:
+    """The lowest sun (degrees) a satellite imaging only in daylight takes a picture in: its own, else `common`."""
+    return sat.minSunElevation if sat.minSunElevation is not None else common
 
 
 def platform_key(sat: SatelliteSpec) -> str:
@@ -323,6 +342,7 @@ def satellite_of(attributes: dict, catalog: SatelliteCatalogConfig):
         kind_given=own.name,
         daylight_given=own.daylight,
         shotsPerPass=max(0, _js_round(num("shotsPerPass", defaults.get("shotsPerPass", 0)))),
+        minSunElevation=sun_of(get("minSunElevation")),
     )
 
 

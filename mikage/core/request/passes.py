@@ -13,7 +13,8 @@ fitting counts requests for it as before.
 A request's own conditions narrow its passes: the off-nadir range, the
 incidence, the look side, the orbit direction (昇交 / 降交), the time of
 day (昼: the sun at least 10° up; 夜: below the horizon; 時刻: the pass
-inside its from … to, JST; optical satellites only in daylight in any case)
+inside its from … to, JST; optical satellites only in daylight in any case:
+the sun at least their own `minSunElevation` up, else 10°)
 and the window of the day it is asked for. Passes left out only for its
 時刻 are kept (`Passes.off_clock`) so that the request is told so. A satellite's `leadTime` (hours before a shot that it has to be
 ordered) leaves out the passes too soon to order, as in the imaging plan.
@@ -43,7 +44,8 @@ from .route import why_not
 #: every satellite of the day). An area that fits in one shot of every satellite that can take it is planned
 #: as its middle (with its outline for its reach), which is much quicker.
 AREA_CELLS = 60
-#: The sun's height (degrees) a pass needs in daylight (as the imaging plan's default).
+#: The sun's height (degrees) a pass needs in daylight (as the imaging plan's default): a 「昼」 request's, and that
+#: of a satellite imaging only in daylight without its own (`minSunElevation`).
 DAYLIGHT_SUN = 10
 ORBIT_DIRS = {"昇交": "ascending", "降交": "descending"}
 LOOK_SIDES = {"右": "right", "左": "left"}
