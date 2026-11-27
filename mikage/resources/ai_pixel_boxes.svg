@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- 観測記録をピクセル座標で書き出す: a turned box on the image's pixel grid, from its top-left corner -->
+  <rect x="3" y="3" width="26" height="26" rx="2" fill="#334155" stroke="#0f172a" stroke-width="1"/>
+  <path d="M3 10.5h26M3 18h26M3 25.5h26M10.5 3v26M18 3v26M25.5 3v26" stroke="#475569" stroke-width="0.6"/>
+  <path d="M9.5 21l9-11 5 4-9 11z" fill="none" stroke="#facc15" stroke-width="1.6" stroke-linejoin="round"/>
+  <circle cx="21" cy="12" r="1.6" fill="#facc15"/>
+  <circle cx="4.5" cy="4.5" r="2.2" fill="#38bdf8" stroke="#ffffff" stroke-width="0.9"/>
+</svg>

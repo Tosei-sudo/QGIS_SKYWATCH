@@ -19,6 +19,7 @@ if TYPE_CHECKING:  # the door (core/door.py): each name is imported from its mod
         tiles_of, wanted,
     )
     from .mask_outline import mask_outline, ring_area
+    from .pixel_boxes import box_properties, collection, feature, METRE_DIGITS, PixelBox as PixelRect, turned_box, upright_box
     from .model_config import DetectModelConfig, detector_spec, DetectorSpec, OnnxSignature, OnnxValue, SamModelConfig
     from .review import (
         ACCEPTED, is_rejection, queue, reject_margin, REJECT_POINT_M, REJECTED_STATE, rejected_tags, rejection_note, review_order,
@@ -56,4 +57,5 @@ __all__ = [
     "Target", "target_of", "threshold_mask", "TILE_SIZES", "tiles_of", "TO_REVIEW", "train", "TrainError", "TrainOptions",
     "transfer_attributes", "TRANSFER_ROLES", "UNKNOWN_MODES", "wanted", "WIDTH_MODES", "Window", "window_at", "window_side",
     "length_for", "positive_or_none",
+    "box_properties", "collection", "feature", "METRE_DIGITS", "PixelRect", "turned_box", "upright_box",
 ]

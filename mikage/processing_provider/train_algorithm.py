@@ -75,6 +75,11 @@ def set_book(book: Callable[[], object]) -> None:
     _book = book
 
 
+def current_book():
+    """The observation book the plugin gave (None when there is none): 「観測記録をピクセル座標で書き出す」 reads it too."""
+    return _book()
+
+
 def parse_bands(text: str) -> list[int]:
     """Band numbers from `1,2,3` / `1-4` / `4 3 2`; empty for the image as shown."""
     out: list[int] = []

@@ -100,6 +100,7 @@ FEATURES: dict[str, frozenset] = {
     "教師データセットの作成…": frozenset({TRAIN}),
     "アノテーション変換（点→矩形）…": frozenset({TRAIN}),
     "アノテーション変換（教師データセット）…": frozenset({TRAIN}),
+    "観測記録をピクセル座標で書き出す…": frozenset({TRAIN}),
     "AI 学習（物体検出）…": frozenset({TRAIN}),
     #: AI結果: 「確認結果で追加学習…」.
     "ai_results.train": frozenset({TRAIN}),
@@ -135,6 +136,7 @@ ALGORITHM_FEATURES = {
     "make_dataset": "教師データセットの作成…",
     "points_to_boxes": "アノテーション変換（点→矩形）…",
     "dataset_points_to_boxes": "アノテーション変換（教師データセット）…",
+    "records_to_pixel_boxes": "観測記録をピクセル座標で書き出す…",
 }
 
 #: The attributes of TBL_USER_ROLE by role (one row per role of a person).

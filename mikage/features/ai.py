@@ -1,6 +1,6 @@
 """
-AI: AI結果, 「物体検出（AI）…」「AI 学習（物体検出）…」「教師データセットの作成…」, the annotations'
-conversions, 「クリック抽出（AI）」 and 「検出結果を DB へ転記…」.
+AI: AI結果, 「物体検出（AI）…」「AI 学習（物体検出）…」「教師データセットの作成…」, 「観測記録をピクセル座標で
+書き出す…」, the annotations' conversions, 「クリック抽出（AI）」 and 「検出結果を DB へ転記…」.
 """
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ def _layers() -> list:
 
 
 class Ai(Feature):
-    COMMANDS = ("open_detect", "open_train", "open_dataset", "open_points_to_boxes", "open_dataset_points_to_boxes", "open_transfer")
+    COMMANDS = ("open_detect", "open_train", "open_dataset", "open_points_to_boxes", "open_dataset_points_to_boxes", "open_pixel_boxes", "open_transfer")
 
     def __init__(self, host):
         super().__init__(host)
@@ -40,6 +40,8 @@ class Ai(Feature):
         self.entry("ai_detect", "物体検出（AI）…", "open_detect")
         self.entry("ai_train", "AI 学習（物体検出）…", "open_train")
         self.entry("ai_dataset", "教師データセットの作成…", "open_dataset")
+        # The records as boxes in their image files' pixels (GeoJSON), for training elsewhere.
+        self.entry("ai_pixel_boxes", "観測記録をピクセル座標で書き出す…", "open_pixel_boxes")
         # 「アノテーション変換」: point annotations as boxes turned to the object (a layer, or a training dataset).
         self.entry("ai_boxes", "アノテーション変換（点→矩形）…", "open_points_to_boxes")
         self.entry("ai_dataset_boxes", "アノテーション変換（教師データセット）…", "open_dataset_points_to_boxes")
@@ -68,6 +70,14 @@ class Ai(Feature):
         import processing  # QGIS's Processing plugin (loaded with QGIS)
 
         processing.execAlgorithmDialog("mikage:make_dataset", {})
+
+    def open_pixel_boxes(self) -> None:
+        """「観測記録をピクセル座標で書き出す」 with the active image (else the first)."""
+        import processing  # QGIS's Processing plugin (loaded with QGIS)
+
+        from ..processing_provider.pixel_box_algorithm import default_inputs as pixel_inputs
+
+        processing.execAlgorithmDialog("mikage:records_to_pixel_boxes", pixel_inputs(_layers(), self.iface.activeLayer()))
 
     def open_points_to_boxes(self) -> None:
         """「アノテーション変換（点→矩形）」 with the active point layer and image."""
