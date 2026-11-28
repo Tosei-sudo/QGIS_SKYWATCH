@@ -24,7 +24,7 @@ except ImportError:  # Qt5
 from .core import edition, win64
 from .core.preload import StartupClock
 from .core.roles import ALGORITHM_FEATURES, refusal as role_refusal
-from .features import ai, analysis, command, enhance, events, images, layers, maps, observations, plan, platform, rendering, requests, training
+from .features import ai, analysis, chat, enhance, events, images, layers, maps, observations, plan, platform, rendering, requests, training
 from .features.base import Feature, disconnect, icon
 from .plugin_api import OBSERVATION_FUNCTIONS, PluginApi  # noqa: F401 (scripts and tests import them from here)
 from .processing_provider import analysis_algorithm, append_algorithm, cloud_algorithm, detect_algorithm
@@ -56,7 +56,7 @@ MENU_GROUPS = [
     ("撮像依頼", ["撮像依頼", "撮像計画ファイル出力", "撮像予定", "地点ごとの撮像予定", "依頼グループ…", "年間撮像上限…", "衛星・システムの障害情報…"]),
     ("観測記録", ["観測記録", "自分の記録…", "分類体系の編集", "分類体系の取り込み…", "通報文の作成…", "通報記録の確認…", "観測記録の書き出し…", "観測記録の一括取り込み…", "分担…", "引き継ぎメモ…"]),
     ("画像", ["画像カタログ", "通知", "新着画像（大きな画面）", "関心地域・地点", None, "画像補正", "影から高さ", "スペクトル", "移動体（AIS・ADS-B）", None, "スワイプ比較", "位置ずらし", "位置ずらしの解除", "クイック幾何補正"]),
-    ("解析・処理", ["データ分析", "データに質問", "ダッシュボード", None, "パンシャープン…", "クイックパンシャープン", "変化抽出（2 時期）…", "自動位置合わせ…", "土地被覆分類…", "簡易オルソ補正…", None,
+    ("解析・処理", ["データ分析", "ミカゲと話す", "ダッシュボード", None, "パンシャープン…", "クイックパンシャープン", "変化抽出（2 時期）…", "自動位置合わせ…", "土地被覆分類…", "簡易オルソ補正…", None,
                 "測地線バッファ…", "正距方位での重心…", "移動体と検出の照合…", None, "サーバ処理…"]),
     ("AI", ["物体検出（AI）…", "クリック抽出（AI）", "AI結果", "検出結果を DB へ転記…", None, "教師データセットの作成…", "観測記録をピクセル座標で書き出す…", "アノテーション変換（点→矩形）…", "アノテーション変換（教師データセット）…",
             "AI 学習（物体検出）…"]),
@@ -94,8 +94,8 @@ PRELOAD_ORDER = ("satellites", "requests", "events", "offlineCache")
 FEATURES: tuple[type[Feature], ...] = (
     rendering.Rendering, platform.Platform, training.Training, images.Images, plan.Plan, observations.Observations, requests.Requests,
     events.Events, analysis.Analysis, ai.Ai, maps.Maps, enhance.Enhance, layers.Layers,
-    # 文で操作 last: its operations open the others' docks and entries.
-    command.Command,
+    # ミカゲと話す last: its operations open the others' docks and entries.
+    chat.Chat,
 )
 
 
@@ -543,7 +543,7 @@ class MikagePlugin:
 
     def run_menu_entry(self, text: str, via: str = "HELP") -> bool:
         """
-        The help's 「…を開く」 links (and 文で操作's 「画面を開く」, `via` COMMAND): the menu entry of that text
+        The help's 「…を開く」 links (and ミカゲと話す's 「画面を開く」, `via` COMMAND): the menu entry of that text
         (a dock comes to the front, never closes).
         """
         action = self._entries_in_menu_order().get(tr(text))
@@ -580,7 +580,7 @@ class MikagePlugin:
     # ---- the menu, the docks' places and the map's right-click menu --------------------------------------
 
     def text_operations(self) -> dict:
-        """文で操作's operations the features offer now ({key: run(reading, place)}, features/base.Feature.text_operations)."""
+        """ミカゲと話す's operations the features offer now ({key: run(reading, place)}, features/base.Feature.text_operations)."""
         runs: dict = {}
         for feature in self.features:
             for key, run in feature.text_operations().items():
@@ -590,7 +590,7 @@ class MikagePlugin:
         return runs
 
     def menu_texts(self) -> list[str]:
-        """The menu's entries the roles in use have, by their text in the menu's order (文で操作's 「画面を開く」)."""
+        """The menu's entries the roles in use have, by their text in the menu's order (ミカゲと話す's 「画面を開く」)."""
         return [t for t, a in self._entries_in_menu_order().items() if self.allows(t) and a.menu() is None]
 
     def _entries_in_menu_order(self) -> dict:

@@ -1,54 +1,47 @@
 """
-文で操作 on the screen (core/text_command.py; tsudo 2026-11-21): the field on
-its own toolbar 「文で操作」, and the card under it that says what the
-sentence was read as before anything is done.
+An operation of 「ミカゲと話す」 (ui/chat_dock.py; 文で操作's card until
+2026-11-28, tsudo: 「文で操作の機能は全廃しよう。名前は任せるけど、チャットで質問も
+操作もできるように」): the card in the chat that says what a sentence was read
+as before anything is done.
 
-- Typed and Enter: the operation its words name (no model), else the one the
-  model chooses among those of the roles in use (「操作: 名前」). The field
-  shows only while the settings give 文で操作 (`textAssist.tasks.command`) a
-  model; the model reads the list of operations once the field is clicked
-  (the sentence is then read in about a second).
-- The card: the sentence, the operation (another can be chosen), the values
-  read from it by code (system, day or period, year, place, satellites,
-  画像検索's 衛星・種別 with the catalog's sensors they name, screen: each can be changed; one not read is left empty, and a value the
-  operation needs empty keeps its button off), what will happen, and the
-  button. Nothing is done before the button; nothing is saved, written or
-  sent by it (the screens' own buttons do that, with their own questions).
+- The operation its words name (no model), else the one the model chose
+  among those of the roles in use (「操作: 名前」), else none (one can be
+  chosen on the card).
+- The card: the operation (another can be chosen), the values read from the
+  sentence by code (system, day or period, year, place, satellites,
+  画像検索's 衛星・種別 with the catalog's sensors they name, screen: each can
+  be changed; one not read is left empty, and a value the operation needs
+  empty keeps its button off), what will happen, and the button. Nothing is
+  done before the button; nothing is saved, written or sent by it (the
+  screens' own buttons do that, with their own questions). Done or left,
+  the card stays in the chat as it was.
 
-What each operation does is the plugin's (features/command.py, `host.run`).
+What each operation does is the plugin's (features/chat.py, `host.run`).
 """
 from __future__ import annotations
 
 import re
-import time
+from dataclasses import dataclass
 from datetime import date
 from typing import Any, Callable, Optional, Protocol, Sequence
 
-from qgis.PyQt.QtCore import QDate, QEvent, QObject, Qt, QTimer
-from qgis.PyQt.QtWidgets import (
-    QComboBox, QDateEdit, QDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSizePolicy, QToolBar, QVBoxLayout, QWidget,
-)
+from qgis.PyQt.QtCore import QDate
+from qgis.PyQt.QtWidgets import QComboBox, QDateEdit, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
 
 from ..core import audit
 from ..core.catalog.api import kind_word, sensor_words_of
 from ..core.plan.api import kinds
-from ..core.data_chat import TASK as DATA_TASK, is_question
-from ..core.text_command import (
-    ALL, BY_KEY, Operation, Reading, by_words, command_messages, lat_lon_in, operation_of, read, reply_done, word_matches,
-)
-from ..qgis_io.text_assist_io import SHOW_MS, Asked
+from ..core.text_command import ALL, BY_KEY, Operation, Reading, lat_lon_in, read
 from ..qgis_io.tasks import error_text
 from .docks import plain_tip
-from .fit import fit_text
-from .text_assist_ui import PLAIN_STYLE, WARN_STYLE, WRITING_STYLE
+from .text_assist_ui import PLAIN_STYLE, WARN_STYLE
 
-TASK = "command"
 #: The day shown for 「not given」 in a date field.
 UNSET = QDate(2000, 1, 1)
 
 
-class CommandHost(Protocol):
-    """What 文で操作 needs from the plugin (features/command.py)."""
+class OperationHost(Protocol):
+    """What an operation's card needs from the plugin (features/chat.py)."""
 
     def operations(self) -> list[Operation]:
         """The operations of the roles in use (and the settings: 結果ファイル only with a system that has one…)."""
@@ -80,6 +73,42 @@ class CommandHost(Protocol):
     def today(self) -> date: ...
 
 
+@dataclass
+class ImagesFound:
+    """What 画像検索 found for the chat (features/chat.py search_images): the catalog's records, newest first."""
+    catalog: Any
+    records: list
+    #: How many match (None when the catalog does not say).
+    total: Optional[int]
+    #: Where, when and which sensors (「呉・2026-11-21〜2026-11-27・SAR（3 センサー）」).
+    said: str = ""
+
+
+class ChatHost(OperationHost, Protocol):
+    """What 「ミカゲと話す」 needs from the plugin besides the operations (features/chat.py)."""
+
+    def known_place(self, name: str) -> bool:
+        """Whether `name` is a place known to the plugin (a named area, an interest): 画像検索 without the model."""
+
+    def search_images(self, reading: Reading, place: Any, done: Callable[[Optional[ImagesFound], str], None]) -> None:
+        """画像検索 behind the screen (画像カタログ's own search): done(found, "") or done(None, why not)."""
+
+    def open_images(self, found: ImagesFound, indexes: Sequence[int]) -> str:
+        """Those of the records found opened (as from the catalog's list); what was done."""
+
+    def show_images(self, found: ImagesFound) -> str:
+        """The records found listed in 画像カタログ, the dock in front."""
+
+    def open_image_ids(self, ids: Sequence[str]) -> str:
+        """Images opened by their ids (画像 ID で開く, one by one); what was done."""
+
+    def list_image_ids(self, ids: Sequence[str]) -> str:
+        """Images of these ids listed in 画像カタログ, the dock in front."""
+
+    def open_records(self, ids: Sequence[str]) -> str:
+        """The first of these 観測記録 shown in its form; what was done."""
+
+
 class _DayEdit(QDateEdit):
     """A day that may be not given (shown 「（なし）」)."""
 
@@ -99,7 +128,7 @@ class _DayEdit(QDateEdit):
         self.setDate(QDate(d.year, d.month, d.day) if d else UNSET)
 
 
-def catalog_sensors(host: CommandHost) -> list[str]:
+def catalog_sensors(host: OperationHost) -> list[str]:
     """The sensors of the catalog chosen in 画像カタログ (none when the host can not say)."""
     sensors = getattr(host, "sensors", None)
     return list(sensors() or []) if sensors is not None else []
@@ -119,30 +148,28 @@ def _row(label: str, *widgets: QWidget) -> tuple[QWidget, QLabel]:
     return row, name
 
 
-class CommandCard(QDialog):
-    """What a sentence was read as, its values to change, and the button that does it."""
+class OperationCard(QFrame):
+    """What a sentence was read as, its values to change, and the button that does it (one card of the chat)."""
 
-    def __init__(self, host: CommandHost, parent: Optional[QWidget] = None):
+    def __init__(self, host: OperationHost, parent: Optional[QWidget] = None):
         super().__init__(parent)
-        fit_text(self)
         self.host = host
-        self.setObjectName("SatObsCommandCard")
-        self.setWindowTitle(self.tr("文で操作"))
-        self.setMinimumWidth(460)
+        self.setObjectName("SatObsChatOperation")
+        self.setFrameShape(QFrame.Shape.StyledPanel)
         self.reading: Optional[Reading] = None
         #: The place found for the place field (core/text_request.AreaChoice), and for which text.
         self.place_found: Any = None
         self._place_for: Optional[str] = None
-        #: What run() did last (for tests and the console).
+        #: What run() did (for tests and the console); whether it was done or left (the card then stays as it was).
         self.message = ""
-        #: Runs the operation (the box sets it: it records and says what was done).
-        self.on_run: Callable[[], None] = lambda: None
+        self.finished = False
+        #: Told what was done (the dock: the status bar's message).
+        self.on_done: Callable[[str], None] = lambda _m: None
         layout = QVBoxLayout(self)
-        self.said = QLabel()
-        self.said.setWordWrap(True)
-        self.said.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.said.setStyleSheet("QLabel { color: #57534e; }")
-        layout.addWidget(self.said)
+        layout.setContentsMargins(8, 6, 8, 6)
+        self.title = QLabel(self.tr("操作"))
+        self.title.setStyleSheet("QLabel { font-weight: 600; }")
+        layout.addWidget(self.title)
         self.state = QLabel()
         self.state.setWordWrap(True)
         layout.addWidget(self.state)
@@ -229,12 +256,11 @@ class CommandCard(QDialog):
         self.timing.setStyleSheet("QLabel { color: #777; font-size: 11px; }")
         buttons.addWidget(self.timing, 1)
         self.cancel_button = QPushButton(self.tr("取りやめ"))
-        self.cancel_button.setAutoDefault(False)
-        self.cancel_button.clicked.connect(self.reject)
+        self.cancel_button.setToolTip(plain_tip(self.tr("この操作はしない（カードは残る）")))
+        self.cancel_button.clicked.connect(lambda _on=False: self.leave())
         buttons.addWidget(self.cancel_button)
         self.run_button = QPushButton(self.tr("実行"))
-        self.run_button.setDefault(True)
-        self.run_button.clicked.connect(lambda _on=False: self.on_run())
+        self.run_button.clicked.connect(lambda _on=False: self.run())
         buttons.addWidget(self.run_button)
         layout.addLayout(buttons)
         self._ops: list[Operation] = []
@@ -242,24 +268,10 @@ class CommandCard(QDialog):
 
     # ---- what is shown --------------------------------------------------------------------------------
 
-    def asking(self, text: str, stage: str) -> None:
-        """The sentence while the model chooses its operation."""
-        self.reading = None
-        self.said.setText(self.tr("「{t}」").format(t=text))
-        self.state.setText(stage)
-        self.state.setStyleSheet(WRITING_STYLE)
-        self.state.show()
-        for w in (self.operation_row, self.will, self.caution, *self.rows.values()):
-            w.hide()
-        self.timing.setText("")
-        self.run_button.hide()
-        self.cancel_button.setText(self.tr("取りやめ"))
-
     def show_reading(self, reading: Optional[Reading], text: str, ops: Sequence[Operation], seconds: float = 0.0,
                      caution: str = "", problem: str = "") -> None:
         """What `text` was read as (None: no operation found; one can still be chosen)."""
         self._ops = list(ops)
-        self.said.setText(self.tr("「{t}」").format(t=text))
         self.operation.blockSignals(True)
         self.operation.clear()
         self.operation.addItem(self.tr("（操作を選ぶ）"), None)
@@ -302,11 +314,12 @@ class CommandCard(QDialog):
         self.will.setVisible(reading is not None)
         self.run_button.setVisible(reading is not None)
         if reading is None:
+            self.title.setText(self.tr("操作"))
             self.place_found, self._place_for = None, None
             return
         op, h = reading.operation, self.host
         slots = set(op.slots)
-        self.setWindowTitle(self.tr("文で操作: {t}").format(t=op.title or op.name))
+        self.title.setText(self.tr("操作: {t}").format(t=op.title or op.name))
         if "system" in slots:
             self.system.blockSignals(True)
             self.system.clear()
@@ -502,195 +515,18 @@ class CommandCard(QDialog):
     def _update_button(self) -> None:
         if self.reading is not None:
             self.will.setText(self._will(self.reading.operation))
-        self.run_button.setEnabled(self.ready())
-
-
-class CommandBox(QObject):
-    """The field 「文で操作」 on its own toolbar, and its card (one per plugin)."""
-
-    def __init__(self, iface, context, host: CommandHost, parent: Optional[QObject] = None):
-        super().__init__(parent)
-        self.iface = iface
-        self.context = context
-        self.host = host
-        self.assistant = context.text_assist
-        self.asked: Optional[Asked] = None
-        #: What was said last (the status bar's message; for tests and the console).
-        self.message = ""
-        self.toolbar: QToolBar = iface.addToolBar(self.tr("文で操作"))
-        self.toolbar.setObjectName("MikageCommandToolbar")
-        self.label = QLabel(self.tr("文で操作"))
-        self.label.setContentsMargins(4, 0, 4, 0)
-        self.toolbar.addWidget(self.label)
-        self.field = QLineEdit()
-        self.field.setObjectName("SatObsCommandField")
-        self.field.setClearButtonEnabled(True)
-        self.field.setMinimumWidth(300)
-        self.field.setMaximumWidth(520)
-        self.field.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.field.setPlaceholderText(self.tr("例: Aシステムの明日のオーダーファイルを出力"))
-        self.field.setToolTip(plain_tip(self.tr(
-            "したいことを文で書いて Enter。操作と値（システム・日付・場所など）を読み取ったカードが出て、"
-            "ボタンを押すまで何もしない。書き出し・取り込み・保存・送信は、開いた画面のボタンで")))
-        self.field.returnPressed.connect(self.submit)
-        self.field.installEventFilter(self)
-        self.toolbar.addWidget(self.field)
-        self.card = CommandCard(host, iface.mainWindow())
-        self.card.on_run = self.run
-        self.card.rejected.connect(self.cancel)
-        self._timer = QTimer(self)
-        self._timer.setInterval(SHOW_MS)
-        self._timer.timeout.connect(self._show)
-        self.assistant.changed.connect(self.apply)
-        self.apply()
-
-    # ---- shown or not -------------------------------------------------------------------------------
-
-    @property
-    def offered(self) -> bool:
-        """
-        Whether 文で操作 shows: the settings give it a model and the roles in use have an operation, or データに質問
-        has one (a question typed here goes there).
-        """
-        return (self.assistant.has(TASK) and bool(self.host.operations())) or self.asks_data
-
-    @property
-    def asks_data(self) -> bool:
-        """Whether a question on the data typed here goes to 「データに質問」 (its model given, the host taking it)."""
-        return self.assistant.has(DATA_TASK) and hasattr(self.host, "ask_data")
-
-    def apply(self) -> None:
-        """Shown while offered (the settings, the roles in use); the card closed when not."""
-        on = self.offered
-        if self.asks_data:
-            self.field.setPlaceholderText(self.tr("例: Aシステムの明日のオーダーファイルを出力 / 先月の舞鶴の記録は何件？"))
-        else:
-            self.field.setPlaceholderText(self.tr("例: Aシステムの明日のオーダーファイルを出力"))
-        self.toolbar.setVisible(on)
-        self.toolbar.toggleViewAction().setVisible(on)
-        if not on:
-            self.cancel()
-            self.card.hide()
-
-    def eventFilter(self, watched, event) -> bool:  # noqa: N802 (Qt's name)
-        if watched is self.field and event.type() == QEvent.Type.FocusIn:
-            self.prime()
-        return False
-
-    def _task(self):
-        s = self.assistant.settings
-        return s.task(TASK) if s is not None else None
-
-    def _more_words(self) -> dict:
-        t = self._task()
-        return dict(t.words) if t is not None else {}
-
-    def prime(self) -> None:
-        """The model loaded and the list read while the sentence is typed (the reply then in about a second)."""
-        t = self._task()
-        ops = self.host.operations()
-        if t is None or not ops or self.asked is not None:
-            return
-        # The conversation up to 「依頼: 」 (what every sentence's begins with).
-        self.assistant.prime(TASK, command_messages(t, ops, ""))
-
-    # ---- reading the sentence ------------------------------------------------------------------------
-
-    def submit(self, text: Optional[str] = None) -> None:
-        """Reads the sentence: its words, else the model; then the card."""
-        text = (text if text is not None else self.field.text()).strip()
-        if not text or not self.offered:
-            return
-        self.cancel()
-        h = self.host
-        ops = h.operations()
-        today = h.today()
-        op = by_words(text, ops, self._more_words(), h.screens())
-        if op is None and self.asks_data and (is_question(text) or not self.assistant.has(TASK) or not ops):
-            # A question on the data (「先月の舞鶴の記録は何件？」): answered by 「データに質問」.
-            if h.ask_data(text):
-                self.message = self.tr("「データに質問」で答える")
-                self.field.clear()
-                return
-        self._place_card()
-        if op is not None:
-            reading = read(op, text, today, h.systems(), h.place_names(), h.satellites(), h.screens(), by="words",
-                           sensors=catalog_sensors(h))
-            self.card.show_reading(reading, text, ops)
-            self._show_card()
-            return
-        t = self._task()
-        if t is None:
-            self.card.show_reading(None, text, ops)
-            self._show_card()
-            return
-        found = word_matches(text, ops, self._more_words())
-        started = time.monotonic()
-
-        def done(raw: str, seconds: float) -> None:
-            self._stop()
-            chosen = operation_of(raw, ops)
-            took = time.monotonic() - started
-            caution = self.assistant.caution(TASK)
-            if chosen is None:
-                why = self.tr("合う操作が見つからず（生成 AI の答え: {a}）。下で選べば、文から値を読む").format(
-                    a=raw.strip().splitlines()[0][:40] if raw.strip() else self.tr("なし"))
-                if found:
-                    why = self.tr("候補: {c}。下で選べば、文から値を読む").format(c="・".join(o.name for o in found))
-                self.card.show_reading(None, text, ops, took, caution, why)
-                return
-            reading = read(chosen, text, today, h.systems(), h.place_names(), h.satellites(), h.screens(), by="model",
-                           sensors=catalog_sensors(h))
-            self.card.show_reading(reading, text, ops, took, caution)
-
-        def failed(message: str) -> None:
-            self._stop()
-            if message == "取消":
-                return
-            self.card.show_reading(None, text, ops, problem=self.tr("生成 AI で読めない: {m}（下で選べば、文から値を読む）").format(m=message))
-
-        messages = command_messages(t, ops, text)
-        self.asked = self.assistant.ask(TASK, self.tr("文で操作"), messages, done, failed, one_line=True,
-                                        until=reply_done(ops), keep=True)
-        if self.asked is None:
-            return
-        self.card.asking(text, self.asked.stage)
-        self._show_card()
-        self._timer.start()
-
-    def _show(self) -> None:
-        if self.asked is not None:
-            self.card.state.setText(self.asked.stage)
-
-    def _stop(self) -> None:
-        self._timer.stop()
-        self.asked = None
-
-    def cancel(self) -> None:
-        """The model's reading stopped (the card closed meanwhile)."""
-        if self.asked is not None:
-            self.asked.cancel()
-            self._stop()
-
-    def _place_card(self) -> None:
-        """The card under the field."""
-        if not self.field.isVisible():
-            return
-        at = self.field.mapToGlobal(self.field.rect().bottomLeft())
-        self.card.move(at.x(), at.y() + 4)
-
-    def _show_card(self) -> None:
-        self.card.show()
-        self.card.raise_()
-        self.card.activateWindow()
+        self.run_button.setEnabled(self.ready() and not self.finished)
 
     # ---- doing it ----------------------------------------------------------------------------------------
 
-    def run(self) -> None:
-        """The card's button: the operation done with the card's values, recorded in the audit log, said in the status bar."""
-        if not self.card.ready():
-            return
-        reading = self.card.chosen()
+    def run(self) -> bool:
+        """
+        The button: the operation done with the card's values, recorded in the audit log (kind command, as 文で操作's
+        were: a log's readers and `auditLog.events` go on as they were); False when not.
+        """
+        if self.finished or not self.ready():
+            return False
+        reading = self.chosen()
         op = reading.operation
         detail = {"text": reading.text[:300], "operation": op.name, "by": reading.by}
         if reading.systems:
@@ -706,25 +542,30 @@ class CommandBox(QObject):
         if reading.screen:
             detail["screen"] = reading.screen
         try:
-            said = self.host.run(reading, self.card.place_found)
+            said = self.host.run(reading, self.place_found)
         except Exception as error:  # noqa: BLE001 (a screen that could not be opened: said, recorded, the card stays)
             audit.record("command", op.name, op.title, result="error", detail=detail, error=str(error))
-            self.card.state.setText(self.tr("実行に失敗: {m}").format(m=error_text(error)))
-            self.card.state.setStyleSheet(WARN_STYLE)
-            self.card.state.show()
-            return
+            self.state.setText(self.tr("実行に失敗: {m}").format(m=error_text(error)))
+            self.state.setStyleSheet(WARN_STYLE)
+            self.state.show()
+            return False
         audit.record("command", op.name, op.title, detail=detail)
-        self.card.hide()
         self.message = said or self.tr("{t} を表示").format(t=op.title or op.name)
-        self.card.message = self.message
-        self.iface.statusBarIface().showMessage(self.tr("文で操作: {m}").format(m=self.message), 8000)
-        self.field.selectAll()
+        self._finish(self.tr("実行した: {m}").format(m=self.message))
+        self.on_done(self.message)
+        return True
 
-    def close(self) -> None:
-        self.cancel()
-        self.card.hide()
-        self.card.deleteLater()
-        self.iface.mainWindow().removeToolBar(self.toolbar)
-        self.toolbar.deleteLater()
+    def leave(self) -> None:
+        """「取りやめ」: nothing done; the card stays as it was, its buttons off."""
+        if not self.finished:
+            self._finish(self.tr("取りやめた"))
 
-
+    def _finish(self, said: str) -> None:
+        self.finished = True
+        self.state.setText(said)
+        self.state.setStyleSheet(PLAIN_STYLE)
+        self.state.show()
+        for w in (self.operation, *self.rows.values()):
+            w.setEnabled(False)
+        self.run_button.setEnabled(False)
+        self.cancel_button.hide()

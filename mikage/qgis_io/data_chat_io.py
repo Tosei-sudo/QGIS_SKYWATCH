@@ -1,7 +1,8 @@
 """
-データに質問 (core/data_chat.py) in QGIS: the settings file's tables and their
-columns (their layers' information), the values named to the model (read
-from the tables), and one question asked through:
+「ミカゲと話す」's model in QGIS (core/chat.py, core/data_chat.py; データに質問
+until 2026-11-28): the settings file's tables and their columns (their
+layers' information), the values named to the model (read from the tables),
+and one question asked through:
 
 1. the model writes one SELECT (the SQL conversation kept read: the next
    question reads only itself, GenAiWriter keep);
@@ -15,9 +16,16 @@ from the tables), and one question asked through:
 
 Every question is recorded in the audit log (kind chat): the question, the
 SQL, the tables read and their rows, the model; never what the rows hold.
+
+A sentence that is no question and that no operation's words name, or a
+question the model says the tables cannot answer (「NG: …」), has the model
+choose one of the operations instead (pick_operation: 文で操作's prompt and
+list, core/text_command.py), read apart from the SQL conversation (not
+kept: the next question still finds the tables read).
 """
 from __future__ import annotations
 
+import dataclasses
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -27,8 +35,10 @@ from qgis.PyQt.QtCore import QObject
 
 from ..core import audit
 from ..core import data_chat as dc
+from ..core import text_command as tc
 from ..core.analysis import DEFAULT_TABLE_LIMIT, AnalysisError, Result, Table, esri_columns, esri_tables
 from ..core.esri import EsriError
+from ..core.text_assist import COMMAND_PROMPT, COMMAND_TOKENS
 from ..core.util import js_string
 from . import analysis_io
 from .tasks import run_task
@@ -57,6 +67,8 @@ class Answer:
     notes: list = field(default_factory=list)
     #: Why there is no table ("" when there is one): the model said it cannot, the SQL is refused, the read failed.
     refused: str = ""
+    #: The model said the tables cannot answer it (「NG: …」): an operation may be what was meant.
+    cannot: bool = False
     seconds: float = 0.0
     #: The columns' labels (for the table's headings).
     labels: dict = field(default_factory=dict)
@@ -67,7 +79,7 @@ class Answer:
 
 
 class DataChat(QObject):
-    """The questions of 「データに質問」 (one at a time): the tables known, the conversation, the model asked through TextAssistant."""
+    """The model of 「ミカゲと話す」 (one ask at a time): the tables known, the conversation, the model asked through TextAssistant."""
 
     def __init__(self, context, parent: Optional[QObject] = None):
         super().__init__(parent)
@@ -98,6 +110,11 @@ class DataChat(QObject):
     def task(self):
         s = self.assistant.settings
         return s.task(dc.TASK) if s is not None else None
+
+    def words(self) -> dict:
+        """The settings' more words naming an operation (`textAssist.tasks.chat.words`)."""
+        t = self.task()
+        return dict(t.words) if t is not None else {}
 
     def tables(self) -> list[Table]:
         t = self.task()
@@ -153,7 +170,7 @@ class DataChat(QObject):
             self._read_at = time.monotonic()
             done(self._schema)
 
-        self._task = run_task(self.tr("データに質問: 表の確認"), work, over, failed, hidden=True)
+        self._task = run_task(self.tr("ミカゲと話す: 表の確認"), work, over, failed, hidden=True)
 
     def warm(self) -> None:
         """The model loaded and the instructions read while the question is typed (a computer's model; quietly)."""
@@ -226,6 +243,7 @@ class DataChat(QObject):
             sql, why = dc.sql_of(raw)
             if sql is None:
                 answer.sql = ""
+                answer.cannot = not retried
                 refuse(self.tr("この質問には表から答えられない（生成 AI: {w}）").format(w=why or raw.strip()[:80] or self.tr("答えなし")))
                 return
             answer.sql = sql
@@ -252,7 +270,7 @@ class DataChat(QObject):
             refuse(self.tr("取消") if message == "取消" else self.tr("生成 AI で作れない: {m}").format(m=message))
 
         t = self.task()
-        self._asked = self.assistant.ask(dc.TASK, self.tr("データに質問"), messages, written, failed, keep=not retried,
+        self._asked = self.assistant.ask(dc.TASK, self.tr("ミカゲと話す"), messages, written, failed, keep=not retried,
                                          max_tokens=t.max_tokens if t is not None else None)
         if self._asked is None:
             self._busy = False
@@ -290,7 +308,7 @@ class DataChat(QObject):
             answer.conditions = {n: c for n, c in conditions.items() if n in counts}
             then()
 
-        self._task = run_task(self.tr("データに質問: 読み込み"), work, over, lambda m: failed(m, False))
+        self._task = run_task(self.tr("ミカゲと話す: 読み込み"), work, over, lambda m: failed(m, False))
 
     def _write_answer(self, schema: dc.Schema, periods: dc.Periods, answer: Answer, finish, stage) -> None:
         result = answer.result
@@ -324,7 +342,36 @@ class DataChat(QObject):
             return
         stage(self.tr("生成 AI が答えの文を作成中…"))
         messages = dc.answer_messages(answer.question, columns, rows, periods, schema.labels)
-        self._asked = self.assistant.ask(dc.TASK, self.tr("データに質問"), messages, written, failed, max_tokens=dc.ANSWER_TOKENS)
+        self._asked = self.assistant.ask(dc.TASK, self.tr("ミカゲと話す"), messages, written, failed, max_tokens=dc.ANSWER_TOKENS)
+
+    # ---- one operation chosen ----------------------------------------------------------------------------
+
+    def pick_operation(self, text: str, ops: list, done: Callable[[Optional[tc.Operation], str, float], None],
+                       failed: Callable[[str], None]) -> bool:
+        """
+        The operation of `ops` the model chooses for `text` (「操作: 名前」, 文で操作's prompt and list), in a task:
+        `done(operation or None, the model's reply, seconds)`; read apart (not kept: the SQL conversation stays read).
+        False when busy or not offered (nothing told).
+        """
+        t = self.task()
+        if t is None or self._busy or not self.offered or not ops:
+            return False
+        self._busy, self._cancelled = True, False
+        started = time.monotonic()
+
+        def written(raw: str, _seconds: float) -> None:
+            self._busy, self._asked = False, None
+            done(None if self._cancelled else tc.operation_of(raw, ops), raw, time.monotonic() - started)
+
+        def not_written(message: str) -> None:
+            self._busy, self._asked = False, None
+            failed(message)
+
+        messages = tc.command_messages(dataclasses.replace(t, prompt=COMMAND_PROMPT), ops, text)
+        self._asked = self.assistant.ask(dc.TASK, self.tr("ミカゲと話す"), messages, written, not_written, one_line=True,
+                                         until=tc.reply_done(ops), keep=False, max_tokens=COMMAND_TOKENS)
+        # None: it could not start (`failed` told already).
+        return True
 
     def _audit(self, answer: Answer) -> None:
         s = self.assistant.settings

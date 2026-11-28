@@ -21,7 +21,7 @@ tokenizer's files), a .zip of one, or the URL of such a .zip:
 - a .zip (a path or a URL) is unpacked once into the profile (a URL is
   downloaded first, through QGIS's network).
 
-A model on a server (`url`, データに質問 on an internal GPU server: an
+A model on a server (`url`, ミカゲと話す on an internal GPU server: an
 OpenAI-compatible chat API such as vLLM's or llama.cpp's) is asked through
 QGIS's network (ServerWriter): nothing is loaded on this computer.
 
@@ -293,7 +293,7 @@ class GenAiWriter:
         self.thinks = _template_thinks(folder)
         self._lock = threading.Lock()
         self._og = og
-        #: The generator kept with what it has read (文で操作: the list of operations read once), and those tokens.
+        #: The generator kept with what it has read (データに質問・ミカゲと話す: the tables read once), and those tokens.
         self._kept: Any = None
         self._held: list[int] = []
         self._kept_length = 0
@@ -324,8 +324,9 @@ class GenAiWriter:
         first line break after some text; `until`: ends once it says the
         text so far is enough (all the lines asked for written …); `keep`:
         what is read is kept, and the next conversation kept that begins the
-        same reads only what follows (文で操作: the list of operations is read
-        once, about 8 s for a 3B model, then 0.5–1 s for each sentence).
+        same reads only what follows (ミカゲと話す: the tables are read
+        once, then only each question; 文で操作's list of operations took
+        about 8 s once for a 3B model, then 0.5–1 s for each sentence).
         """
         with self._lock:
             ids = list(self.tokenizer.encode(self.prompt(messages)))
@@ -693,7 +694,7 @@ class TextAssistant(QObject):
     def prime(self, task: str, messages: Sequence[Message]) -> bool:
         """
         Loads `task`'s model (when it is not) and has it read `messages`
-        ahead (文で操作: the list of operations, while the sentence is typed),
+        ahead (ミカゲと話す: the tables, while the sentence is typed),
         quietly: nothing is said when it cannot. False when it does not start
         (busy, no model, or ready already).
         """

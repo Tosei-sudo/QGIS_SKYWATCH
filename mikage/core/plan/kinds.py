@@ -10,7 +10,7 @@ cloud-free kind's), else the first kind with no `match` (光学 by default; the 
 Each kind says whether it images only in daylight (`daylight`: the imaging plan's 日照条件, 時間帯 「夜」 of a
 request) and whether clouds hide the ground from it (`clouds`: the cloud forecast, a request's 実施しない雲量,
 either-kind requests going to a satellite clouds do not stop). A kind clouds do not stop is a radar (SAR: the
-interferometric pairs, its satellites' `sar`). Its `words` are what sentences call it (文で操作's 画像検索, a
+interferometric pairs, its satellites' `sar`). Its `words` are what sentences call it (ミカゲと話す's 画像検索, a
 request's text).
 
 Without the key: 光学, SAR and IR (thermal infrared: by night too, not through clouds).

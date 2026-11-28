@@ -42,7 +42,7 @@ class ConditionsPart:
         catalog = self.catalog()
         self._show_keyword(catalog)
         self._show_file_buttons()
-        #: The sensors the catalog lists (文で操作's SAR・光学 and satellites); None without a sensor attribute.
+        #: The sensors the catalog lists (ミカゲと話す's SAR・光学 and satellites); None without a sensor attribute.
         self._sensor_values = None
         if catalog is None or not catalog.fields.get("sensor"):
             return

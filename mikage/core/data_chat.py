@@ -1,8 +1,9 @@
 """
-データに質問 (tsudo 2026-11-24: 「ミカゲと接続してる各データを参照した生成AIと
-対話できる機能を検討して」 → design doc 「ミカゲのデータと対話する生成 AI」,
-then 「両方に対応（まず PC の 9B）」): a question on the settings file's
-tables (「先月の舞鶴の記録は何件？」) answered from what they hold.
+The questions of 「ミカゲと話す」 (core/chat.py; データに質問 until 2026-11-28:
+tsudo 2026-11-24 「ミカゲと接続してる各データを参照した生成AIと対話できる機能を
+検討して」 → design doc 「ミカゲのデータと対話する生成 AI」, then 「両方に対応
+（まず PC の 9B）」): a question on the settings file's tables (「先月の舞鶴の
+記録は何件？」) answered from what they hold.
 
 The generative model never sees the rows it is asked about until code has
 read and counted them; it writes two things only:
@@ -39,7 +40,8 @@ from .analysis import KINDS, Table, fold
 from .request.api import REQUEST_KINDS
 from .text_assist import Message, TextTask
 
-TASK = "dataChat"
+#: The task of `textAssist.tasks` (ミカゲと話す; the dataChat of データに質問 and the command of 文で操作 are read as it).
+TASK = "chat"
 
 #: The tables offered (when the settings name none), by kind: those measured in the study (2026-11-24).
 SHOWN_KINDS = ("observation", "namedArea", "catalog", "aiResult", "alertLog", "request", "requestHistory", "event", "eventLink",

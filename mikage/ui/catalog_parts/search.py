@@ -5,7 +5,7 @@ state.
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import Callable, Optional
 
 from qgis.PyQt.QtCore import Qt
 
@@ -35,36 +35,49 @@ class SearchPart:
             self.layers[catalog.url] = info
         return info
 
-    def search(self) -> None:
-        """Searches the chosen catalog (images like the one compared with, during 「類似画像の検索」)."""
+    def search(self, searched: Optional[Callable[[Optional[tuple], str], None]] = None) -> None:
+        """
+        Searches the chosen catalog (images like the one compared with, during 「類似画像の検索」). `searched`
+        (search_area_period's): `((catalog, records, how many match), "")` once read, or `(None, why not)`.
+        """
+        def refuse(text: str) -> None:
+            self.status.setText(text)
+            if searched is not None:
+                searched(None, text)
+
         problem = self.input_problem()
         if problem:
-            self.status.setText(problem)
+            refuse(problem)
             return
         if self.reference is not None:
+            if searched is not None:
+                searched(None, self.tr("画像カタログは「類似画像の検索」中（終えてから）"))
+                return
             self._search_similar()
             return
         catalog = self.catalog()
         if catalog is None:
+            if searched is not None:
+                searched(None, self.tr("検索できる画像カタログがない"))
             return
         search = self.conditions()
         box = self.area()
         if self.area_box.currentData() == "drawn" and box is None:
-            self.status.setText(self.tr("範囲が未作成。「範囲を描く」で地図に描画"))
+            refuse(self.tr("範囲が未作成。「範囲を描く」で地図に描画"))
             return
         if self.area_box.currentData() == "saved" and box is None:
-            self.status.setText(self._no_saved_area())
+            refuse(self._no_saved_area())
             return
         if self.area_box.currentData() == "layer" and box is None:
             layer = self.area_layer.currentLayer()
             if layer is None:
-                self.status.setText(self.tr("範囲のレイヤーが未選択"))
+                refuse(self.tr("範囲のレイヤーが未選択"))
             elif self.selected_only.isChecked():
-                self.status.setText(self.tr("「{name}」に選択地物なし").format(name=layer.name()))
+                refuse(self.tr("「{name}」に選択地物なし").format(name=layer.name()))
             else:
-                self.status.setText(self.tr("「{name}」に形のある地物なし").format(name=layer.name()))
+                refuse(self.tr("「{name}」に形のある地物なし").format(name=layer.name()))
             return
-        self._read(_Listed(catalog, search, box))
+        self._read(_Listed(catalog, search, box), searched=searched)
 
     def read_more(self) -> None:
         """「続きを読む」: the next `maxResults` images of the search listed added to the list."""
@@ -73,8 +86,8 @@ class SearchPart:
             return
         self._read(listed, more=True)
 
-    def _read(self, listed: _Listed, more: bool = False) -> None:
-        """Reads the newest images of `listed` (a new search; in a task), or with `more` the next ones."""
+    def _read(self, listed: _Listed, more: bool = False, searched: Optional[Callable[[Optional[tuple], str], None]] = None) -> None:
+        """Reads the newest images of `listed` (a new search; in a task), or with `more` the next ones; `searched`: search's."""
         catalog = listed.catalog
         client = self.context.esri()
         token = None
@@ -93,6 +106,8 @@ class SearchPart:
         def done(result) -> None:
             self._reading(False)
             if listed is not self._listed or (similar and self.reference is None):
+                if searched is not None:
+                    searched(None, self.tr("画像カタログで別の検索をしたため取りやめ"))
                 return  # searched again since (another list shown, 「類似画像の検索」 left)
             listed.total, listed.next_offset = result.total, result.next_offset
             known = {_key(r) for r in listed.read}
@@ -109,11 +124,15 @@ class SearchPart:
             else:
                 self.show_records(catalog, new, listed=listed)
                 self._show_count()
+                if searched is not None:
+                    searched((catalog, list(self.model.records), result.total), "")
 
         def failed(message: str) -> None:
             self._reading(False)
             what = self.tr("続きの取得") if more else self.tr("類似画像の検索") if similar else self.tr("画像カタログの検索")
             self.status.setText(self.tr("{what}に失敗: {m}").format(what=what, m=message))
+            if searched is not None:
+                searched(None, self.tr("{what}に失敗: {m}").format(what=what, m=message))
 
         self._reading(True)
         self.status.setText(self.tr("続きを取得中") if more else self.tr("類似画像の検索中") if similar else self.tr("検索中"))

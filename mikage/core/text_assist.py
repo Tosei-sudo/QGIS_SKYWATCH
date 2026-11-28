@@ -24,16 +24,16 @@ takes or leaves:
 - 依頼文から下書き (requestDraft; core/text_request.py, tsudo 2026-11-21): a
   request's mail or chat text made into the request form's fields (new or
   edited), the dates, numbers, satellites and choice words read by code.
-- 文で操作 (command; core/text_command.py, tsudo 2026-11-21): a sentence
-  typed in the toolbar made into one of a fixed list of operations (which
-  screen to open and what to put in it), the model only choosing the
-  operation and every value read by code.
-- データに質問 (dataChat; core/data_chat.py, tsudo 2026-11-24): a question
-  on the data (「先月の舞鶴の記録は何件？」) made into one SELECT of the
-  「データ分析」 engine, which reads the tables; the model then says the
-  result in 1–3 sentences, checked against the table by code. A model of
+- ミカゲと話す (chat; core/chat.py, tsudo 2026-11-28; it took the place of
+  文で操作 and データに質問): one chat for questions on the data
+  (「先月の舞鶴の記録は何件？」 made into one SELECT of the 「データ分析」 engine,
+  which reads the tables; the model then says the result in 1–3 sentences,
+  checked against the table by code; core/data_chat.py) and the operations
+  (which screen to open and what to put in it, the model only choosing the
+  operation and every value read by code; core/text_command.py). A model of
   about 9B (a computer's), or one on an internal server (`url`: an
-  OpenAI-compatible API, e.g. a 27B on a GPU).
+  OpenAI-compatible API, e.g. a 27B on a GPU). The older tasks `dataChat`
+  and `command` are still read when `chat` is not given.
 
 A small model writes well-formed sentences but can get facts wrong, so what
 it writes is checked here: numbers that are not in what it was given are
@@ -156,24 +156,29 @@ HANDOVER_LIMIT = 3000
 TERMS_LIMIT = 30
 
 #: What the model can be asked to do (`textAssist.tasks`), in the order they are listed.
-TASKS = ("tidyNote", "handoverDraft", "noteFields", "searchWords", "summary", "translate", "requestDraft", "command", "dataChat")
+TASKS = ("tidyNote", "handoverDraft", "noteFields", "searchWords", "summary", "translate", "requestDraft", "chat", "command", "dataChat")
+#: The tasks 「ミカゲと話す」 (chat) took the place of (2026-11-28): read as chat when it is not given.
+OLD_CHAT_TASKS = ("dataChat", "command")
 TASK_LABELS = {"tidyNote": "備考を整える", "handoverDraft": "申し送りの下書き", "noteFields": "項目の提案", "searchWords": "言葉で探す",
-               "summary": "まとめ", "translate": "英訳", "requestDraft": "依頼文から下書き", "command": "文で操作",
-               "dataChat": "データに質問"}
+               "summary": "まとめ", "translate": "英訳", "requestDraft": "依頼文から下書き", "chat": "ミカゲと話す",
+               "command": "文で操作（廃止: chat に）", "dataChat": "データに質問（廃止: chat に）"}
 #: The tasks a model of about 3B is meant for: a smaller one is said to be (not refused).
 LARGE_TASKS = frozenset({"noteFields", "searchWords", "summary", "translate", "requestDraft", "command"})
 #: Smaller than this (billions of parameters) is a small model for LARGE_TASKS.
 LARGE_MODEL = 2.0
 #: The tasks a model of about 9B is meant for (2026-11-24, 30 questions: 4B 22, 9B 26, 27B 28 of 30 SQL right).
-CHAT_TASKS = frozenset({"dataChat"})
+CHAT_TASKS = frozenset({"chat", "dataChat"})
 #: Smaller than this (billions) is a small model for CHAT_TASKS.
 CHAT_MODEL = 6.0
 #: Each task's own: how long it may write (tokens) and its instructions.
 TASK_DEFAULTS: dict[str, tuple[int, str]] = {
     "tidyNote": (160, NOTE_PROMPT), "handoverDraft": (320, HANDOVER_PROMPT), "noteFields": (160, FIELDS_PROMPT),
     "searchWords": (160, SEARCH_PROMPT), "summary": (480, SUMMARY_PROMPT), "translate": (240, TRANSLATE_PROMPT),
-    "requestDraft": (240, REQUEST_PROMPT), "command": (24, COMMAND_PROMPT), "dataChat": (400, DATA_PROMPT),
+    "requestDraft": (240, REQUEST_PROMPT), "chat": (400, DATA_PROMPT), "command": (24, COMMAND_PROMPT),
+    "dataChat": (400, DATA_PROMPT),
 }
+#: How long the model may write when it chooses an operation in ミカゲと話す (「操作: 名前」).
+COMMAND_TOKENS = 24
 #: How long a server's model may take for one reply (s; `timeoutSeconds`).
 SERVER_TIMEOUT = 300.0
 #: The name of the one model of the shorter settings (`"textAssist": "…"`, or `{ "model": … }`).
@@ -393,19 +398,41 @@ def _settings_of(value: dict, at: str, problems: list[str]) -> Optional[TextAssi
         elif name == "requestDraft":
             known.append("examples")
             examples = _request_examples_of(t["examples"], f"{where}.examples", problems) if "examples" in t else None
-        elif name == "dataChat":
+        elif name in ("chat", "dataChat"):
             known += ["examples", "tables", "rules"]
             examples = _chat_examples_of(t["examples"], f"{where}.examples", problems) if "examples" in t else None
         words: tuple = ()
-        if name == "command":
+        if name in ("chat", "command"):
             known.append("words")
             words = _command_words_of(t["words"], f"{where}.words", problems) if "words" in t else ()
-        tables = _lines_of(t["tables"], f"{where}.tables", "表の名前（TBL_OBSERVATION など）", problems) if name == "dataChat" and "tables" in t else ()
-        rules = _lines_of(t["rules"], f"{where}.rules", "決まりの文", problems) if name == "dataChat" and "rules" in t else ()
+        tables = _lines_of(t["tables"], f"{where}.tables", "表の名前（TBL_OBSERVATION など）", problems) if name in ("chat", "dataChat") and "tables" in t else ()
+        rules = _lines_of(t["rules"], f"{where}.rules", "決まりの文", problems) if name in ("chat", "dataChat") and "rules" in t else ()
         _unknown(t, known, where, problems)
         tasks.append(task_of(name, model, tokens, prompt, examples, words, tables, rules))
     _unknown(value, ("models", "tasks", "keepMinutes", "model"), at, problems)
+    tasks = _chat_of(tasks, at, problems)
     return TextAssistSettings(tuple(models), tuple(tasks), _keep_minutes(value, at, problems))
+
+
+def _chat_of(tasks: list[TextTask], at: str, problems: list[str]) -> list[TextTask]:
+    """
+    「ミカゲと話す」 (chat) took the place of データに質問 (dataChat) and 文で操作 (command), 2026-11-28: when the settings
+    give only those, chat is made of them (dataChat's model, else command's; dataChat's prompt, examples, tables and
+    rules; command's words), and the older ones are told to be written as chat.
+    """
+    old = {t.name: t for t in tasks if t.name in OLD_CHAT_TASKS}
+    if not old:
+        return tasks
+    kept = [t for t in tasks if t.name not in OLD_CHAT_TASKS]
+    if any(t.name == "chat" for t in tasks):
+        problems.append(f"{at}.tasks の {'・'.join(old)} は使わない（chat があるため。ミカゲと話すは chat のモデルで動く）")
+        return kept
+    problems.append(f"{at}.tasks の {'・'.join(old)} は「ミカゲと話す」（chat）にまとめた。chat に書き換えを（いまは chat として読む）")
+    d, c = old.get("dataChat"), old.get("command")
+    base = d or c
+    kept.append(task_of("chat", base.model, d.max_tokens if d else None, d.prompt if d else None, d.examples if d else None,
+                        c.words if c else (), d.tables if d else (), d.rules if d else ()))
+    return kept
 
 
 def _server_model_of(name: str, m: dict, where: str, problems: list[str]) -> Optional[TextModel]:

@@ -35,7 +35,7 @@ def remember_trained_model(label: str, path: str) -> None:
     set_pref("trained_models", json.dumps(items[:TRAINED_MAX], ensure_ascii=False))
 
 
-#: 生成 AI の機能 (文章の手伝い・文で操作; tsudo 2026-11-21: 「生成AIの機能はオプトインにしよう」): off until the person turns it on
+#: 生成 AI の機能 (文章の手伝い・ミカゲと話す; tsudo 2026-11-21: 「生成AIの機能はオプトインにしよう」): off until the person turns it on
 #: (担当と個人設定). The tests turn it on (conftest).
 TEXT_ASSIST_DEFAULT = "0"
 

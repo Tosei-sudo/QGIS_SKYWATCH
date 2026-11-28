@@ -5,7 +5,7 @@ it is chosen, and the counts are kept and sent in the background.
 - The plugin's menu entries (the toolbar's buttons are the same actions): each
   entry's trigger is counted a moment later (a zero timer), from the place
   that claimed it meanwhile: the toolbar (its buttons' clicked, by the person
-  only), a help link or 文で操作 (`claim` before they trigger it), else the
+  only), a help link or ミカゲと話す (`claim` before they trigger it), else the
   plugin's menus when one of them closed just before (a menu closes as its
   entry is chosen, before the entry triggers; QMenu.triggered and the
   toolbar's actionTriggered come for an action triggered from anywhere, so
@@ -211,7 +211,7 @@ class FeatureUseKeeper(QObject):
             self.counter.add(feature, place, dock)
 
     def claim(self, action, place: str) -> None:
-        """The next trigger of `action` (just after) is from `place` (a help link, 文で操作)."""
+        """The next trigger of `action` (just after) is from `place` (a help link, ミカゲと話す)."""
         self._claims[action] = place
 
     def popup_claimed(self, text: str) -> None:

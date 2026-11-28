@@ -65,11 +65,19 @@ class CatalogPort(Protocol):
         """The records listed, with what they are in the status line, the dock in front."""
 
     def search_area_period(self, start: str, end: str, corners: Optional[list] = None, anywhere: bool = False,
-                           sensor: Optional[str] = None) -> None:
+                           sensor: Optional[str] = None, extent: bool = False, front: bool = True,
+                           searched: Optional[Callable[[Optional[tuple], str], None]] = None) -> None:
         """
-        Searched over a period (its days, "" open) and an area (its corners; `anywhere`: none), the dock in front;
-        `sensor`: the センサー box's (several separated by 「、」; "" every sensor; None as it is).
+        Searched over a period (its days, "" open) and an area (its corners; `anywhere`: none; `extent`: the map's
+        extent without corners), the dock in front unless not `front`; `sensor`: the センサー box's (several separated
+        by 「、」; "" every sensor; None as it is); `searched((catalog, records, how many match), "")` or `(None, why)`.
         """
+
+    def show_image_ids(self, ids: list, title: str = "") -> None:
+        """The images of these ids listed (in a task), the dock in front."""
+
+    def open_catalog_records(self, catalog, records) -> list:
+        """Images of a catalog's records opened (as from the list)."""
 
     def sensor_values(self) -> Optional[list]:
         """The sensors the catalog chosen lists (none before they are read); None when it has no sensor attribute."""
@@ -175,6 +183,24 @@ def _none():
     return None
 
 
+class AnalysisPort(Protocol):
+    """データ分析 (ui/analysis_dock.py): ミカゲと話す's 「データ分析で開く」."""
+
+    #: The tables read (none before 「更新」).
+    tables: Any
+    conditions: dict
+
+    def refresh(self) -> None: ...
+
+    def edit_condition(self, name: str, condition: str) -> None: ...
+
+    def set_sql(self, sql: str) -> None: ...
+
+    def show(self) -> None: ...
+
+    def raise_(self) -> None: ...
+
+
 class Ports:
     """Each feature's port as the plugin's features set it (a function: the port, or None)."""
 
@@ -187,6 +213,7 @@ class Ports:
         self.notices: Callable[[], Optional[NoticesPort]] = _none
         self.satellites: Callable[[], Optional[SatellitesPort]] = _none
         self.org_areas: Callable[[], Optional[OrgAreasPort]] = _none
+        self.analysis: Callable[[], Optional[AnalysisPort]] = _none
 
 
 class PluginEvents(QObject):

@@ -1,5 +1,5 @@
 """
-解析・処理: データ分析, データに質問 (its generative AI given a model in the settings: else its entry is put away), the Processing algorithms' dialogs (パンシャープン, 変化抽出, 自動位置合わせ,
+解析・処理: データ分析 (ミカゲと話す, which was データに質問 here, is features/chat.py), the Processing algorithms' dialogs (パンシャープン, 変化抽出, 自動位置合わせ,
 土地被覆分類, 簡易オルソ補正, 測地線バッファ, 正距方位での重心, 移動体と検出の照合) and 「サーバ処理…」.
 """
 from __future__ import annotations
@@ -8,9 +8,8 @@ from qgis.core import QgsProject, QgsVectorLayer
 
 from ..processing_provider.pansharpen_algorithm import default_inputs
 from ..ui.analysis_dock import AnalysisDock
-from ..ui.data_chat_dock import TITLE as CHAT_TITLE, DataChatDock
 from ..ui.gp_dialog import RemoteProcessingDialog
-from .base import DockSpec, Feature, close, tr
+from .base import DockSpec, Feature, close
 
 #: The vector algorithms of the menu: (icon, algorithm, entry).
 VECTOR_ALGORITHMS = (("geodesic_buffer", "mikage:geodesic_buffer", "測地線バッファ…"),
@@ -24,58 +23,17 @@ def _layers() -> list:
 
 class Analysis(Feature):
     COMMANDS = ("open_pansharpen", "open_change", "open_align", "open_classify", "open_simple_ortho", "open_vector_algorithm",
-                "open_remote_processing", "open_data_chat")
+                "open_remote_processing")
 
     def __init__(self, host):
         super().__init__(host)
         #: 「サーバ処理」, once opened.
         host.remote_dialog = None
+        host.ports.analysis = lambda: host.docks.get("SatObsAnalysis")
 
     def dock_specs(self) -> dict:
         iface, context, settings, window = self.iface, self.context, self.host.open_settings, self.window()
-        return {"SatObsAnalysis": DockSpec("データ分析", "analysis", lambda: AnalysisDock(iface, context, settings, window)),
-                "SatObsDataChat": DockSpec(CHAT_TITLE, "data_chat",
-                                           lambda: DataChatDock(iface, context, settings, window, self._analysis_dock))}
-
-    def connect(self) -> None:
-        # データに質問: its entry only while its generative AI is given a model and the person uses it.
-        self.context.text_assist.changed.connect(self._chat_offered)
-        self._chat_offered()
-
-    def _analysis_dock(self):
-        dock = self.docks.get("SatObsAnalysis")
-        if dock is not None:
-            dock.show()
-            dock.raise_()
-            if not dock.tables:
-                dock.refresh()
-        return dock
-
-    def _chat_offered(self) -> None:
-        """「データに質問」 in the menu (and its dock) while the settings give it a model and the person uses the generative AI."""
-        title = tr(CHAT_TITLE)
-        hidden = self.host.hidden_entries
-        offered = self.context.text_assist.has("dataChat")
-        changed = (title in hidden) == offered
-        if offered:
-            hidden.discard(title)
-        else:
-            hidden.add(title)
-        if changed:
-            self.host.apply_roles()
-
-    def open_data_chat(self, question: str = ""):
-        """「データに質問」 shown, with a question asked (`plugin.open_data_chat("…")`, 文で操作's field); None when not offered."""
-        dock = self.docks.get("SatObsDataChat")
-        if dock is None or not dock.chat.offered:
-            return None
-        dock.show()
-        dock.raise_()
-        if question:
-            dock.ask(question)
-        else:
-            dock.field.setFocus()
-        return dock
+        return {"SatObsAnalysis": DockSpec("データ分析", "analysis", lambda: AnalysisDock(iface, context, settings, window))}
 
     def add_actions(self) -> None:
         # 「パンシャープン…」: the Processing algorithm's dialog (the algorithm also in the Processing toolbox).
@@ -150,12 +108,6 @@ class Analysis(Feature):
         host.remote_dialog.raise_()
 
     def unload(self) -> None:
-        try:
-            self.context.text_assist.changed.disconnect(self._chat_offered)
-        except (TypeError, RuntimeError):
-            pass
-        if "SatObsDataChat" in self.docks:
-            self.docks["SatObsDataChat"].close_all()
         if "SatObsAnalysis" in self.docks:
             self.docks["SatObsAnalysis"].close_all()
         close(self.host.remote_dialog)

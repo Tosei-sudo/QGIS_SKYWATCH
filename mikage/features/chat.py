@@ -1,6 +1,10 @@
 """
-文で操作 (core/text_command.py, ui/text_command.py; tsudo 2026-11-21): the
-toolbar's field and what each operation does with the values on its card.
+「ミカゲと話す」 (core/chat.py, ui/chat_dock.py; tsudo 2026-11-28: 「文で操作の機能は
+全廃しよう。名前は任せるけど、チャットで質問も操作もできるように」): its dock and
+menu entry (shown while the settings give it a model and the person uses
+the generative AI), and what the chat does on the plugin: the operations
+that 文で操作 had (its toolbar is gone), 画像検索 behind the screen, and the
+images and records its answers list opened.
 
 Each feature does the operations on its own docks (`text_operations`,
 ui/command_runs.py): the screen opened with the values in it, then only
@@ -16,16 +20,22 @@ import time
 from datetime import date
 from typing import Any, Callable, Optional
 
+from typing import Sequence
+
 from ..core import errors
 from ..core.catalog.api import KINDS, SensorPick, pick_sensors
+from ..core.chat import TASK, TITLE
 from ..core.obs.api import load_named_areas, settings_for
 from ..core.request.api import jst_day
 from ..core.text_command import OPERATIONS, Operation, Reading
 from ..core.text_request import area_choices, found_choice, point_choice
+from ..core.util import ms_of
 from ..qgis_io.place_search import place_search_of
 from ..qgis_io.tasks import run_task
-from ..ui.text_command import CommandBox
-from .base import Feature, close, tr
+from ..ui import command_runs as runs
+from ..ui.chat_dock import ChatDock
+from ..ui.chat_operation import ImagesFound
+from .base import DockSpec, Feature, tr
 
 #: The side of the square taken around a point or a place found by a geocoder (km).
 POINT_KM = 5.0
@@ -33,42 +43,70 @@ POINT_KM = 5.0
 AREAS_SECONDS = 600
 
 
-class Command(Feature):
-    COMMANDS = ("open_command",)
+class Chat(Feature):
+    COMMANDS = ("open_chat",)
 
     def __init__(self, host):
         super().__init__(host)
-        #: 「文で操作」 (ui/text_command.py), made once the other features' entries are.
-        host.command_box = None
         self._areas: list = []
         self._areas_at = 0.0
         self._areas_waiting: Optional[list] = None
 
-    def add_actions(self) -> None:
-        # After every dock and entry: the operations open them.
-        self.host.command_box = CommandBox(self.iface, self.context, self, self.window())
+    def dock_specs(self) -> dict:
+        iface, context, settings, window = self.iface, self.context, self.host.open_settings, self.window()
+        return {"SatObsDataChat": DockSpec(TITLE, "data_chat",
+                                           lambda: ChatDock(iface, context, settings, window, self, self._analysis_dock))}
 
-    def roles_changed(self) -> None:
-        if self.host.command_box is not None:
-            self.host.command_box.apply()
+    def connect(self) -> None:
+        # Its entry only while its generative AI is given a model and the person uses it.
+        self.context.text_assist.changed.connect(self._offered)
+        self._offered()
+
+    def _offered(self) -> None:
+        """「ミカゲと話す」 in the menu (and its dock) while the settings give it a model and the person uses the generative AI."""
+        title = tr(TITLE)
+        hidden = self.host.hidden_entries
+        offered = self.context.text_assist.has(TASK)
+        changed = (title in hidden) == offered
+        if offered:
+            hidden.discard(title)
+        else:
+            hidden.add(title)
+        if changed:
+            self.host.apply_roles()
+
+    def _analysis_dock(self):
+        """「データ分析」 shown (its tables read when they are not), for 「データ分析で開く」."""
+        dock = self.ports.analysis()
+        if dock is not None:
+            dock.show()
+            dock.raise_()
+            if not dock.tables:
+                dock.refresh()
+        return dock
 
     def unload(self) -> None:
-        close(self.host.command_box)
-        self.host.command_box = None
+        try:
+            self.context.text_assist.changed.disconnect(self._offered)
+        except (TypeError, RuntimeError):
+            pass
+        if "SatObsDataChat" in self.docks:
+            self.docks["SatObsDataChat"].close_all()
 
-    def open_command(self, text: str = ""):
-        """「文で操作」 with a sentence (`plugin.open_command("…")`; the field takes the focus when there is none)."""
-        box = self.host.command_box
-        if box is None or not box.offered:
+    def open_chat(self, text: str = ""):
+        """「ミカゲと話す」 shown, with a sentence sent (`plugin.open_chat("…")`; else the field takes the focus); None when not offered."""
+        dock = self.docks.get("SatObsDataChat")
+        if dock is None or not dock.chat.offered:
             return None
+        dock.show()
+        dock.raise_()
         if text:
-            box.field.setText(text)
-            box.submit(text)
+            dock.send(text)
         else:
-            box.field.setFocus()
-        return box
+            dock.field.setFocus()
+        return dock
 
-    # ---- what the card needs (ui/text_command.CommandHost) -------------------------------------------
+    # ---- what the chat needs (ui/chat_operation.ChatHost) --------------------------------------------
 
     def today(self) -> date:
         return jst_day(time.time() * 1000)
@@ -115,9 +153,9 @@ class Command(Feature):
             return None
         return pick_sensors(words, values, self.satellites(), self.context.known_names())
 
-    def ask_data(self, text: str) -> bool:
-        """A question on the data typed in the field: asked in 「データに質問」 (False when it is not offered)."""
-        return self.host.open_data_chat(text) is not None
+    def known_place(self, name: str) -> bool:
+        """A named area's name (画像検索 without the model: 「呉で今週のSAR画像ある？」)."""
+        return bool(name) and name in self.place_names()
 
     def _named_source(self):
         c = self.context.config
@@ -190,6 +228,86 @@ class Command(Feature):
         if "sensors" in reading.operation.slots:
             reading.catalog_sensors = self._catalog_sensors(reading.sensors)
         return run(reading, place)
+
+    # ---- images ------------------------------------------------------------------------------------------
+
+    def search_images(self, reading: Reading, place: Any, done: Callable[[Optional[ImagesFound], str], None]) -> None:
+        """画像検索 in 画像カタログ behind the screen (its own search, its list replaced): done(found, "") or done(None, why)."""
+        port = self.ports.catalog()
+        if port is None or not self.context.config.image_catalogs or not self.host.allows(tr("画像カタログ")):
+            done(None, tr("画像カタログを使えない（設定ファイルに imageCatalogs がない、または担当）"))
+            return
+        try:
+            reading.catalog_sensors = self._catalog_sensors(reading.sensors)
+        except RuntimeError as error:
+            done(None, str(error))
+            return
+        said = runs.catalog_said(reading, place.label if place is not None else tr("地図の表示範囲"))
+
+        def searched(found, problem: str) -> None:
+            if found is None:
+                done(None, problem)
+                return
+            catalog, records, total = found
+            # Newest first (as the catalog asks the server for them; whatever order they came in).
+            newest = sorted(records, key=lambda r: -(ms_of(r.acquired) or 0))
+            done(ImagesFound(catalog, newest, total, said), "")
+
+        runs.catalog(port, reading, place, front=False, searched=searched)
+
+    def open_images(self, found: ImagesFound, indexes: Sequence[int]) -> str:
+        port = self.ports.catalog()
+        records = [found.records[i] for i in indexes if 0 <= i < len(found.records)]
+        if port is None or not records:
+            return ""
+        port.open_catalog_records(found.catalog, records)
+        return tr("画像を開いた: {s}").format(s="、".join(r.id or "?" for r in records))
+
+    def show_images(self, found: ImagesFound) -> str:
+        port = self.ports.catalog()
+        if port is None:
+            return ""
+        port.show_event_records(found.catalog, found.records, found.said)
+        return tr("画像カタログに一覧: {s}").format(s=found.said)
+
+    def open_image_ids(self, ids: Sequence[str]) -> str:
+        port = self.ports.catalog()
+        if port is None or not ids:
+            return ""
+        for i in ids:
+            port.open_image_id(i)
+        return tr("画像 ID で開く: {s}").format(s="、".join(ids))
+
+    def list_image_ids(self, ids: Sequence[str]) -> str:
+        port = self.ports.catalog()
+        if port is None or not ids:
+            return ""
+        port.show_image_ids(list(ids), tr(TITLE))
+        port.show()
+        port.raise_()
+        return tr("画像カタログに一覧: {n} 枚の画像 ID").format(n=len(ids))
+
+    def open_records(self, ids: Sequence[str]) -> str:
+        """The first record in 観測記録's form (read first when the store is shared)."""
+        port = self.observations_if_allowed()()
+        if port is None or not ids:
+            return tr("観測記録を使えない（担当・設定）") if ids else ""
+        first = ids[0]
+
+        def show() -> None:
+            book = port.book
+            o = book.record(first) if book is not None else None
+            if o is None:
+                self.iface.statusBarIface().showMessage(tr("観測記録に記録ID「{i}」がない").format(i=first), 8000)
+                return
+            port.show()
+            port.raise_()
+            port.open_record(o)
+
+        if port.with_records([first], show):
+            show()
+        more = tr("（フォームは 1 件ずつ。ほかは「2件目を開いて」のように）") if len(ids) > 1 else ""
+        return tr("記録を開いた: {i}").format(i=first) + more
 
     def _catalog_sensors(self, words: list[str]) -> list[str]:
         """The catalog's sensors 衛星・種別 names (none: every sensor); an error when it names none of them."""

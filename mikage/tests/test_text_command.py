@@ -155,14 +155,20 @@ def test_the_names_agree_with_the_settings():
 
 
 def test_the_task_and_its_words_in_the_settings():
+    """The words are ミカゲと話す's (chat); 文で操作's command is read as chat (2026-11-28: 文で操作 abolished)."""
     problems = []
-    s = ta.text_assist_settings_of({"models": {"large": "m"}, "tasks": {"command": {
+    s = ta.text_assist_settings_of({"models": {"large": "m"}, "tasks": {"chat": {
         "model": "large", "words": {"計画ファイル出力": ["発注書"], "jump": "飛んで", "天気": ["x"], "画像検索": [1]}}}}, problems)
-    t = s.task("command")
-    assert t.label == "文で操作" and t.max_tokens == 24 and t.prompt == ta.COMMAND_PROMPT and "command" in ta.LARGE_TASKS
+    t = s.task("chat")
+    assert t.label == "ミカゲと話す" and t.max_tokens == 400 and t.prompt == ta.DATA_PROMPT and ta.COMMAND_TOKENS == 24
     assert t.words == (("planFiles", ("発注書",)), ("jump", ("飛んで",)))
     assert len(problems) == 2 and "「天気」は操作にない" in problems[0] and "画像検索" in problems[1]
-    # words is 文で操作's only.
+    problems = []
+    s = ta.text_assist_settings_of({"models": {"large": "m"}, "tasks": {"command": {"model": "large", "words": {"jump": "飛んで"}}}},
+                                   problems)
+    assert s.task("command") is None and s.has("chat") and s.task("chat").words == (("jump", ("飛んで",)),)
+    assert len(problems) == 1 and "「ミカゲと話す」（chat）にまとめた" in problems[0]
+    # words is ミカゲと話す's only.
     problems = []
     ta.text_assist_settings_of({"models": {"large": "m"}, "tasks": {"tidyNote": {"model": "large", "words": {}}}}, problems)
     assert problems and "words" in problems[0]

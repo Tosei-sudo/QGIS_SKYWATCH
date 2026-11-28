@@ -1,7 +1,9 @@
 """
-文で操作's 画像検索 with the satellite kind (tsudo 2026-11-25: 「画像検索の文から生成AIでやるけん、衛星の種別も
-拾えないかな」): the card's 衛星・種別 read from the sentence by code, the catalog's sensors it names beside it, and
-the run putting them in 画像カタログ's センサー (several: any of them), or clearing it when the sentence names none.
+ミカゲと話す's 画像検索 (文で操作's until 2026-11-28) with the satellite kind (tsudo 2026-11-25: 「画像検索の文から生成AIで
+やるけん、衛星の種別も拾えないかな」): the card's 衛星・種別 read from the sentence by code, the catalog's sensors it names
+beside it, and the run putting them in 画像カタログ's センサー (several: any of them), or clearing it when the sentence
+names none. Images of a place asked for (a point, a named area, the map's extent) are searched behind the screen and
+answered in the chat (how many, the newest with 「開く」), and a follow-up opens them (「いちばん新しいのを開いて」).
 """
 import time
 
@@ -9,14 +11,15 @@ import pytest
 
 pytest.importorskip("qgis.core")
 
-from mikage.features.command import Command  # noqa: E402
+from mikage.features.chat import Chat  # noqa: E402
 from mikage.features.images import Images  # noqa: E402
 from mikage.features.plan import Plan  # noqa: E402
 from mikage.tests.qgis_fakes import wait_for  # noqa: E402
 from mikage.tests.test_qgis_requests import IMAGES, plugin  # noqa: E402,F401 (the fixture)
-from mikage.tests.test_qgis_text_command import _setup, records  # noqa: E402,F401 (a fixture)
+from mikage.tests.test_qgis_chat_operation import _setup, records, send  # noqa: E402,F401 (a fixture)
+from mikage.ui.chat_dock import ImagesCard, NoteCard  # noqa: E402
 
-PLUGIN_FEATURES = (Plan, Images, Command)
+PLUGIN_FEATURES = (Plan, Images, Chat)
 DAY = 86_400_000
 
 
@@ -31,13 +34,13 @@ def _ready(p, fake, tmp_path):
     for i, sensor in enumerate(["RADAR 1", "RADAR 2", "OPT 1", "OTHER"]):
         images.add({"IMAGE_ID": f"I{i}", "ACQ": now - DAY, "SENSOR": sensor, "URL": f"https://x.example/{i}.tif"},
                    ring(139.6, 35.2, 139.8, 35.4))
-    box, _loaded = _setup(p, tmp_path, [])
+    chat, _loaded = _setup(p, tmp_path, [])
     dock = p.docks["SatObsImageCatalog"]
-    command = p.feature(Command)
+    feature = p.feature(Chat)
     assert wait_for(lambda: dock.sensor_values() == ["OPT 1", "OTHER", "RADAR 1", "RADAR 2"])
-    command.satellites()
-    assert wait_for(lambda: len(command.satellites()) == 2)
-    return box, dock
+    feature.satellites()
+    assert wait_for(lambda: len(feature.satellites()) == 2)
+    return chat, dock
 
 
 def asked_where(fake):
@@ -48,9 +51,8 @@ def asked_where(fake):
 
 def test_the_kind_said_searches_the_sensors_of_that_kind(plugin, records):
     p, iface, fake, tmp_path = plugin
-    box, dock = _ready(p, fake, tmp_path)
-    box.submit("昨日のSAR画像を探して")
-    card = box.card
+    chat, dock = _ready(p, fake, tmp_path)
+    card = send(chat, "昨日のSAR画像を探して")
     r = card.chosen()
     assert r.operation.key == "catalog" and r.sensors == ["SAR"] and card.sensors.text() == "SAR"
     assert card.sensors_row.isVisibleTo(card) and card.run_button.isEnabled()
@@ -58,18 +60,17 @@ def test_the_kind_said_searches_the_sensors_of_that_kind(plugin, records):
     assert card.sensors_note.text() == "→ RADAR 1・RADAR 2（2 センサー）。種別のわからない 1 は含めない"
     assert "OTHER" in card.sensors_note.toolTip()
     card.run_button.click()
-    assert not card.isVisible() and dock.isVisible() and dock.more.is_open()
+    assert card.finished and dock.isVisible() and dock.more.is_open()
     assert dock.sensor_box.currentText() == "RADAR 1、RADAR 2"
     assert wait_for(lambda: dock.search_button.isEnabled() and "SENSOR IN ('RADAR 1', 'RADAR 2')" in asked_where(fake))
-    assert box.message.endswith("・SAR（2 センサー） を検索")
+    assert card.message.endswith("・SAR（2 センサー） を検索")
     assert records[-1][3]["detail"]["sensors"] == ["SAR"]
 
 
 def test_a_satellite_said_and_the_value_changed_by_hand(plugin):
     p, iface, fake, tmp_path = plugin
-    box, dock = _ready(p, fake, tmp_path)
-    card = box.card
-    box.submit("OPT 1 の昨日の画像を探して")
+    chat, dock = _ready(p, fake, tmp_path)
+    card = send(chat, "OPT 1 の昨日の画像を探して")
     assert card.chosen().sensors == ["OPT 1"] and card.sensors_note.text() == "→ OPT 1（1 センサー）"
     # A name of no sensor of the catalog: said, the button off until it is put right or cleared.
     card.sensors.setText("NOPE")
@@ -80,7 +81,7 @@ def test_a_satellite_said_and_the_value_changed_by_hand(plugin):
     assert dock.sensor_box.currentText() == "OPT 1"
     assert wait_for(lambda: dock.search_button.isEnabled() and "SENSOR = 'OPT 1'" in asked_where(fake))
     # A sentence naming none: every sensor (the box cleared of what it had).
-    box.submit("昨日の画像を探して")
+    card = send(chat, "昨日の画像を探して")
     assert card.chosen().sensors == [] and card.sensors_note.text() == "（なし: すべてのセンサー）"
     card.run_button.click()
     assert dock.sensor_box.currentText() == ""
@@ -97,16 +98,53 @@ def test_ir_said_searches_the_ir_sensors(plugin):
     images = fake.layers[IMAGES]
     images.add({"IMAGE_ID": "I9", "ACQ": time.time() * 1000 - DAY, "SENSOR": "THERM 1", "URL": "https://x.example/9.tif"},
                ring(139.6, 35.2, 139.8, 35.4))
-    box, _loaded = _setup(p, tmp_path, [])
+    chat, _loaded = _setup(p, tmp_path, [])
     dock = p.docks["SatObsImageCatalog"]
-    command = p.feature(Command)
+    feature = p.feature(Chat)
     assert wait_for(lambda: "THERM 1" in (dock.sensor_values() or []))
-    command.satellites()
-    assert wait_for(lambda: len(command.satellites()) == 3)
-    assert [s.kind_name for s in command.satellites()] == ["光学", "SAR", "IR"]
-    box.submit("昨日の赤外画像を探して")
-    card = box.card
+    feature.satellites()
+    assert wait_for(lambda: len(feature.satellites()) == 3)
+    assert [s.kind_name for s in feature.satellites()] == ["光学", "SAR", "IR"]
+    card = send(chat, "昨日の赤外画像を探して")
     assert card.chosen().operation.key == "catalog" and card.sensors.text() == "IR"
     assert card.sensors_note.text().startswith("→ THERM 1（1 センサー）")
     card.run_button.click()
     assert dock.sensor_box.currentText() == "THERM 1"
+
+
+def test_images_of_a_place_answered_in_the_chat_and_opened_by_a_follow_up(plugin, records):
+    """「35.3, 139.7 の昨日のSAR画像を見せて」: searched behind the screen (no card, no model), the newest listed, then opened."""
+    p, iface, fake, tmp_path = plugin
+    chat, dock = _ready(p, fake, tmp_path)
+    images = fake.layers[IMAGES]
+    now = time.time() * 1000
+    images.add({"IMAGE_ID": "I8", "ACQ": now - DAY + 60_000, "SENSOR": "RADAR 1", "URL": "https://x.example/8.tif"},
+               ring(139.6, 35.2, 139.8, 35.4))
+    opened = []
+    dock.open_catalog_records = lambda catalog, records: opened.append([r.id for r in records]) or []
+    card = send(chat, "35.3, 139.7 の昨日のSAR画像を見せて", ImagesCard)
+    assert not dock.isVisible() and chat.last(NoteCard) is None
+    # The point's square searched, the SAR sensors only; the newest first.
+    where = asked_where(fake)
+    assert "SENSOR IN ('RADAR 1', 'RADAR 2')" in where
+    assert [r.id for r in card.found.records] == ["I8", "I0", "I1"]
+    assert card.said.text().endswith("・SAR（2 センサー）: 3 枚") and len(card.open_buttons) == 3
+    # A follow-up: the newest opened as from the catalog's list.
+    assert chat.send("いちばん新しいのを開いて")
+    assert opened == [["I8"]] and chat.last(NoteCard).text() == "画像を開いた: I8"
+    # A card's button, and 「カタログで見る」 (the dock in front, the records listed).
+    card.open_buttons[1].click()
+    assert opened[-1] == [card.found.records[1].id]
+    card.catalog_button.click()
+    assert dock.isVisible() and [r.id for r in dock.records] == [r.id for r in card.found.records]
+    # Nothing of 画像検索 recorded as an operation (no card was pressed).
+    assert not [r for r in records if r[0] == "command"]
+
+
+def test_images_searched_without_the_roles_for_the_catalog_are_not(plugin, monkeypatch):
+    p, iface, fake, tmp_path = plugin
+    chat, dock = _ready(p, fake, tmp_path)
+    monkeypatch.setattr(p, "allows", lambda feature: feature != "画像カタログ")
+    assert chat.send("35.3, 139.7 の昨日の画像を見せて")
+    assert wait_for(lambda: not chat.busy)
+    assert not chat.cards(ImagesCard)

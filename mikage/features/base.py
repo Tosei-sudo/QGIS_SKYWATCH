@@ -145,7 +145,7 @@ class Feature:
 
     def text_operations(self) -> dict:
         """
-        {operation key (core/text_command.OPERATIONS): run(reading, place) -> what was done}: 文で操作's operations on its
+        {operation key (core/text_command.OPERATIONS): run(reading, place) -> what was done}: ミカゲと話す's operations on its
         docks (ui/command_runs.py), those the settings have what they need for (asked each time a sentence is read).
         """
         return {}

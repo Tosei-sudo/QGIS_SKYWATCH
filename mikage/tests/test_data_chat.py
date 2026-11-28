@@ -14,7 +14,7 @@ from mikage.core import analysis_plan
 from mikage.core import data_chat as dc
 from mikage.core.analysis import Column, Table, fold
 from mikage.core.obs.model import DEFAULT_OBSERVATION_FIELDS
-from mikage.core.text_assist import task_of, text_assist_settings_of
+from mikage.core.text_assist import DATA_PROMPT, task_of, text_assist_settings_of
 
 NOW = datetime(2026, 11, 24, 10, 0)
 AREA_ROLES = {"name": "NAME", "kind": "KIND", "active": "ACTIVE", "id": "NAMED_AREA_ID"}
@@ -63,28 +63,50 @@ def test_a_server_model_and_the_task_of_its_own():
     problems = []
     s = text_assist_settings_of({
         "models": {"pc": "models/qwen3.5-9b", "gpu": {"url": "https://llm.example.local/v1", "model": "qwen3.8-27b", "timeoutSeconds": 120}},
-        "tasks": {"dataChat": {"model": "gpu", "tables": ["TBL_OBSERVATION", "request"], "rules": ["「艦艇」は KIND LIKE '%艦艇%'"],
-                               "examples": [{"question": "今日の記録は？", "sql": "SELECT COUNT(*) FROM TBL_OBSERVATION"}]},
-                  "command": "pc"}}, problems)
+        "tasks": {"chat": {"model": "gpu", "tables": ["TBL_OBSERVATION", "request"], "rules": ["「艦艇」は KIND LIKE '%艦艇%'"],
+                           "examples": [{"question": "今日の記録は？", "sql": "SELECT COUNT(*) FROM TBL_OBSERVATION"}]},
+                  "tidyNote": "pc"}}, problems)
     assert problems == []
-    m = s.model_for("dataChat")
+    m = s.model_for("chat")
     assert m.on_server and m.remote == "qwen3.8-27b" and m.timeout == 120 and m.path == ""
     assert m.chat_url == "https://llm.example.local/v1/chat/completions"
-    t = s.task("dataChat")
-    assert t.label == "データに質問" and t.max_tokens == 400 and t.tables == ("TBL_OBSERVATION", "request")
+    t = s.task("chat")
+    assert t.label == "ミカゲと話す" and t.max_tokens == 400 and t.tables == ("TBL_OBSERVATION", "request")
     assert t.rules == ("「艦艇」は KIND LIKE '%艦艇%'",) and t.examples == (("今日の記録は？", "SELECT COUNT(*) FROM TBL_OBSERVATION"),)
-    assert not s.model_for("command").on_server
+    assert not s.model_for("tidyNote").on_server
+
+
+def test_the_older_tasks_are_read_as_the_chat():
+    """データに質問 (dataChat) and 文で操作 (command) became ミカゲと話す (chat), 2026-11-28: read as it, and said."""
+    problems = []
+    s = text_assist_settings_of({
+        "models": {"pc": "models/qwen3.5-9b", "small": "models/sarashina-3b"},
+        "tasks": {"dataChat": {"model": "pc", "tables": ["TBL_OBSERVATION"], "maxTokens": 300},
+                  "command": {"model": "small", "words": {"jump": "飛んで"}}}}, problems)
+    assert s.task("dataChat") is None and s.task("command") is None
+    t = s.task("chat")
+    assert t.model == "pc" and t.tables == ("TBL_OBSERVATION",) and t.max_tokens == 300 and t.words == (("jump", ("飛んで",)),)
+    assert len(problems) == 1 and "command・dataChat は「ミカゲと話す」（chat）にまとめた" in problems[0]
+    # 文で操作 alone: its model.
+    problems = []
+    s = text_assist_settings_of({"models": {"small": "models/sarashina-3b"}, "tasks": {"command": "small"}}, problems)
+    assert s.task("chat").model == "small" and s.task("chat").prompt == DATA_PROMPT
+    # chat given: the older ones are not used.
+    problems = []
+    s = text_assist_settings_of({"models": {"pc": "models/qwen3.5-9b", "small": "models/sarashina-3b"},
+                                 "tasks": {"chat": "pc", "dataChat": "small"}}, problems)
+    assert s.task("chat").model == "pc" and s.task("dataChat") is None and "chat があるため" in problems[0]
 
 
 def test_a_server_model_written_wrong_is_said():
     problems = []
     s = text_assist_settings_of({"models": {"a": {"url": "llm.local"}, "b": {"url": "http://x/v1", "path": "m", "timeoutSeconds": 1}},
-                                 "tasks": {"dataChat": {"model": "b", "tables": "TBL_OBSERVATION", "examples": [{"q": 1}]}}}, problems)
+                                 "tasks": {"chat": {"model": "b", "tables": "TBL_OBSERVATION", "examples": [{"q": 1}]}}}, problems)
     assert any("models.a.url" in p for p in problems)
     assert any("path と url" in p for p in problems) and any("timeoutSeconds" in p for p in problems)
     assert any("examples[0]" in p for p in problems)
     # A table named alone is a list of one.
-    assert s.task("dataChat").tables == ("TBL_OBSERVATION",)
+    assert s.task("chat").tables == ("TBL_OBSERVATION",)
 
 
 # ---- what the model is told -------------------------------------------------------------------------
@@ -125,7 +147,7 @@ def test_the_dates_and_the_labels_of_a_result():
 def test_the_conversation_with_examples_of_the_tables_own_names_and_a_follow_up():
     values = {("TBL_NAMED_AREA", "NAME"): ["呉", "横須賀"], ("TBL_OBSERVATION", "CONFIDENCE"): ["推定", "確定"]}
     schema = _schema(values)
-    task = task_of("dataChat", "pc")
+    task = task_of("chat", "pc")
     history = [dc.Turn("先月の呉の記録は何件？", "SELECT COUNT(*) FROM TBL_OBSERVATION WHERE PLACE_NAME = '呉'")]
     m = dc.sql_messages(task, schema, dc.Periods(NOW), "では舞鶴は？", history, values)
     assert m[0]["role"] == "system" and m[0]["content"].startswith(task.prompt) and m[0]["content"].endswith("【ここまで】")

@@ -5,7 +5,7 @@ widgets and state.
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import Callable, Optional
 
 from qgis.core import QgsMapLayer
 
@@ -70,11 +70,14 @@ class AreasPart:
         self._show_layer_row()
 
     def search_area_period(self, start: str, end: str, corners: Optional[list] = None, anywhere: bool = False,
-                           sensor: Optional[str] = None) -> None:
+                           sensor: Optional[str] = None, extent: bool = False, front: bool = True,
+                           searched: Optional[Callable[[Optional[tuple], str], None]] = None) -> None:
         """
         Searched over a period (its first and last days, "" open) and an area (its corners in WGS 84; `anywhere`:
-        no area, not whatever area the dock had before), the dock in front (イベント's 「カタログで検索」).
-        `sensor` (文で操作's 画像検索): the センサー box's, 詳細条件 opened to show it ("" every sensor; None: as it is).
+        no area, not whatever area the dock had before; `extent`: the map's extent when there are no corners), the
+        dock in front unless not `front` (イベント's 「カタログで検索」; ミカゲと話す's 画像検索 searches behind).
+        `sensor` (ミカゲと話す's 画像検索): the センサー box's, 詳細条件 opened to show it ("" every sensor; None: as it is).
+        `searched((catalog, records newest first, how many match or None), "")` once read, or `(None, why not)`.
         """
         self.acquired_from.setText(start)
         self.acquired_to.setText(end)
@@ -86,9 +89,12 @@ class AreasPart:
             self.area_box.setCurrentIndex(self.area_box.findData("none"))
         else:
             self.set_drawn(corners)
-        self.show()
-        self.raise_()
-        self.search()
+            if extent and not corners:
+                self.area_box.setCurrentIndex(self.area_box.findData("extent"))
+        if front:
+            self.show()
+            self.raise_()
+        self.search(searched)
 
     def show_event_records(self, catalog: CatalogConfig, records, text: str) -> None:
         """The records listed with what they are in the status line, the dock in front (イベント's 「カタログに表示」)."""
