@@ -79,10 +79,13 @@ def test_the_chat_shows_only_while_the_task_has_a_model(plugin):
     p, iface, fake, tmp_path = plugin
     dock, _loaded = _setup(p, tmp_path, [], task=False)
     assert "ミカゲと話す" in p.hidden_entries and not dock.chat.offered and p.open_chat("x") is None
+    assert "ミカゲと話す" not in [a.text() for a in p.toolbar.actions()]
     # No toolbar of 文で操作 any more.
     assert iface.mainWindow().findChild(object, "MikageCommandToolbar") is None and not hasattr(p, "command_box")
     dock, _loaded = _setup(p, tmp_path, [])
     assert "ミカゲと話す" not in p.hidden_entries and dock.chat.offered and p.open_chat() is dock and dock.isVisible()
+    # Its button on the toolbar, where 文で操作's box was.
+    assert "ミカゲと話す" in [a.text() for a in p.toolbar.actions()]
     # The operations of the features there (撮像計画・撮像依頼・地図; no 画像カタログ, no 観測記録 in this assembly).
     keys = [o.key for o in p.feature(Chat).operations()]
     assert keys == ["planFiles", "schedule", "follow", "quotas", "passes", "placeSchedule", "imagingPlan", "newRequest", "jump",
