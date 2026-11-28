@@ -148,8 +148,13 @@ class Platform(Feature):
         from ..ui.help_dialog import HelpDialog
 
         host = self.host
+        keeper = getattr(host, "feature_use", None)
+        if keeper is not None:
+            keeper.help_opened()
         if host.help_dialog is None:
             host.help_dialog = HelpDialog(host.run_menu_entry, self.window())
+            if keeper is not None:
+                keeper.watch_help(host.help_dialog)
             if not section and edition.training_only():
                 section = TRAINING_EDITION_HELP
         host.help_dialog.show()

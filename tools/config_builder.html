@@ -2165,7 +2165,7 @@ const SPEC = [
         N("keepDays", "この PC に残す日数", { min: 1, ph: "90", help: "送り終えたものだけ消す" }),
         T("localFolder", "この PC の保存先", { help: "既定は QGIS のプロファイルの mikage/audit" }),
       ]) },
-    { key: "featureUse", label: "機能の使われ方", doc: "機能の使われ方featureuse", help: "どのメニュー・ボタン・ドックがどれだけ使われたか（日・担当・機能・どこからごとの回数）を数え、1 時間ごとに増えた分を Esri の表に行として足す（メニュー「機能の使われ方…」で集計）。利用者名・入力した文字・画像や記録の中身は記録しない。書かなければこの PC の中だけで数える。false で数えない。",
+    { key: "featureUse", label: "機能の使われ方", doc: "機能の使われ方featureuse", help: "どのメニュー・ボタン・ドックがどれだけ使われたか（日・担当・機能・どこからごとの回数）と、迷った時間（使うまでの時間・使わずに閉じた回数・ヘルプ・エラーコード）を数え、1 時間ごとに増えた分を Esri の表に行として足す（メニュー「機能の使われ方…」で集計）。利用者名・入力した文字（ヘルプで見つからなかった検索語のほか）・画像や記録の中身は記録しない。書かなければこの PC の中だけで数える。false で数えない。",
       field: TJ("featureUse", "使われ方のテーブル（行を足すだけ）", { ph: "URL か { \"url\", \"fields\", \"sendMinutes\" } か false", help: "TBL_FEATURE_USE。役割: " + Object.entries(K.roles.featureUse).map(([k, v]) => `${k}（${v}）`).join("・") + "。sendMinutes は送る間隔（分、既定 60・5 以上）。作成者・更新者の属性は付けない" }) },
   ] },
   { group: "日時", keys: [

@@ -337,7 +337,9 @@ class MikagePlugin:
         keeper = self.feature_use
         if keeper is None:
             return
-        menus = [*self._submenus, plugin_menu(self.iface, menu_name())]
+        root = plugin_menu(self.iface, menu_name())
+        menus = [*self._submenus, root]
+        keeper.watch_menu(root, self._submenus)
         keeper.watch_entries(self._entries_in_menu_order(), menus, self.toolbar, [d.toggleViewAction() for d in self.docks.values()])
         if self.toolbar_buttons is not None:
             self.toolbar_buttons.filled = keeper.watch_toolbar
@@ -554,12 +556,15 @@ class MikagePlugin:
             self.iface.messageBar().pushInfo(tr(text), tr(role_refusal(tr(text))))
             return False
         keeper = self.feature_use
-        dock = next((d for d in self.docks.values() if d.toggleViewAction() is action), None)
-        if dock is not None:
+        name = next((n for n, d in self.docks.items() if d.toggleViewAction() is action), None)
+        if name is not None:
+            dock = self.docks[name]
             if keeper is not None:
                 keeper.used(tr(text), via)
             dock.show()
             dock.raise_()
+            if keeper is not None:
+                keeper.dock_opened(name)
             return True
         if action.menu() is not None:  # a submenu (背景地図): shown where the mouse is
             if keeper is not None:

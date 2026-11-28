@@ -11,6 +11,10 @@ leads to its row in the help's 「エラーコード一覧」.
 
 The help is opened by what the plugin gives `set_opener` (its 「使い方（ヘルプ）」);
 before that (and after the plugin is unloaded) nothing reacts.
+
+A code shown (a status line painted with a new text that has one, a message
+bar item with one) is told to what `set_seen` was given: 機能の使われ方's 迷い
+counts the codes by screen (ui/feature_use.py).
 """
 from __future__ import annotations
 
@@ -30,6 +34,10 @@ _SHOWN = re.compile(r"［(E\d{3})］")
 _HAND = "mikage_error_hand"
 
 _opener: Optional[Callable[[str], object]] = None
+#: What is told of each code shown: (code, the status line, or None for the message bar).
+_seen: Optional[Callable[[str, object], None]] = None
+#: The text (a line's) or the code (a bar item's) last told.
+_SEEN = "mikage_error_seen"
 
 
 def tr(text: str) -> str:
@@ -48,6 +56,20 @@ def set_opener(open_help: Optional[Callable[[str], object]]) -> None:
     """What opens the help at a code (the plugin's 「使い方（ヘルプ）」); None: nothing opens it."""
     global _opener
     _opener = open_help
+
+
+def set_seen(seen: Optional[Callable[[str, object], None]]) -> None:
+    """What is told of each error code shown (None: nothing)."""
+    global _seen
+    _seen = seen
+
+
+def _tell(code: str, widget) -> None:
+    try:
+        if _seen is not None:
+            _seen(code, widget)
+    except Exception:  # noqa: BLE001 (counting never breaks a message)
+        pass
 
 
 def open_code(code: str) -> bool:
@@ -69,7 +91,16 @@ class _LabelClicks(QObject):
         if not isinstance(watched, QLabel):
             return False
         kind = event.type()
-        if kind == QEvent.Type.Enter:
+        if kind == QEvent.Type.Paint:
+            # Shown with a new text (a hidden line is not painted).
+            if _seen is not None:
+                text = watched.text()
+                if watched.property(_SEEN) != text:
+                    watched.setProperty(_SEEN, text)
+                    code = shown_code(text)
+                    if code is not None:
+                        _tell(code, watched)
+        elif kind == QEvent.Type.Enter:
             self._cursor(watched)
         elif kind == QEvent.Type.ToolTip:
             code = shown_code(watched.text()) if _opener is not None else None
@@ -151,6 +182,9 @@ class BarHelp(QObject):
                 layout.addWidget(button)
             button.setProperty(_CODE, code)
             button.setToolTip(tr("{c} の原因と対処法をヘルプで見る").format(c=code))
+            if item.property(_SEEN) != code:
+                item.setProperty(_SEEN, code)
+                _tell(code, None)
         except (TypeError, RuntimeError, AttributeError):
             pass
 
