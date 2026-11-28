@@ -40,11 +40,12 @@ from .ui.audit_status import AuditKeeper
 from .ui.dock_layouts import float_docks
 from .ui.offline_status import OfflineController
 from .ui.ports import PluginEvents, Ports
-from .ui.shortcuts import Shortcuts
+from .ui.feature_use import FeatureUseKeeper, plugin_menu
+from .ui.shortcuts import OPENS, Shortcuts
 from .ui.toolbar_buttons import ToolbarButtons
 
 #: The entries hidden in MIKAGE 練習版 whatever the settings (core/edition.py): the audit log is not kept there.
-NOT_IN_TRAINING_EDITION = ("監査ログ…",)
+NOT_IN_TRAINING_EDITION = ("監査ログ…", "機能の使われ方…")
 #: The plugin's menu by area (tsudo, 2026-11-07): each group a submenu, its entries by their text in this order
 #: (None: a separator). The entries after the groups stay in the menu itself, 「設定…」 last. 2026-11-28 (点検 13):
 #: 移動体 with 画像's reading tools (as the help's 判読), ダッシュボード with データ分析, so 観測記録 holds the records' only.
@@ -63,7 +64,7 @@ MENU_GROUPS = [
                    "ArcGIS Web マップを開く…", "ArcGIS Web マップとして保存…"]),
 ]
 #: In the menu itself, after the groups (behind a separator).
-MENU_TOP = ["イベント", "参考情報", "担当と個人設定…", "ツールバーのボタン…", "ドックのレイアウト", "ドックを初期位置に戻す", "接続と表の点検…", "監査ログ…", "使い方（ヘルプ）…", "Python API リファレンス…", "設定…"]
+MENU_TOP = ["イベント", "参考情報", "担当と個人設定…", "ツールバーのボタン…", "ドックのレイアウト", "ドックを初期位置に戻す", "接続と表の点検…", "監査ログ…", "機能の使われ方…", "使い方（ヘルプ）…", "Python API リファレンス…", "設定…"]
 #: Where the docks start: each group docked on one side, as tabs (the first in front).
 DOCK_GROUPS = [
     (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsImagingPlan", "SatObsSatellitePass", "SatObsRequests", "SatObsPlanFiles",
@@ -145,6 +146,8 @@ class MikagePlugin:
         self.offline: Optional[OfflineController] = None
         #: 監査ログ: the log of operations kept and sent to the settings file's folder (ui/audit_status.py, core/audit.py).
         self.audit: Optional[AuditKeeper] = None
+        #: 機能の使われ方: how often each entry and dock control is used, counted and sent (ui/feature_use.py, core/feature_use.py).
+        self.feature_use: Optional[FeatureUseKeeper] = None
         #: The menu's entries as added, its submenus (MENU_GROUPS) and what sits in the menu itself.
         self._menu_entries: list[QAction] = []
         self._submenus: list[QMenu] = []
@@ -261,6 +264,8 @@ class MikagePlugin:
         # 監査ログ before anything that records (its writing and sending run in threads of their own); none in
         # MIKAGE 練習版 (only practice: nothing of the production done).
         self.audit = None if edition.training_only() else AuditKeeper(self.iface, self.context, window)
+        # 機能の使われ方 (counted in memory; kept and sent by hidden tasks); none in MIKAGE 練習版 either.
+        self.feature_use = None if edition.training_only() else FeatureUseKeeper(self.context, parent=window)
         # 一時的なオフライン作業: the status-bar button, the checks while a server is down, and the question when it is back.
         self.offline = OfflineController(self.iface, self.context, lambda: self._after_offline(True), window,
                                          refresh_docks=lambda: self._after_offline(False))
@@ -300,6 +305,7 @@ class MikagePlugin:
         # What the roles in use do not use put away (and again whenever they change: chosen, or read from `userRoles`).
         self.role_keeper.changed.connect(self.apply_roles)
         self.apply_roles()
+        self._watch_use()
         self.clock.step("メニュー・ツールバー")
         self._add_preload_items()
         self.context.configChanged.connect(self._config_read_for_preload)
@@ -325,6 +331,30 @@ class MikagePlugin:
                 QTimer.singleShot(300, lambda: self.open_first_setup(first=True))
             else:
                 started.connect(self._first_setup_after_start)
+
+    def _watch_use(self) -> None:
+        """機能の使われ方: the menu's entries, its menus and toolbar, the keys and the docks listened to."""
+        keeper = self.feature_use
+        if keeper is None:
+            return
+        menus = [*self._submenus, plugin_menu(self.iface, menu_name())]
+        keeper.watch_entries(self._entries_in_menu_order(), menus, self.toolbar, [d.toggleViewAction() for d in self.docks.values()])
+        if self.toolbar_buttons is not None:
+            self.toolbar_buttons.filled = keeper.watch_toolbar
+        if self.shortcuts is not None:
+            keeper.watch_shortcuts(self.shortcuts.actions, self._dock_features, OPENS)
+        keeper.watch_docks(self.docks, self._dock_features)
+
+    def use_known(self, role: str) -> list:
+        """「機能の使われ方…」's features listed with 0 for the people of `role` ("": everyone, NONE: no role ticked)."""
+        from .core import feature_use, roles
+
+        if self.feature_use is None:
+            return []
+        codes = [] if role == feature_use.NO_ROLE else [role]
+        allows = (lambda _text: True) if not role else (lambda text: roles.allows(text, codes))
+        entries = [t for t in self._entries_in_menu_order() if t not in self.hidden_entries]
+        return self.feature_use.known(lambda text: text not in self.hidden_entries and allows(text), entries)
 
     def _make_docks(self) -> None:
         """The features' docks in DOCK_ORDER, each docked where DOCK_GROUPS puts it, its entry in the menu."""
@@ -477,6 +507,8 @@ class MikagePlugin:
         """
         if self.context is None:
             return
+        if self.feature_use is not None and self.role_keeper is not None:
+            self.feature_use.set_roles(self.role_keeper.codes)
         for action in self._menu_entries:
             action.setVisible(self.allows(self._entry_text(action)))
         for menu in self._submenus:
@@ -509,8 +541,11 @@ class MikagePlugin:
         """The menu entry of this text (its button on the toolbar is the same action); None when there is none."""
         return self._entries_in_menu_order().get(tr(text))
 
-    def run_menu_entry(self, text: str) -> bool:
-        """The help's 「…を開く」 links: the menu entry of that text (a dock comes to the front, never closes)."""
+    def run_menu_entry(self, text: str, via: str = "HELP") -> bool:
+        """
+        The help's 「…を開く」 links (and 文で操作's 「画面を開く」, `via` COMMAND): the menu entry of that text
+        (a dock comes to the front, never closes).
+        """
         action = self._entries_in_menu_order().get(tr(text))
         if action is None:
             return False
@@ -518,17 +553,27 @@ class MikagePlugin:
             # The help links to every feature: one the roles in use do not have says how to get it.
             self.iface.messageBar().pushInfo(tr(text), tr(role_refusal(tr(text))))
             return False
+        keeper = self.feature_use
         dock = next((d for d in self.docks.values() if d.toggleViewAction() is action), None)
         if dock is not None:
+            if keeper is not None:
+                keeper.used(tr(text), via)
             dock.show()
             dock.raise_()
             return True
         if action.menu() is not None:  # a submenu (背景地図): shown where the mouse is
+            if keeper is not None:
+                keeper.used(tr(text), via)
+                keeper.popup_claimed(tr(text))
             action.menu().popup(QCursor.pos())
             return True
         if action.objectName() == "SatObsNoticeFeed":  # the page, not back to the map when it is in front
+            if keeper is not None:
+                keeper.used(tr(text), via)
             self.show_notice_feed()
             return True
+        if keeper is not None:
+            keeper.claim(action, via)
         action.trigger()
         return True
 
@@ -622,7 +667,9 @@ class MikagePlugin:
         for text in [t for t in MAP_MENU if t in entries] + [t for t in entries if t not in MAP_MENU]:
             action = menu.addAction(tr(text))
 
-            def at_point(_on=False, run=entries[text]) -> None:
+            def at_point(_on=False, run=entries[text], text=text) -> None:
+                if self.feature_use is not None:
+                    self.feature_use.used(tr(text), "MAP_MENU")
                 p = to_wgs84(canvas.mapSettings().destinationCrs()).transform(point)
                 run(p.x(), p.y())
 
@@ -677,6 +724,9 @@ class MikagePlugin:
         if self.shortcuts is not None:
             self.shortcuts.unload()
             self.shortcuts = None
+        # The last counts into this PC's file while the docks are still there (sent at the next start).
+        if self.feature_use is not None:
+            self.feature_use.unload()
         overviews_io.queue.cancel_all()
         local_copy_io.queue.cancel_all()
         # overviews.location "temp": its .ovr go as QGIS closes (what is still open, at the next start); localCopy's too.
@@ -738,6 +788,9 @@ class MikagePlugin:
         if self.audit is not None:
             self.audit.unload()
             self.audit = None
+        if self.feature_use is not None:
+            self.feature_use.deleteLater()
+            self.feature_use = None
         if self.context is not None:
             self.context.close()
             self.context.deleteLater()

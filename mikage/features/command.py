@@ -181,7 +181,7 @@ class Command(Feature):
         """The operation done by the feature that has it, with the card's values; what was done."""
         key = reading.operation.key
         if key == "openScreen":
-            if not self.host.run_menu_entry(reading.screen):
+            if not self.host.run_menu_entry(reading.screen, via="COMMAND"):
                 raise RuntimeError(tr("「{s}」を開けない").format(s=reading.screen))
             return tr("{s} を開いた").format(s=reading.screen)
         run = self.host.text_operations().get(key)

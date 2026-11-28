@@ -20,6 +20,7 @@ from .ai_results import AiResultSource, ai_continuation_of, ai_result_source_of
 from .auth import ArcgisPortalConfig, arcgis_portal_of
 from .sign_in import SignInRule, sign_in_rules_of
 from .audit import DEFAULT_AUDIT, AuditSettings, audit_log_of
+from .feature_use import DEFAULT_FEATURE_USE, FeatureUseSettings, feature_use_of
 from .training.api import DEFAULT_TRAINING, TrainingSettings, training_settings_of
 from .edit_stamp import DEFAULT_EDIT_TRACKING, EditTracking, edit_tracking_of
 from .basemaps import DEFAULT_BASE_MAPS, BaseMapConfig, base_maps_of, default_base_map_of
@@ -147,6 +148,8 @@ class PluginConfig:
     edit_tracking: EditTracking = DEFAULT_EDIT_TRACKING
     #: `auditLog`: the audit log of operations (監査ログ) and the folder it is sent to.
     audit_log: AuditSettings = DEFAULT_AUDIT
+    #: `featureUse`: how often each menu entry and dock control is used (機能の使われ方), and the table it is sent to.
+    feature_use: FeatureUseSettings = DEFAULT_FEATURE_USE
     #: `alertReports`: notable records as delimited text (通報); None hides it.
     alert_reports: Optional[AlertSettings] = None
     #: `observationExports`: the named formats (CSV / JSON) of 観測記録の書き出し, besides the built-in ones.
@@ -395,6 +398,7 @@ SECTIONS = (
     Section("requestExports", "request_exports", export_systems_of),
     Section("editTracking", "edit_tracking", edit_tracking_of),
     Section("auditLog", "audit_log", audit_log_of),
+    Section("featureUse", "feature_use", feature_use_of),
     Section("alertReports", "alert_reports", alert_settings_of),
     Section("observationExports", "observation_exports", export_settings_of),
     Section("assignments", "assignments", assignment_source_of),

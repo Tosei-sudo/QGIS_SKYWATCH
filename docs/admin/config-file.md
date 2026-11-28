@@ -209,6 +209,7 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 | --- | --- | --- | --- | --- |
 | `editTracking` | オブジェクトか `false` | 書き込む Esri のレイヤー・テーブルの作成日時・作成者・更新日時・更新者。`userVariable`（ユーザー名の環境変数、既定 `USERNAME`）、`user`（固定のユーザー名）、`fields`（`createdAt`・`createdBy`・`updatedAt`・`updatedBy`。既定 `CREATED_DATE`・`CREATED_USER`・`UPDATED_DATE`・`UPDATED_USER`）、`enabled`。`false` で書かない | 既定の属性名があるレイヤーに書く | [作成者・更新者の記録](operations.md#作成者更新者の記録edittracking) |
 | `auditLog` | オブジェクト・文字列（送り先）か `false` | 操作の監査ログと自動送信。`folder`（送り先、`{user}`・`{computer}`・`{yyyy}`・`{mm}`・`{dd}`）、`sendMinutes`（既定 10）、`format`（`jsonl`・`csv`）、`encoding`、`events`（`session`・`config`・`edit`・`offline`・`open`・`export`・`copy`・`error`）、`values`、`keepDays`（既定 90）、`localFolder`、`enabled`。`false` で記録しない | この PC にだけ記録（送らない） | [監査ログ](operations.md#監査ログauditlog) |
+| `featureUse` | 文字列（URL）・オブジェクトか `false` | 機能の使われ方の回数を足していくテーブル（`TBL_FEATURE_USE`）。`url`・`fields`（`date`・`user`・`roles`・`dock`・`feature`・`place`・`count`・`minutes`・`version`・`send`）・`where`（集計で読む行）・`sendMinutes`（既定 60、5 以上）・`enabled`。`false` で数えない | この PC の中だけで数える（送らない） | [機能の使われ方](operations.md#機能の使われ方featureuse) |
 
 #### 日時
 

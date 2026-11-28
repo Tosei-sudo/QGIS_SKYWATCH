@@ -152,6 +152,16 @@ def own_audit_folder(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def own_feature_use_folder(monkeypatch, tmp_path):
+    """Each test's counts of 機能の使われ方 are kept in its own folder, never the profile's."""
+    try:
+        from mikage.ui import feature_use
+    except ImportError:  # no QGIS
+        return
+    monkeypatch.setattr(feature_use, "default_folder", lambda: str(tmp_path / "feature-use"))
+
+
+@pytest.fixture(autouse=True)
 def no_time_zone_rules():
     """Each test starts with no settings file's time zones (they are module state, as in the viewer)."""
     from mikage.core import time_zone

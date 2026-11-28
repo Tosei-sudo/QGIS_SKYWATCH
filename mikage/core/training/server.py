@@ -14,7 +14,9 @@ What it answers (as ArcGIS Server 11 does, for what the plugin and QGIS ask):
         /query           where (SQL, run by SQLite), objectIds, geometry (box),
                          outFields, orderByFields, resultOffset / resultRecordCount,
                          returnIdsOnly, returnCountOnly, returnExtentOnly,
-                         returnDistinctValues, outSR / inSR (4326, 3857)
+                         returnDistinctValues, outSR / inSR (4326, 3857),
+                         outStatistics (sum, count, min, max, avg) with
+                         groupByFieldsForStatistics (paged as the features)
         /applyEdits      adds, updates, deletes (rollbackOnFailure)
         /addFeatures, /updateFeatures, /deleteFeatures
     /arcgis/rest/services/<name>/FeatureServer/applyEdits   edits of several layers
@@ -22,7 +24,7 @@ What it answers (as ArcGIS Server 11 does, for what the plugin and QGIS ask):
     /files/<path>        the files under <data>/files (HTTP ranges, for /vsicurl/)
 
 Not a full server: geometry filters compare bounding boxes, there are no
-attachments, statistics, versions or relationships. The layers are defined
+attachments, versions or relationships. The layers are defined
 in JSON (see sample.py and scripts/mock_esri/README.md). A layer can have
 the two kinds of attribute rule the plugin's tables use (`attributeRules`: a
 field set to the OBJECTID of the smallest polygon of another layer holding
@@ -583,6 +585,17 @@ class Store:
             finally:
                 self.db.row_factory = None
 
+    def rows(self, sql: str, args: Iterable[Any] = ()) -> list[dict]:
+        """The rows of a SELECT (each a dict by column name)."""
+        with self.lock:
+            self.db.row_factory = sqlite3.Row
+            try:
+                return [dict(r) for r in self.db.execute(sql, list(args))]
+            except sqlite3.Error as error:
+                raise ServiceError("集計できない", details=[str(error)]) from None
+            finally:
+                self.db.row_factory = None
+
     def count(self, layer: Layer) -> int:
         with self.lock:
             return self.db.execute(f"SELECT COUNT(*) FROM {layer.table}").fetchone()[0]
@@ -628,11 +641,12 @@ class Service:
             "currentVersion": VERSION, "id": layer.id, "name": layer.name, "type": "Table" if layer.is_table else "Feature Layer",
             "description": layer.description, "copyrightText": "mock_esri", "defaultVisibility": True,
             "editFieldsInfo": None, "relationships": [], "isDataVersioned": False,
-            "supportsRollbackOnFailureParameter": True, "supportsStatistics": False, "supportsAdvancedQueries": True,
+            "supportsRollbackOnFailureParameter": True, "supportsStatistics": True, "supportsAdvancedQueries": True,
             "supportsCoordinatesQuantization": False, "supportsApplyEditsWithGlobalIds": False,
             "advancedQueryCapabilities": {"supportsPagination": layer.pagination, "supportsOrderBy": True, "supportsDistinct": True,
                                           "supportsQueryWithResultType": False, "supportsReturningGeometryCentroid": False,
-                                          "supportsStatistics": False, "supportsCountDistinct": False},
+                                          "supportsStatistics": True, "supportsCountDistinct": False,
+                                          "supportsPaginationOnAggregatedQueries": layer.pagination},
             "objectIdField": layer.oid, "globalIdField": "", "displayField": next((f["name"] for f in layer.fields[1:] if f["type"] == "esriFieldTypeString"), layer.oid),
             "typeIdField": "", "types": [], "templates": [], "fields": layer.fields,
             "maxRecordCount": layer.max_record_count, "standardMaxRecordCount": layer.max_record_count,
@@ -705,6 +719,8 @@ class Service:
                 params.extend([box[2], box[0], box[3], box[1]])
         sql = " AND ".join(clauses)
         oid = layer.oid
+        if (form.get("outStatistics") or "").strip():
+            return self._statistics(layer, form, sql, params)
         if _truthy(form.get("returnIdsOnly")):
             ids = [r["oid"] for r in self.store.select(layer, sql, params)]
             if _truthy(form.get("returnCountOnly")):
@@ -764,6 +780,50 @@ class Service:
         if not layer.is_table:
             answer["geometryType"] = layer.geometry_type
             answer["spatialReference"] = {"wkid": out_sr, "latestWkid": 3857 if out_sr in MERCATOR else out_sr}
+        if offset + size < len(features):
+            answer["exceededTransferLimit"] = True
+        return answer
+
+    #: outStatistics' statistic types and their SQL.
+    STATISTICS = {"sum": "SUM", "count": "COUNT", "min": "MIN", "max": "MAX", "avg": "AVG"}
+
+    def _statistics(self, layer: Layer, form: dict[str, str], sql: str, params: list) -> dict:
+        """outStatistics (with groupByFieldsForStatistics): one feature per group, its fields and the statistics named."""
+        stats = self._json(form, "outStatistics", [])
+        if not isinstance(stats, list) or not stats or not all(isinstance(x, dict) for x in stats):
+            raise ServiceError("outStatistics が読めない")
+        columns = layer.columns()
+        by_upper = {f["name"].upper(): f for f in layer.fields}
+        groups = [g.strip().strip('"') for g in (form.get("groupByFieldsForStatistics") or "").split(",") if g.strip()]
+        for g in groups:
+            if g.upper() not in columns:
+                raise ServiceError("groupByFieldsForStatistics に存在しない属性", details=[g])
+        selects = [f"{columns[g.upper()]} AS {q(by_upper[g.upper()]['name'])}" for g in groups]
+        fields = [{k: v for k, v in by_upper[g.upper()].items() if k in ("name", "type", "alias", "length")} for g in groups]
+        for x in stats:
+            kind = str(x.get("statisticType") or "").lower()
+            on = str(x.get("onStatisticField") or "")
+            name = str(x.get("outStatisticFieldName") or f"{kind}_{on}")
+            if kind not in self.STATISTICS:
+                raise ServiceError("statisticType が使えない", details=[kind])
+            if on.upper() not in columns and not (kind == "count" and on in ("*", "1")):
+                raise ServiceError("onStatisticField に存在しない属性", details=[on])
+            selects.append(f"{self.STATISTICS[kind]}({columns.get(on.upper(), '*')}) AS {q(name)}")
+            kind_type = ("esriFieldTypeDouble" if kind in ("sum", "avg") else "esriFieldTypeInteger" if kind == "count"
+                         else by_upper[on.upper()]["type"])
+            fields.append({"name": name, "type": kind_type, "alias": name})
+        group = (" GROUP BY " + ", ".join(columns[g.upper()] for g in groups)) if groups else ""
+        order = ", ".join(columns[g.upper()] for g in groups) or "1"
+        rows = self.store.rows(f"SELECT {', '.join(selects)} FROM {layer.table} WHERE {sql}{group} ORDER BY {order}", params)
+        features = [{"attributes": row} for row in rows]
+        offset = int(float(form.get("resultOffset") or 0))
+        if "resultOffset" in form and not layer.pagination:
+            raise ServiceError("ページングは使えない（supportsPaginationOnAggregatedQueries: false）")
+        size = layer.max_record_count
+        if form.get("resultRecordCount", "").strip():
+            size = max(1, min(size, int(float(form["resultRecordCount"]))))
+        answer: dict[str, Any] = {"displayFieldName": "", "fieldAliases": {f["name"]: f.get("alias", f["name"]) for f in fields},
+                                  "fields": fields, "features": features[offset:offset + size]}
         if offset + size < len(features):
             answer["exceededTransferLimit"] = True
         return answer
