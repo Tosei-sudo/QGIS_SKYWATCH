@@ -65,6 +65,18 @@ def ask_discard(parent: Optional[QWidget], work: OfflineWork) -> bool:
                   yes=tr("破棄"))
 
 
+def slow_text(slowness) -> str:
+    """「応答が遅い（12 秒待ち）」 of OfflineWork.slowness(); "" when the servers answer quickly."""
+    if not slowness:
+        return ""
+    _host, seconds, waiting = slowness
+    return tr("応答が遅い（{s} 秒待ち）").format(s=int(seconds)) if waiting else tr("応答が遅い（{s} 秒かかった）").format(s=int(seconds))
+
+
+def slow_tip() -> str:
+    return tr("サーバーの返事に時間がかかっている（つながってはいる。オフラインには切り替えない）。"
+              "\n観測記録は確定するとすぐ「送信中」（水色）で表示し、裏で送る。そのまま作業を続けられる")
+
 #: After a server comes back with nothing to send, the docks read again within this (ms), at a moment of
 #: each PC's own: everyone's PC sees it back within the same probe, and all reading at once slowed it again.
 BACK_SPREAD_MS = 30_000
@@ -133,6 +145,11 @@ class OfflineController(QObject):
         self.back_timer = QTimer(self)
         self.back_timer.setSingleShot(True)
         self.back_timer.timeout.connect(lambda: self.refresh_docks() if not self._unloaded else None)
+        #: 「応答が遅い」: how the servers answer, looked at every second (core/offline.py slowness; tsudo 2026-11-28).
+        self._slow_text = ""
+        self.slow_timer = QTimer(self)
+        self.slow_timer.timeout.connect(self._look_at_slowness)
+        self.slow_timer.start(1000)
         self._unloaded = False
         context.configChanged.connect(self._config_changed)
         self._update()
@@ -166,16 +183,28 @@ class OfflineController(QObject):
                 shelf.all(label)
             except Exception:  # noqa: BLE001 (left where it was; moved next time)
                 pass
+        try:
+            # Records an earlier session was sending when QGIS ended: drafts now (core/obs/drafts.py left_over).
+            shelf.left_over()
+        except Exception:  # noqa: BLE001 (left; taken next time)
+            pass
 
     def _ask_left_over(self) -> None:
         if not self._unloaded and self.work.enabled and self.work.sendable() and not self.work.offline:
             self.ask(back=False)
+
+    def _look_at_slowness(self) -> None:
+        text = slow_text(self.work.slowness())
+        if text != self._slow_text:
+            self._slow_text = text
+            self._update()
 
     def _update(self) -> None:
         work = self.work
         down = work.offline
         # The drafts wait here even with the offline work off.
         total = work.total()
+        slow = self._slow_text if not down else ""
         if down:
             self.button.setText(tr("⚠ オフライン作業中") + (tr("（送信待ち {n} 件）").format(n=total) if total else ""))
             self.button.setStyleSheet("QToolButton { color: #b45309; font-weight: bold; }")
@@ -184,12 +213,16 @@ class OfflineController(QObject):
                                       "\n変更は送信待ちとして保管し、つながったら送信を確認\n{why}").format(
                 since=tr("（{t} から）").format(t=since) if since else "", why="\n".join(work.reasons())))
         elif total:
-            self.button.setText(tr("送信待ち {n} 件").format(n=total))
+            self.button.setText(tr("送信待ち {n} 件").format(n=total) + (f"・{slow}" if slow else ""))
             self.button.setStyleSheet("QToolButton { color: #b45309; }")
-            self.button.setToolTip(tr("まだ送っていない変更あり。クリックで一覧・送信・破棄"))
+            self.button.setToolTip(tr("まだ送っていない変更あり。クリックで一覧・送信・破棄") + (f"\n{slow_tip()}" if slow else ""))
+        elif slow:
+            self.button.setText(slow)
+            self.button.setStyleSheet("QToolButton { color: #a16207; }")
+            self.button.setToolTip(slow_tip())
         else:
             self.button.setText("")
-        self.button.setVisible(bool(down or total))
+        self.button.setVisible(bool(down or total or slow))
         if self.dialog is not None and self.dialog.isVisible():
             self.dialog.render()
         if down and not work.forced and not self.timer.isActive():
@@ -338,6 +371,7 @@ class OfflineController(QObject):
         self.timer.stop()
         self.start_timer.stop()
         self.back_timer.stop()
+        self.slow_timer.stop()
         try:
             self.work.listeners.remove(self._from_any_thread)
         except ValueError:

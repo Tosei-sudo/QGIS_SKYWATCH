@@ -60,6 +60,10 @@ class RecordsPart:
         return result
 
     def carry(self, object_id: str, present: bool = True) -> None:
+        if self.holds():
+            # Listed now (送信中), sent behind the screen (a slow server, tsudo 2026-11-28).
+            self.hold(lambda b: b.hold_carry(object_id, present))
+            return
         self.do(self.tr("継続の記録"), lambda b: b.carry(object_id, present), watch=True)
 
     def _carry_shown(self) -> Optional[Callable[[CarryOver], bool]]:
@@ -114,7 +118,7 @@ class RecordsPart:
             self._whole_flows.add((id(book), self.chosen))
             chosen = self.chosen
             self.do(self.tr("モノの記録の取得"), lambda b: b.fetch_things([chosen]),
-                    failed=lambda _m: self._whole_flows.discard((id(book), chosen)))
+                    failed=lambda _m: self._whole_flows.discard((id(book), chosen)), read=True)
         self.render()
 
     def toggle_flow(self, object_id: str) -> None:

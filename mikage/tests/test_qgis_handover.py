@@ -166,9 +166,11 @@ def test_recording_starts_by_taking_the_image(plugin):
     fake, work, _ = _setup(p, tmp_path)
     assert wait_for(lambda: dock.assignment_bar.read_at > 0)
     dock.set_active(True)
-    assert not dock.active
-    assert wait_for(lambda: dock.active)
-    assert len(work.rows) == 1 and work.rows[0]["attributes"]["ASSIGNEE"] == "田中"
+    # 協業 (the default): recording starts at once, the image is taken behind it (a slow server, tsudo 2026-11-28).
+    assert dock.active and dock.record_button.isEnabled() and dock.record_button.text() == "クリック記録中"
+    assert dock.assignment_bar.label.text() == "分担: 担当を取得中…（記録はそのまま続けられる）"
+    assert wait_for(lambda: len(work.rows) == 1)
+    assert work.rows[0]["attributes"]["ASSIGNEE"] == "田中"
     assert work.rows[0]["attributes"]["IMAGE_ID"] == dock.book.current.id
     assert dock.record_button.isChecked() and dock.record_button.isEnabled() and dock.record_button.text() == "クリック記録中"
     assert "の担当を開始" in dock.status.text()

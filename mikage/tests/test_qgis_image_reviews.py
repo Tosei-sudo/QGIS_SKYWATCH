@@ -190,3 +190,32 @@ def test_the_catalog_column(plugin):
     assert [r.id for r in model.records] == ["A", "B", "C"]
     model.sort(column, 1)
     assert [r.id for r in model.records] == ["B", "A", "C"]
+
+
+def test_the_window_goes_at_once_and_comes_back_as_it_was_when_the_save_did_not_go(plugin):
+    """A slow server (tsudo 2026-11-28): 「保存」 puts the window away now (the line says 送信中); back when not saved."""
+    import threading
+
+    p, iface, dock, tmp_path = plugin
+    fake, reviews = _setup(p, tmp_path)
+    bar, dialog = _open(dock)
+    hold, refuse = threading.Event(), [{"error": {"code": 500, "message": "busy"}}]
+    answer = fake.answer
+
+    def slow(url, form):
+        if url == f"{REVIEWS}/applyEdits":
+            hold.wait(10)
+            if refuse:
+                return refuse.pop()
+        return answer(url, form)
+
+    fake.answer = slow
+    dialog.set_rating(dialog.row_of("東京湾"), BAD)
+    dialog.save()
+    assert not dialog.isVisible() and bar.label.text() == "評価: 送信中…"
+    hold.set()
+    assert wait_for(lambda: dialog.isVisible() and "保存に失敗" in dialog.status.text())
+    assert dialog.rating_of(dialog.row_of("東京湾")) == BAD and dialog.save_button.isEnabled() and not reviews.rows
+    dialog.save()
+    assert wait_for(lambda: bar.dialog is None and len(reviews.rows) == 1)
+    assert bar.label.text() == "評価: 使えない 1"

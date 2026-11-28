@@ -42,10 +42,11 @@ class ModesPart:
     def set_active(self, on: bool, quiet: bool = False, claimed: bool = False, keep_form: bool = False) -> None:
         """
         Turns 「クリック記録」 on or off. With `assignments`, turning it on takes
-        the image first (in a task; recording starts once it is one's own). In
-        協業 (the default) others holding it do not matter, and a table that
-        cannot be reached only warns; with `mode: "exclusive"` it is refused
-        when someone else holds it or the table cannot be reached.
+        the image: in 協業 (the default) behind the recording, which starts at
+        once (others holding it do not matter, and a table that cannot be
+        reached only warns; tsudo 2026-11-28, a slow server); with `mode:
+        "exclusive"` first (in a task; recording starts once it is one's own),
+        refused when someone else holds it or the table cannot be reached.
         `claimed`: the taking was tried already (no second try). `keep_form`:
         turned off, the form stays open (another map tool chosen).
         """
@@ -53,8 +54,12 @@ class ModesPart:
             self.say(NO_IMAGE)
             on = False
         if on and not claimed and not self.active and self.assignment_bar.needs_claim(self.book.current):
-            self._claim_then_record(self.book.current, quiet)
-            on = False
+            if self.assignment_bar.shared:
+                # 協業: recording starts now, the image is taken behind it (nothing waits for a slow server).
+                self.claim_behind(self.book.current)
+            else:
+                self._claim_then_record(self.book.current, quiet)
+                on = False
         if self.record_button.isChecked() != on:
             self.record_button.blockSignals(True)
             self.record_button.setChecked(on)
@@ -73,6 +78,24 @@ class ModesPart:
         elif not quiet:
             self.say(HINT_POINTS.get(self.points, HINT))
         self.draw()
+
+    def claim_behind(self, image) -> None:
+        """
+        協業: takes the image (分担) while 「クリック記録」 goes on (tsudo
+        2026-11-28: a slow server made the recording wait for it, though
+        nobody is kept out); a failure only warns, as before.
+        """
+        def done(_x) -> None:
+            current = self.book.current if self.book is not None else None
+            if current is not None and current.id == image.id:
+                self.say(self.tr("{name} の担当を開始").format(name=image.name or image.id))
+
+        def failed(message: str) -> None:
+            text = self.tr("分担の記録に失敗（クリック記録は続行）: {m}").format(m=message)
+            self.say(text)
+            self.iface.messageBar().pushWarning(self.tr("観測記録"), plain_tip(text))
+
+        self.assignment_bar.claim_behind(image, done, failed)
 
     def _claim_then_record(self, image, quiet: bool) -> None:
         """Takes the image (分担), then starts 「クリック記録」 on it; refused: an error, and no recording."""

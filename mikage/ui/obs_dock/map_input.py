@@ -152,8 +152,41 @@ class MapInputPart:
                 self.set_area_mode(False)
                 self.say(message)
 
-        if self.area_unseen:
-            reason = self.area_reason.currentText().strip() or UNSEEN
-            self.do(self.tr("不可範囲の記録"), lambda b: b.add_area(ring, "", note, unseen=reason), after)
+        reason = (self.area_reason.currentText().strip() or UNSEEN) if self.area_unseen else ""
+        what = self.tr("不可範囲の記録") if reason else self.tr("確認範囲の記録")
+        if self.holds():
+            # A shared store (a slow server, tsudo 2026-11-28): shown now as 送信中, saved behind; back in the form when not.
+            area = self.book.hold_area(ring, "" if reason else kind, note, unseen=reason)
+            if area is None:
+                return
+            message = self.status.text()
+            self.set_area_mode(False)
+            self.say(message)
+            back = (ring, kind, note, reason)
+            self.do(what, lambda b: b.send_area(area), lambda saved: saved is None and self._area_not_saved(back),
+                    failed=lambda _m: self._area_not_saved(back))
             return
-        self.do(self.tr("確認範囲の記録"), lambda b: b.add_area(ring, kind, note), after)
+        self.do(what, lambda b: b.add_area(ring, "" if reason else kind, note, unseen=reason), after)
+
+    def _area_not_saved(self, back: tuple) -> None:
+        """A checked area held and not saved: drawn again in its form as it was (unless something else is being recorded)."""
+        ring, kind, note, reason = back
+        message = self.status.text()
+        self.iface.messageBar().pushWarning(self.tr("観測記録"), message)
+        if self.book is None or self.area_mode or self.form.isVisible() or self.many.mode:
+            self.render()
+            return
+        self.set_area_mode(True, unseen=bool(reason))
+        if not self.area_mode:
+            return
+        self.area_kind.setText(kind)
+        self.area_note.setText(note)
+        if reason:
+            at = self.area_reason.findText(reason)
+            if at < 0:
+                self.area_reason.addItem(reason)
+                at = self.area_reason.count() - 1
+            self.area_reason.setCurrentIndex(at)
+        self._set_area_ring(ring)
+        self.say(message)
+        self.draw()

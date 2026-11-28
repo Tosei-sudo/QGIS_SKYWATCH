@@ -259,8 +259,12 @@ class ImagesPart:
         self.many.went()
         image = self.book.current if self.book else None
         if self.active and self.assignment_bar.needs_claim(image):
-            self.set_active(False)
-            self.set_active(True, quiet=True)
+            if self.assignment_bar.shared:
+                # 協業: recording goes on, the image is taken behind it.
+                self.claim_behind(image)
+            else:
+                self.set_active(False)
+                self.set_active(True, quiet=True)
         # An image without its file: its footprint's layer (made now when just listed).
         self._show_footprints()
         footprint = self.footprints.layer_of(image.id) if image is not None and not image.file else None

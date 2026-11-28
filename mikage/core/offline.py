@@ -54,6 +54,10 @@ from .esri import BusyError, Transport, UnreachableError
 #: Reads that only timed out or met a 5xx (BusyError) within STRIKE_MS before a server is marked down.
 DOWN_AFTER = 2
 STRIKE_MS = 120_000
+#: A request waiting this long (ms) shows the server as slow (「応答が遅い」, not offline: tsudo 2026-11-28), and an
+#: answer that took as long keeps showing it for SLOW_KEEP_MS unless a quick answer comes from that server first.
+SLOW_MS = 5_000
+SLOW_KEEP_MS = 60_000
 
 #: The kinds of work kept, in the order they are counted and sent, with their names on screen.
 KINDS: dict[str, str] = {
@@ -183,6 +187,14 @@ class OfflineWork:
         self._puts = 0
         #: Reads that met a BusyError lately: host → their times (ms).
         self._strikes: dict[str, list[int]] = {}
+        #: This session (records being sent are kept under it: those of an earlier one are left over, sending_left()).
+        self.session = f"{os.getpid()}-{time.time_ns()}"
+        #: Requests on their way: their number → (host, when sent, time.monotonic()).
+        self._asking: dict[int, tuple[str, float]] = {}
+        self._asked = 0
+        #: Answers that took SLOW_MS or more: host → (when answered, time.monotonic(); how long, s).
+        self._slow: dict[str, tuple[float, float]] = {}
+        self._slow_lock = threading.Lock()
 
     # ---- the file -------------------------------------------------------
 
@@ -200,6 +212,10 @@ class OfflineWork:
                 db.execute("CREATE TABLE IF NOT EXISTS outbox (seq INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT, store TEXT,"
                            " item_id TEXT, op TEXT, data TEXT, base REAL, known INTEGER, at INTEGER, title TEXT, note TEXT,"
                            " UNIQUE(kind, store, item_id))")
+                # Records being sent (core/obs/drafts.py hold): kept until the server took them, so that a QGIS
+                # closed or gone meanwhile leaves them as drafts (2026-11-28, sent behind the screen).
+                db.execute("CREATE TABLE IF NOT EXISTS sending (store TEXT, item_id TEXT, data TEXT, session TEXT, at INTEGER,"
+                           " PRIMARY KEY(store, item_id))")
                 db.commit()
                 self._db = db
             return self._db
@@ -392,6 +408,85 @@ class OfflineWork:
             db.execute("DELETE FROM responses")
             db.commit()
 
+    # ---- how quickly the servers answer --------------------------------
+
+    def _sent(self, url: str) -> int:
+        with self._slow_lock:
+            self._asked += 1
+            self._asking[self._asked] = (host_of(url), time.monotonic())
+            return self._asked
+
+    def _answered(self, number: int, quick: bool) -> None:
+        with self._slow_lock:
+            host, at = self._asking.pop(number, ("", 0.0))
+            took = time.monotonic() - at
+            if took * 1000 >= SLOW_MS:
+                self._slow[host] = (time.monotonic(), took)
+            elif quick:
+                self._slow.pop(host, None)
+
+    def slowness(self) -> Optional[tuple[str, float, bool]]:
+        """
+        A server slow now: (its host, seconds, waiting) for the request
+        waiting longest when it has waited SLOW_MS (waiting True), else the
+        last answer that took that long within SLOW_KEEP_MS; None when none is.
+        """
+        now = time.monotonic()
+        with self._slow_lock:
+            waiting = max(((h, now - t) for h, t in self._asking.values()), key=lambda x: x[1], default=None)
+            if waiting is not None and waiting[1] * 1000 >= SLOW_MS:
+                return waiting[0], waiting[1], True
+            late = [(h, took, at) for h, (at, took) in self._slow.items() if (now - at) * 1000 < SLOW_KEEP_MS]
+        if not late:
+            return None
+        h, took, _at = max(late, key=lambda x: x[2])
+        return h, took, False
+
+    # ---- records being sent (kept until the server takes them) ----------
+
+    def hold(self, store: str, item_id: str, data: dict) -> None:
+        """Keeps a record being sent (replacing what was kept for it), until let_go."""
+        with self.lock:
+            db = self.db()
+            db.execute("INSERT OR REPLACE INTO sending (store, item_id, data, session, at) VALUES (?, ?, ?, ?, ?)",
+                       (store, item_id, json.dumps(_plain(data), ensure_ascii=False), self.session, self.clock()))
+            db.commit()
+
+    def let_go(self, store: str, item_ids: Iterable[str]) -> None:
+        """The records sent (or kept as drafts): no longer kept as being sent."""
+        ids = list(item_ids)
+        if not ids:
+            return
+        with self.lock:
+            db = self.db()
+            for item_id in ids:
+                db.execute("DELETE FROM sending WHERE store = ? AND item_id = ? AND session = ?", (store, item_id, self.session))
+            db.commit()
+
+    def sending_left(self) -> list[tuple[str, dict]]:
+        """
+        The records an earlier session was sending when it ended (QGIS closed
+        or gone meanwhile): (store, what was kept), taken out (to be kept as
+        drafts: they may be on the server or not).
+        """
+        try:
+            with self.lock:
+                db = self.db()
+                rows = db.execute("SELECT store, item_id, data FROM sending WHERE session <> ? ORDER BY at", (self.session,)).fetchall()
+                db.execute("DELETE FROM sending WHERE session <> ?", (self.session,))
+                db.commit()
+        except sqlite3.Error:
+            return []
+        out = []
+        for store, _item_id, data in rows:
+            try:
+                value = json.loads(data) if data else None
+            except ValueError:
+                value = None
+            if isinstance(value, dict):
+                out.append((store, value))
+        return out
+
     def transport(self, send: Transport) -> Transport:
         """
         `send` with the cache: reads are kept; a server down is not asked (its
@@ -407,8 +502,11 @@ class OfflineWork:
                     return kept[0]
                 raise (UnreachableError(code="E107", detail=f"{host_of(url)}：オフライン中、控えなし") if read else
                        UnreachableError("サーバーに接続できない。変更は送信待ちに保管", detail=f"{host_of(url)}：オフライン中"))
+            number = self._sent(url)
+            quick = False
             try:
                 body = send(url, form)
+                quick = True
             except UnreachableError as error:
                 if not self.enabled:
                     raise
@@ -418,6 +516,8 @@ class OfflineWork:
                 if kept is not None:
                     return kept[0]
                 raise
+            finally:
+                self._answered(number, quick)
             self.answered(url)
             if read:
                 self.remember(url, form, body)

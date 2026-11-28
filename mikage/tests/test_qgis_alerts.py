@@ -588,3 +588,58 @@ def test_notices_tab_makes_a_mail_of_the_rows(plugin, monkeypatch):
     assert QApplication.clipboard().text().startswith("船A|停泊")
     assert "起動に失敗" in feed.status.text() and recorded[-1][3]["result"] == "error"
     assert "起動に失敗" in iface.bar.currentItem().text()
+
+
+def _put_out(dock, record):
+    dialog = dock.add_to_alerts([record])
+    assert wait_for(lambda: dialog.lines_table.rowCount() == 1)
+    return dialog
+
+
+def test_an_alert_is_put_out_at_once_and_logged_behind_again_when_it_failed(plugin):
+    """A slow server (tsudo 2026-11-28): the clipboard first; the log table behind; 「記録し直す」 when that failed."""
+    p, iface, dock, tmp_path = plugin
+    fake, log = _setup(p, tmp_path, {"notifyOnSave": False})
+    b = dock.book.add(139.7, 35.6, object="船B", kind="船舶", activity="航行")
+    dialog = _put_out(dock, b)
+    QApplication.clipboard().setText("")
+    fake.fail_next = {"error": {"code": 500, "message": "busy"}}
+    dialog.send()
+    # Out at once, before the server answers; off the list.
+    assert QApplication.clipboard().text().startswith("船B|航行") and dialog.lines_table.rowCount() == 0
+    assert "通報テーブルへ記録中" in dialog.status.text()
+    assert wait_for(lambda: dialog.relog_button.isVisibleTo(dialog))
+    assert "出力済み。通報テーブルへの記録に失敗" in dialog.status.text() and b.id not in dock.reported and not log.rows
+    assert any("記録し直す" in w.text() for w in iface.bar.items())
+    dialog.log_again()
+    assert wait_for(lambda: "件を通報" in dialog.status.text())
+    assert [r["attributes"]["OBS_ID"] for r in log.rows] == [b.id] and b.id in dock.reported
+    assert not dialog.relog_button.isVisibleTo(dialog)
+
+
+def test_an_alert_logged_again_after_a_lost_answer_is_not_logged_twice(plugin):
+    p, iface, dock, tmp_path = plugin
+    fake, log = _setup(p, tmp_path, {"notifyOnSave": False})
+    log.types["BATCH_ID"] = "esriFieldTypeString"
+    b = dock.book.add(139.7, 35.6, object="船B", kind="船舶", activity="航行")
+    c = dock.book.add(139.7, 35.6, object="船C", kind="船舶", activity="航行")
+    dialog = dock.add_to_alerts([b, c])
+    assert wait_for(lambda: dialog.lines_table.rowCount() == 2)
+    answer, lost = fake.answer, []
+
+    def losing(url, form):
+        out = answer(url, form)
+        if url == f"{LOG}/applyEdits" and not lost:
+            # The rows went in; the answer did not come back.
+            lost.append(url)
+            return {"error": {"code": 504, "message": "Gateway Timeout"}}
+        return out
+
+    fake.answer = losing
+    dialog.send()
+    assert wait_for(lambda: dialog.relog_button.isVisibleTo(dialog))
+    assert len(log.rows) == 2
+    dialog.log_again()
+    assert wait_for(lambda: "件を通報" in dialog.status.text())
+    assert sorted(r["attributes"]["OBS_ID"] for r in log.rows) == sorted([b.id, c.id])
+    assert len({r["attributes"]["BATCH_ID"] for r in log.rows}) == 1 and dock.reported >= {b.id, c.id}

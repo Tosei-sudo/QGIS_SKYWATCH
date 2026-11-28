@@ -28,7 +28,7 @@ from qgis.core import QgsPointXY, QgsRectangle, QgsWkbTypes
 from qgis.gui import QgsMapToolEmitPoint, QgsRubberBand
 from qgis.PyQt import sip
 from qgis.PyQt.QtCore import QDateTime, QStringListModel, Qt, QUrl
-from qgis.PyQt.QtGui import QColor, QDesktopServices
+from qgis.PyQt.QtGui import QBrush, QColor, QDesktopServices
 from qgis.PyQt.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QCompleter, QDateTimeEdit, QDialog, QDialogButtonBox, QFormLayout,
     QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPlainTextEdit, QPushButton, QTableWidget,
@@ -44,7 +44,7 @@ from ..core.reference_info import (
 from ..qgis_io import map_tools
 from ..qgis_io.geometry import from_wgs84, to_wgs84
 from ..qgis_io.tasks import run_task
-from .docks import PluginDock, ask_no, name_cancel, plain_label, plain_tip
+from .docks import SENDING_ROW, PluginDock, ask_no, name_cancel, plain_label, plain_tip
 from .fit import fit_text
 from .flow_layout import FlowLayout
 from .list_views import column_menus
@@ -183,7 +183,8 @@ class ReferenceForm(QDialog):
         form.addRow(self.problem)
         self.button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         name_cancel(self.button_box)
-        #: Saves the values (in a task): `saver(info, done, failed)`; the form closes only once saved.
+        #: Saves the values: `saver(info, done, failed)`; the form closes on `done` (the dock's: at once, the save then
+        #: goes behind and the form opens again when it does not go; a slow server, tsudo 2026-11-28).
         self.saver: Optional[Callable] = None
         self.button_box.accepted.connect(self._accept)
         self.button_box.rejected.connect(self.reject)
@@ -457,6 +458,8 @@ class ReferenceDock(PluginDock):
         self._again = False
         self._form: Optional[ReferenceForm] = None
         self._import_dialog = None
+        #: Infos saved and not answered yet (送信中: listed as typed, kept over a read), by id.
+        self.sending: dict[str, ReferenceInfo] = {}
 
         self.note = plain_label(QLabel())
         self.note.setWordWrap(True)
@@ -686,7 +689,8 @@ class ReferenceDock(PluginDock):
             if s is not self.settings or self._again:
                 self.reload(keep=chosen)
                 return
-            self.infos = infos
+            # Being saved from here: as typed until the layer answers.
+            self.infos = [self.sending.get(x.id, x) for x in infos] + [x for i, x in self.sending.items() if i not in {y.id for y in infos}]
             self.link_cache = {}
             if self.focus is not None:
                 # The infos listed on their own, as saved now.
@@ -750,11 +754,15 @@ class ReferenceDock(PluginDock):
         self.table.blockSignals(True)
         self.table.setRowCount(len(self.shown))
         for i, x in enumerate(self.shown):
-            values = (local_text(x.time), x.title, source_text(x), x.reliability, self.area_name(x.area_id) or x.area_id)
+            late = self.tr("（送信中）") if x.id in self.sending else ""
+            values = (local_text(x.time), x.title + late, source_text(x), x.reliability, self.area_name(x.area_id) or x.area_id)
             for j, v in enumerate(values):
                 item = QTableWidgetItem(v)
                 if j == 1:
-                    item.setToolTip(plain_tip("\n".join(detail_lines(x, self.area_name(x.area_id)))))
+                    item.setToolTip(plain_tip("\n".join(([self.tr("送信中（サーバーの返事待ち。そのまま操作を続けられる）")] if late else [])
+                                                        + detail_lines(x, self.area_name(x.area_id)))))
+                if late:
+                    item.setBackground(QBrush(QColor(SENDING_ROW)))
                 self.table.setItem(i, j, item)
         self.table.blockSignals(False)
         if chosen is not None:
@@ -778,8 +786,9 @@ class ReferenceDock(PluginDock):
         x = self.chosen()
         self.buttons["new"].setEnabled(ready)
         self.buttons["import"].setEnabled(self.settings is not None)
-        self.buttons["edit"].setEnabled(ready and x is not None)
-        self.buttons["delete"].setEnabled(ready and x is not None)
+        # One being saved (送信中): changed once the layer has it (a second add of a new one is not sent meanwhile).
+        self.buttons["edit"].setEnabled(ready and x is not None and x.id not in self.sending)
+        self.buttons["delete"].setEnabled(ready and x is not None and x.id not in self.sending)
         self.buttons["zoom"].setEnabled(x is not None and x.has_place)
         self.buttons["url"].setEnabled(x is not None and bool(x.url))
         self.buttons["copy"].setEnabled(x is not None)
@@ -937,22 +946,34 @@ class ReferenceDock(PluginDock):
     # ---- infos ---------------------------------------------------------------------------------
 
     def _open_form(self, info: Optional[ReferenceInfo], link: Sequence[LinkTarget] = (),
-                   then: Optional[Callable[[], None]] = None) -> Optional[ReferenceForm]:
+                   then: Optional[Callable[[], None]] = None, problem: str = "") -> Optional[ReferenceForm]:
+        """
+        An info's form (None: a new one). 「保存」 closes it at once and the info is saved behind (a slow server,
+        tsudo 2026-11-28), then linked to `link`. Not saved: the form opens again as it was typed, why told
+        (`problem`), unless another one is open meanwhile (then told in the message bar).
+        """
         if self.settings is None:
             return None
         if self._form is not None and not sip.isdeleted(self._form):
+            if problem:
+                self.iface.messageBar().pushWarning(TITLE, plain_tip(problem + self.tr("（もう一度入力が必要）")))
+                return None
             self._form.close()
         form = ReferenceForm(self, info, self)
         if info is None:
             form.use_centre()
+        elif info.oid is None:
+            form.setWindowTitle(self.tr("新しい参考情報"))
+        if problem:
+            form.problem.setText(problem)
 
-        def saver(value: ReferenceInfo, done, failed) -> None:
+        def saver(value: ReferenceInfo, done, _failed) -> None:
             def saved(x: ReferenceInfo) -> None:
-                done()
                 if link:
                     self.link([x.id], list(link), then)
 
-            self.save(value, saved, failed)
+            done()
+            self.save(value, saved, lambda m: self._open_form(value, link, then, self.tr("保存に失敗: {m}").format(m=m)))
 
         form.saver = saver
         form.finished.connect(lambda _r: (form.deleteLater(), setattr(self, "_form", None) if self._form is form else None))
@@ -974,30 +995,70 @@ class ReferenceDock(PluginDock):
 
     def save(self, info: ReferenceInfo, then: Optional[Callable[[ReferenceInfo], None]] = None,
              failed: Optional[Callable[[str], None]] = None) -> None:
-        """Saves the info (in a task), then reads the list again with it chosen."""
+        """
+        Saves the info (in a task): listed now as 送信中 and chosen; once saved, only it is put in the list (the
+        infos are not read again, unless the period had to widen to hold it). Not saved: the list as it was.
+        """
         s = self.settings
         client = self.context.esri()
         token = None
         new = info.oid is None
+        before = next((x for x in self.infos or [] if x.id == info.id), None)
+        if self.focus is not None and new:
+            self.focus = None
+        self.sending[info.id] = info
+        self._put(info.id, info)
+        self.choose(info.id)
+
+        def settled() -> None:
+            if self.sending.get(info.id) is info:
+                self.sending.pop(info.id)
 
         def done(saved: ReferenceInfo) -> None:
-            if self.focus is not None and new:
-                self.focus = None
+            settled()
+
+            def said() -> None:
+                self.say(self.tr("「{t}」を保存").format(t=saved.title))
+                if then:
+                    then(saved)
+
             days = self.period_days()
-            if days and saved.time is not None and saved.time < time.time() * 1000 - days * 86_400_000:
-                # Older than the period: the period widened so that it is listed.
+            if s is self.settings and days and saved.time is not None and saved.time < time.time() * 1000 - days * 86_400_000:
+                # Older than the period: the period widened so that it is listed, and read for it.
                 self.period.blockSignals(True)
                 self.period.setCurrentIndex(self.period.findData(None))
                 self.period.blockSignals(False)
-            self.reload(lambda: (self.say(self.tr("「{t}」を保存").format(t=saved.title)), then(saved) if then else None), keep=saved.id)
+                self.reload(said, keep=saved.id)
+                return
+            if s is self.settings:
+                self._put(saved.id, saved)
+            said()
 
         def fail(message: str) -> None:
+            settled()
+            if s is self.settings:
+                self._put(info.id, before)
             self._update_buttons()
             self.say(self.tr("参考情報の保存に失敗: {m}").format(m=message))
             if failed is not None:
                 failed(message)
 
         self._start(self.tr("参考情報の保存"), lambda _t: save_info(client, s, info, token), done, fail)
+
+    def _put(self, info_id: str, info: Optional[ReferenceInfo]) -> None:
+        """One info put in the list as it is now (None: taken out), as are those listed on their own."""
+        def put(listed: list[ReferenceInfo], add: bool) -> list[ReferenceInfo]:
+            if info is None:
+                return [x for x in listed if x.id != info_id]
+            if any(x.id == info_id for x in listed):
+                return [info if x.id == info_id else x for x in listed]
+            return [*listed, info] if add else listed
+
+        if self.infos is not None:
+            self.infos = put(self.infos, True)
+        if self.focus is not None:
+            self.focus = (self.focus[0], put(self.focus[1], False))
+        self.render()
 
     def may_delete(self, info: ReferenceInfo) -> bool:
         return can_delete(info, edit_stamp.user_name(), self.allows(DELETE_ANY))

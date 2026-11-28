@@ -75,8 +75,8 @@ if TYPE_CHECKING:  # the door (core/door.py): each name is imported from its mod
     )
     from .alerts import (
         AlertItem, OBJECT_LAYERS, select as alert_select, write_file as alert_write_file, build_lines, history_query,
-        layer_key_problems, load_rules, manual_items, name_places, object_keys, report_text, reported_ids, score_note,
-        uses_source,
+        layer_key_problems, load_rules, manual_items, name_places, new_batch as new_alert_batch, object_keys, report_text,
+        reported_ids, score_note, uses_source,
     )
     from .assignments import (
         DONE, UNWORKED, roots_text as assignment_roots_text, holder_of, holders_of, is_shared, own_row, roots_by_person,
@@ -589,7 +589,8 @@ __all__ = [
     "SimilarFound", "UNWORKED", "alert_select", "alert_write_file", "assignment_roots_text", "build_lines", "by_image",
     "changed_by_other", "continuations", "file_name_of", "gray_of", "half_sizes", "handover_text",
     "handover_write_file", "history_query", "holder_of", "holders_of", "is_shared", "keep_memo", "last_memo",
-    "layer_key_problems", "load_rules", "manual_items", "mine_roots_text", "mine_select", "name_places", "object_keys",
+    "layer_key_problems", "load_rules", "manual_items", "mine_roots_text", "mine_select", "name_places", "new_alert_batch",
+    "object_keys",
     "observer_names", "open_requests", "own_row", "report_text", "reported_ids", "root_of", "roots_by_person",
     "score_note", "since_of", "uses_source", "work_state",
 ]

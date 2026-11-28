@@ -676,8 +676,10 @@ def test_polygons_of_any_shape_drawn_taken_and_saved(plugin):
     assert form.area_label.text().startswith("多角形（頂点 7）: 経度 139.0000〜139.3000")
     form.name.setText("U 字")
     form._save_clicked()
-    assert wait_for(lambda: dock.task is None and len(dock.requests) == 1), form.message.text()
+    assert wait_for(lambda: not dock.sending and len(dock.requests) == 1), form.message.text()
     # Back from the ledger clockwise (as Esri keeps outer rings): the same corners.
+    dock.reload()
+    assert wait_for(lambda: dock.task is None and dock.requests[0].rings != [corners + [corners[0]]])
     saved, = dock.requests[0].rings
     assert saved == list(reversed(corners + [corners[0]]))
 

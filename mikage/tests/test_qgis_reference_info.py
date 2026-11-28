@@ -366,3 +366,49 @@ def test_without_settings_the_dock_says_so(tmp_path, monkeypatch):
     finally:
         p.unload()
         QgsSettings().remove("mikage")
+
+
+def test_an_info_saved_is_listed_at_once_and_its_form_opens_again_when_it_did_not_go(plugin, monkeypatch):
+    """A slow server (tsudo 2026-11-28): 「保存」 closes the form now; 送信中 until saved; only it is put in the list."""
+    import threading
+
+    import mikage.ui.reference_dock as module
+    from mikage.core.esri import EsriError
+    from qgis.PyQt import sip
+
+    p, iface, infos, links, tmp_path = plugin
+    dock = p.docks["SatObsReferences"]
+    dock.show()
+    assert wait_for(lambda: dock.infos is not None and idle(dock))
+    hold, reads, refuse = threading.Event(), [], []
+    real_save, real_load = module.save_info, module.load_infos
+
+    def slow(*a, **k):
+        hold.wait(10)
+        if refuse:
+            raise EsriError(refuse.pop())
+        return real_save(*a, **k)
+
+    monkeypatch.setattr(module, "save_info", slow)
+    monkeypatch.setattr(module, "load_infos", lambda *a, **k: reads.append(1) or real_load(*a, **k))
+    n = len(dock.infos)
+    form = dock.create()
+    form.title_edit.setText("港内でクレーン設置")
+    form._accept()
+    assert sip.isdeleted(form) or not form.isVisible()
+    assert len(dock.infos) == n + 1 and dock.chosen().title == "港内でクレーン設置"
+    row = dock.shown.index(dock.chosen())
+    assert dock.table.item(row, 1).text() == "港内でクレーン設置（送信中）" and not dock.buttons["edit"].isEnabled()
+    hold.set()
+    assert wait_for(lambda: not dock.sending and any(r["attributes"]["TITLE"] == "港内でクレーン設置" for r in infos.rows))
+    assert dock.chosen().oid is not None and dock.buttons["edit"].isEnabled() and reads == []
+    # Not saved: listed as it was, and the form open again as typed.
+    hold.clear()
+    refuse.append("ネットワーク")
+    form = dock.create()
+    form.title_edit.setText("別の情報")
+    form._accept()
+    hold.set()
+    assert wait_for(lambda: dock._form is not None and "保存に失敗" in dock._form.problem.text())
+    assert dock._form.title_edit.text() == "別の情報" and dock._form.windowTitle() == "新しい参考情報"
+    assert len(dock.infos) == n + 1 and not dock.sending

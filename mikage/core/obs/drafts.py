@@ -30,6 +30,8 @@ from .model import Observation, unseen_label
 LIMIT = 200
 #: The outbox kind of the drafts (core/offline.py KINDS).
 KIND = "draft"
+#: Why a record being sent when QGIS ended is a draft (OutboxDrafts.left_over).
+LEFT_OVER = "送信中に QGIS が終了（届いたか不明。送り直しても二重にはならない）"
 
 
 @dataclass
@@ -132,6 +134,12 @@ class PrefsDrafts:
             self.prefs.set(prefs_key(store), drafts_text(rest))
         return len(kept) - len(rest)
 
+    def hold(self, store: str, draft: Draft) -> None:
+        """A record being sent: kept only while this book lives (no outbox to keep it in)."""
+
+    def let_go(self, store: str, draft_ids: list[str]) -> None:
+        """(nothing kept: hold)"""
+
 
 class OutboxDrafts:
     """
@@ -178,3 +186,30 @@ class OutboxDrafts:
     def drop(self, store: str, draft_ids: list[str]) -> int:
         self._move_old(store)
         return self.work.drop(KIND, store, draft_ids)
+
+    def hold(self, store: str, draft: Draft) -> None:
+        """
+        A record being sent behind the screen (book.hold_submit): kept on this
+        computer until the server takes it (let_go), so that QGIS closed or
+        gone meanwhile does not lose it (left_over makes it a draft then).
+        """
+        self.work.hold(store, draft.id, draft.to_json())
+
+    def let_go(self, store: str, draft_ids: list[str]) -> None:
+        self.work.let_go(store, draft_ids)
+
+    def left_over(self) -> int:
+        """
+        The records an earlier session was sending when it ended, kept as
+        drafts (they may be on the server: sent again, the store asks first,
+        #73); how many.
+        """
+        n = 0
+        for store, value in self.work.sending_left():
+            d = draft_of(value)
+            if d is None:
+                continue
+            self.keep(store, Draft(d.record, d.values, d.present, d.editing_id, d.base_updated, d.source_id, d.kept_at,
+                                   LEFT_OVER, d.needs_check))
+            n += 1
+        return n

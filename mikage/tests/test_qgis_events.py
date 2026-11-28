@@ -232,15 +232,20 @@ def test_a_failed_save_keeps_the_form_and_a_reload_asked_meanwhile_is_not_lost(p
 
     real = module.save_event
     monkeypatch.setattr(module, "save_event", broken)
+    from qgis.PyQt import sip
+
     form = dock.create()
     form.name.setText("地震")
     form.has_start.setChecked(False)
     form._accept()
-    assert wait_for(lambda: "保存に失敗" in form.problem.text())
+    # Closed at once (a slow server, tsudo 2026-11-28); not saved, it opens again as it was typed.
+    assert sip.isdeleted(form) or not form.isVisible()
+    assert wait_for(lambda: dock.form is not form and "保存に失敗" in dock.form.problem.text())
+    form = dock.form
     assert form.isVisible() and form.name.text() == "地震" and form.values()["start"] is None
+    assert form.windowTitle() == "新しいイベント" and dock.events == [] and not dock.sending
     monkeypatch.setattr(module, "save_event", real)
     form._accept()
-    from qgis.PyQt import sip
 
     assert wait_for(lambda: (sip.isdeleted(form) or not form.isVisible()) and dock.events and dock.events[0].name == "地震")
     assert dock.events[0].start is None
@@ -308,3 +313,31 @@ def test_images_outside_the_catalog_go_into_events(plugin, monkeypatch):
     assert len([l for l in QgsProject.instance().mapLayers().values() if isinstance(l, QgsRasterLayer)]) == 1
     dock.show_in_catalog()
     assert "カタログの画像なし" in dock.status.text()
+
+
+def test_an_event_saved_is_listed_at_once_and_the_list_is_not_read_again(plugin, monkeypatch):
+    """A slow server (tsudo 2026-11-28): 「保存」 closes the form now; listed as 送信中 until saved; only it is put in the list."""
+    import threading
+
+    import mikage.ui.events_dock as module
+    from qgis.PyQt import sip
+
+    p, iface, events, links, tmp_path = plugin
+    dock = p.api.events
+    dock.show()
+    assert wait_for(lambda: dock.events == [] and dock.task is None)
+    hold, reads = threading.Event(), []
+    real_save, real_load = module.save_event, module.load_events
+    monkeypatch.setattr(module, "save_event", lambda *a, **k: hold.wait(10) and real_save(*a, **k))
+    monkeypatch.setattr(module, "load_events", lambda *a, **k: reads.append(1) or real_load(*a, **k))
+    form = dock.create()
+    form.name.setText("地震")
+    form._accept()
+    assert sip.isdeleted(form) or not form.isVisible()
+    [e] = dock.events
+    assert set(dock.sending) == {e.id} and dock.table.item(0, 0).text() == "地震（送信中）"
+    assert dock.chosen() is e and not dock.buttons["edit"].isEnabled()
+    hold.set()
+    assert wait_for(lambda: not dock.sending and events.rows)
+    assert dock.table.item(0, 0).text() == "地震" and dock.events[0].oid is not None and dock.buttons["edit"].isEnabled()
+    assert reads == []

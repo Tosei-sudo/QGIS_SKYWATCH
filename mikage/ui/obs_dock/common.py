@@ -11,6 +11,7 @@ from qgis.PyQt.QtGui import QBrush, QColor, QPainter
 from qgis.PyQt.QtWidgets import QDateTimeEdit, QSizePolicy, QWidget
 
 from ...core.obs.api import local_time, ObjectFlow, time_key, unseen_label
+from ..docks import SENDING_ROW  # noqa: F401 (a record confirmed, not taken by the server yet)
 from ..obs_overlay import UNSEEN_COLOR
 
 HINT = "地図クリックで記録（白抜きの印は継続）"

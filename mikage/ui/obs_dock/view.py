@@ -212,6 +212,7 @@ class ViewPart:
             return f"{size}・{heading_text(o.heading)}"
 
         waiting = self.waiting_ids()
+        sending = self.sending_ids()
         for o in here:
             gone = o.deleted_at is not None
             buttons = self._small((tr("復元"), tr("削除した記録を復元"), lambda o=o: self.restore([o]))) if gone else \
@@ -221,7 +222,7 @@ class ViewPart:
                        origin_label(o.ai), self._made_by(o), local_time(o.updated_at), ""],
                       None if gone else (lambda o=o: self._open_row(o, editing=o)),
                       style="deleted" if gone else "unseen" if o.unseen else "", buttons=buttons, records=[] if gone else [o], reported=o.id in self.reported,
-                      waiting=o.id in waiting, key=f"o:{o.id}")
+                      waiting=o.id in waiting, sending=o.id in sending, key=f"o:{o.id}")
             self._origin_tip(o.ai)
         inside_ids = {id(c) for c in inside}
         hidden_ids = {id(c) for c in hidden or []}

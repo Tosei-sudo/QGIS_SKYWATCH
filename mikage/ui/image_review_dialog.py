@@ -5,7 +5,9 @@ too), then the named areas the image shows (the named area layer, cut by
 the footprint): those the image's records are in first, then the smaller
 first; a search box narrows a long list. Each row: the rating (empty ·
 使える · 一部 · 使えない), the cloud seen, the reasons (不可の理由's words) and
-a note. The row chosen is lit on the map.
+a note. The row chosen is lit on the map. 「保存」 puts the window away at once
+and saves behind (a slow server, tsudo 2026-11-28): it comes back as it was
+when the save does not go.
 
 A row not rated yet takes a first rating from the 不可範囲 drawn on the
 image (half or more of it covered → 使えない, some → 一部; their reasons),
@@ -55,6 +57,8 @@ class ImageReviewDialog(QDialog):
 
     #: The image's rows were saved: its id and its rows now.
     saved = pyqtSignal(str, list)
+    #: A save started or ended (the window away meanwhile): the bar says 送信中.
+    sending = pyqtSignal()
 
     def __init__(self, context, image, footprint: Optional[list], canvas=None, points: Sequence[tuple] = (),
                  unseen: Sequence[tuple] = (), reasons: Sequence[str] = (), later: bool = False, parent=None):
@@ -317,6 +321,10 @@ class ImageReviewDialog(QDialog):
         return out, cleared
 
     def save(self, then: Optional[Callable[[], None]] = None) -> None:
+        """
+        「保存」: the window put away at once and the rows saved behind (a slow server, tsudo 2026-11-28); closed once
+        saved, back as it was (why told) when not.
+        """
         source, image = self.source, self.image
         if source is None or self.task is not None:
             return
@@ -325,21 +333,31 @@ class ImageReviewDialog(QDialog):
         self.save_button.setEnabled(False)
         self.status.setText(self.tr("保存中…"))
 
+        def back(text: str) -> None:
+            self.save_button.setEnabled(True)
+            self.status.setText(text)
+            self.show()
+            self.raise_()
+            self._light(self.table.currentRow())
+            self.sending.emit()
+
         def done(result) -> None:
             self.task = None
-            self.save_button.setEnabled(True)
             if result.problems:
-                self.status.setText(self.tr("一部を保存できない: {m}").format(m="、".join(result.problems)))
+                back(self.tr("一部を保存できない: {m}").format(m="、".join(result.problems)))
                 return
             self.saved.emit(image.id, list(result.rows))
             self.accept()
+            self.sending.emit()
             if then:
                 then()
 
         def failed(message: str) -> None:
             self.task = None
-            self.save_button.setEnabled(True)
-            self.status.setText(self.tr("保存に失敗: {m}").format(m=message))
+            back(self.tr("保存に失敗: {m}").format(m=message))
 
         self.task = run_task(self.tr("画像の評価の保存"),
                              lambda _t: save_reviews(client, source, image.id, wanted, cleared, token, user=user), done, failed)
+        self.hide()
+        self._unlight()
+        self.sending.emit()
