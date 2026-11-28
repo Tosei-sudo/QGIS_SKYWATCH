@@ -6,10 +6,12 @@ period (登録日時 or 撮像日時), then 「抽出」 reads the rules, the ge
 and what was already reported from Esri (in a task) and lists a line per
 record, highest importance score first (the score in the first column,
 its parts in the tooltip): untick one to leave it out, 「選択を一覧から削除」 to
-take rows off the list, edit a line by hand. 「通報」 adds the
-lines to the Esri log table, then copies the text (header, lines, footer)
-and writes the file, as the format says; 「コピーのみ」 copies without
-recording anything.
+take rows off the list, edit a line by hand. 「通報」 copies the text
+(header, lines, footer) and writes the file, as the format says, then adds
+the lines to the Esri log table behind the screen (a slow server does not
+hold the 通報 back, tsudo 2026-11-28); when that fails, 「記録し直す」 tries
+again (the rows that went in are not added twice). 「コピーのみ」 copies
+without recording anything.
 
 Tab 「通報記録」: the log table's rows of a period (and a format): copy
 them, go to their record, or delete them so their records can be reported again.
@@ -28,7 +30,7 @@ from ..core import audit, edit_stamp, errors
 from ..core.esri import EsriError
 from ..core.obs.api import (
     OBJECT_LAYERS, AlertItem, AlertSettings, LogRow, Moment, build_lines, history_query, layer_key_problems, load_geofences,
-    load_rules, manual_items, name_places, object_keys, report_text, reported_ids, score_note, alert_select as select,
+    load_rules, manual_items, name_places, new_alert_batch, object_keys, report_text, reported_ids, score_note, alert_select as select,
     uses_source, alert_write_file as write_file,
 )
 from ..core.obs.api import living
@@ -84,6 +86,8 @@ class AlertDialog(QDialog):
         self._shown_lines: list[tuple[str, str]] = []
         self._shown_format = ""
         self._filling = False
+        #: 通報 put out but not in the log table yet (its write failed): (format, items, lines, moment, batch), for 「記録し直す」.
+        self._unlogged: list[tuple] = []
         layout = QVBoxLayout(self)
         self.note = plain_label(QLabel())
         self.note.setWordWrap(True)
@@ -150,6 +154,11 @@ class AlertDialog(QDialog):
         self.copy_button = QPushButton(self.tr("記録せずにコピー"))
         self.copy_button.setToolTip(self.tr("通報テーブルに記録せず、クリップボードへコピー"))
         self.copy_button.clicked.connect(lambda: self.send(record=False))
+        self.relog_button = QPushButton(self.tr("記録し直す"))
+        self.relog_button.setToolTip(self.tr("出力済みで通報テーブルへの記録に失敗した通報を、もう一度記録（記録するまでほかの人には通報済みと表示されない）"))
+        self.relog_button.clicked.connect(lambda _on=False: self.log_again())
+        self.relog_button.hide()
+        row.addWidget(self.relog_button)
         row.addStretch(1)
         row.addWidget(self.copy_button)
         row.addWidget(self.send_button)
@@ -536,8 +545,9 @@ class AlertDialog(QDialog):
 
     def send(self, record: bool = True, after: Optional[Callable[[str], None]] = None) -> None:
         """
-        「記録してコピー」 and the like (`_name_send`): the lines to the log table (in a task), then the
-        clipboard and the file as the format says; 「記録せずにコピー」 (record False): the clipboard only.
+        「記録してコピー」 and the like (`_name_send`): the clipboard and the file as the format says, at once, then the
+        lines to the log table (in a task: a slow server does not hold the 通報 back, tsudo 2026-11-28; when it fails,
+        「記録し直す」); 「記録せずにコピー」 (record False): the clipboard only. `after`: what was said once all is done.
         """
         s, fmt = self.settings, self._format()
         items, lines = self.chosen()
@@ -553,48 +563,81 @@ class AlertDialog(QDialog):
             audit.record("copy", "alert-text", count=len(items), text=text)
             self._say(self.tr("{n} 件をクリップボードへコピー（通報テーブルには記録せず）").format(n=len(items)))
             return
-
-        def outputs(logged: int) -> None:
-            # First: whatever happens below, the button can be pressed again.
-            self.send_button.setEnabled(True)
-            said = [self.tr("通報テーブルに {n} 件").format(n=logged)] if s.table else []
-            if fmt.clipboard:
-                QApplication.clipboard().setText(text)
-                audit.record("copy", "alert-text", count=len(items), text=text)
-                said.append(self.tr("クリップボードへコピー"))
-            if fmt.file:
-                try:
-                    path, replaced = write_file(text, fmt, at)
-                    audit.record("export", "alert-text", path, count=len(items), file=path)
-                    said.append(self.tr("ファイル {p}").format(p=path))
-                    if replaced:
-                        said.append(self.tr("{enc} で書けない文字を ? に置き換え").format(enc=fmt.file.encoding))
-                except (OSError, ValueError) as error:
-                    reason, detail = errors.describe(error)
-                    said.append(self.tr("ファイルの書き込みに失敗: {e}").format(e=reason))
-                    audit.error("file-save", getattr(error, "filename", None) or "", reason, detail={"what": "alert-text", "said": detail})
-            sent = {i.record.id for i in items}
-            if s.table and logged:
-                self.dock.mark_reported(sent)
-            self.items = [i for i in self.items if i.record.id not in sent] if s.table else self.items
-            self._render_lines()
+        said = []
+        if fmt.clipboard:
+            QApplication.clipboard().setText(text)
+            audit.record("copy", "alert-text", count=len(items), text=text)
+            said.append(self.tr("クリップボードへコピー"))
+        if fmt.file:
+            try:
+                path, replaced = write_file(text, fmt, at)
+                audit.record("export", "alert-text", path, count=len(items), file=path)
+                said.append(self.tr("ファイル {p}").format(p=path))
+                if replaced:
+                    said.append(self.tr("{enc} で書けない文字を ? に置き換え").format(enc=fmt.file.encoding))
+            except (OSError, ValueError) as error:
+                reason, detail = errors.describe(error)
+                said.append(self.tr("ファイルの書き込みに失敗: {e}").format(e=reason))
+                audit.error("file-save", getattr(error, "filename", None) or "", reason, detail={"what": "alert-text", "said": detail})
+        if not s.table:
             message = self.tr("{n} 件を通報: ").format(n=len(items)) + "・".join(said or [self.tr("出力先なし")])
             self._say(message)
             if after:
                 after(message)
-
-        if not s.table:
-            outputs(0)
             return
+        # Put out: off the list now (pressed again, not put out twice); others see it 通報済み once logged.
+        sent = {i.record.id for i in items}
+        self.items = [i for i in self.items if i.record.id not in sent]
+        self._render_lines()
+        self._say(self.tr("{n} 件を出力: ").format(n=len(items)) + "・".join(said or [self.tr("出力先なし")]) +
+                  self.tr("（通報テーブルへ記録中）"))
+        self._log((fmt, items, lines, at, new_alert_batch()), said, after)
+
+    def _log(self, job: tuple, said: Optional[list[str]] = None, after: Optional[Callable[[str], None]] = None) -> None:
+        """A 通報 put out written to the log table (in a task); kept for 「記録し直す」 when it fails."""
+        fmt, items, lines, at, batch = job
+        again = said is None
         repo = self.log_repository()
 
-        def failed(message: str) -> None:
-            self.send_button.setEnabled(True)
-            self._say(self.tr("通報の記録に失敗（コピーもファイル出力もなし）: {m}").format(m=message))
-            self.dock.refresh_reported()  # some rows may have gone in
+        def logged(n: int) -> None:
+            if job in self._unlogged:
+                self._unlogged.remove(job)
+            self._render_relog()
+            self.dock.mark_reported({i.record.id for i in items})
+            parts = [self.tr("通報テーブルに {n} 件").format(n=n), *(said or [])]
+            message = self.tr("{n} 件を通報: ").format(n=len(items)) + "・".join(parts)
+            self._say(message)
+            if after:
+                after(message)
 
-        self.send_button.setEnabled(False)
-        run_task(self.tr("通報の記録"), lambda _t: repo.write_log(fmt, items, lines, at), outputs, failed)
+        def failed(message: str) -> None:
+            if job not in self._unlogged:
+                self._unlogged.append(job)
+            self._render_relog()
+            text = self.tr("{n} 件は出力済み。通報テーブルへの記録に失敗: {m}（「記録し直す」でもう一度。記録するまでほかの人には通報済みと表示されない）").format(
+                n=len(items), m=message)
+            self._say(text)
+            self.dock.iface.messageBar().pushWarning(self.tr("通報"), plain_tip(text))
+            self.dock.refresh_reported()  # some rows may have gone in
+            if after:
+                after(text)
+
+        write = repo.write_log_again if again else repo.write_log
+        run_task(self.tr("通報の記録"), lambda _t: write(fmt, items, lines, at, batch), logged, failed)
+
+    def log_again(self) -> None:
+        """「記録し直す」: each 通報 put out and not logged written to the log table again (its rows that went in not added twice)."""
+        jobs = list(self._unlogged)
+        if not jobs:
+            return
+        self._say(self.tr("通報 {n} 件分を通報テーブルへ記録中").format(n=len(jobs)))
+        for job in jobs:
+            self._log(job)
+
+    def _render_relog(self) -> None:
+        n = len(self._unlogged)
+        self.relog_button.setVisible(bool(n))
+        self.relog_button.setText(self.tr("記録し直す") if n <= 1 else self.tr("記録し直す（{n} 回分）").format(n=n))
 
     # ---- the log ------------------------------------------------------------
 

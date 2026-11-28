@@ -74,8 +74,10 @@ class OverlayPart:
                     last = Mark("step", o.lon, o.lat, label=label, present=o.present, unseen=bool(o.unseen))
                     s.marks.append(last)
         areas = book.image_areas()
-        s.areas = [(a.ring, area_label(a)) for a in areas if not a.unseen]
-        s.unseen_areas = [(a.ring, area_label(a)) for a in areas if a.unseen]
+        held = book.areas_sending()
+        late = self.tr("（送信中）")
+        s.areas = [(a.ring, area_label(a) + (late if a.id in held else "")) for a in areas if not a.unseen]
+        s.unseen_areas = [(a.ring, area_label(a) + (late if a.id in held else "")) for a in areas if a.unseen]
         for c in self._once("carried", book.carried):
             o = c.source
             ends, outline = _shape(o.lon, o.lat, o.length, o.width, o.heading)
@@ -83,20 +85,21 @@ class OverlayPart:
                                 outline=outline))
         editing = self.pending[2].id if self.pending and self.pending[2] else None
         waiting = self.waiting_ids()
+        sending = self.sending_ids()
         dragged = self.dragging[0] if self.dragging else None
         for o in living:
             if o.image_id != image.id or o.id == dragged:
                 continue  # the one dragged follows the pointer (_live_scene)
-            s.marks.append(self._record_mark(o, o.lon, o.lat, color, ring_of, surest, editing, waiting))
+            s.marks.append(self._record_mark(o, o.lon, o.lat, color, ring_of, surest, editing, waiting, sending))
         self.many.paint_waiting(s, color)
         return s
 
     def _record_mark(self, o, lon: float, lat: float, color, ring_of: dict, surest: Optional[str], editing: Optional[str],
-                     waiting: set) -> Mark:
+                     waiting: set, sending: frozenset = frozenset()) -> Mark:
         """A record of this image on the map (at `lon`, `lat`: where it is, or where it is being dragged)."""
         what = (f"・{o.activity}" if o.activity else "") if o.present else f"（{unseen_label(o.unseen)}）" if o.unseen else "（消失）"
         sure = f"（{o.confidence}）" if o.confidence and o.confidence != surest else ""
-        late = self.tr("（送信待ち）") if o.id in waiting else ""
+        late = self.tr("（送信中）") if o.id in sending else self.tr("（送信待ち）") if o.id in waiting else ""
         ends, outline = _shape(lon, lat, o.length, o.width, o.heading)
         return Mark("obs", lon, lat, color(o.kind), f"{o.object_name}{quantity_mark(o)}{what}{sure}{late}", o.present, ring_of.get(o.confidence or ""),
                     ends=None if o.unseen else ends, heading=o.heading, editing=o.id == editing,
@@ -115,7 +118,7 @@ class OverlayPart:
                 levels = book.confidences()
                 editing = self.pending[2].id if self.pending and self.pending[2] else None
                 s.marks.append(self._record_mark(o, self.dragging[1], self.dragging[2], self._mark_color, {c.label: c.color for c in levels if c.color},
-                                                 levels[0].label if levels else None, editing, self.waiting_ids()))
+                                                 levels[0].label if levels else None, editing, self.waiting_ids(), self.sending_ids()))
         p = self.pending
         if p and not p[2]:
             s.pending = (p[0], p[1])

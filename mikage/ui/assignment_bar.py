@@ -56,6 +56,8 @@ class AssignmentBar(QWidget):
         self._writing = None
         #: The image being taken because 「クリック記録」 started on it (claim()).
         self.claiming = None
+        #: 協業: the image to take behind the recording once the one being taken is (claim_behind()), and what to call then.
+        self._behind: Optional[tuple] = None
         self.image = None
         row = QHBoxLayout(self)
         row.setContentsMargins(0, 0, 0, 0)
@@ -247,10 +249,33 @@ class AssignmentBar(QWidget):
             self.claiming = None
             self.read_at = 0.0
             self.reload()
+            self.render()
             failed(message)
 
         run_task(self.tr("分担の取得"), work, taken, refused)
         self.render()
+
+    def claim_behind(self, image, done: Callable[[Assignment], None], failed: Callable[[str], None]) -> None:
+        """
+        協業: takes `image` while 「クリック記録」 already goes on (a slow
+        server, tsudo 2026-11-28: nothing waits for it, since nobody is kept
+        out and a failure only warns). One being taken already: this one is
+        taken after it (the last asked, when the images were flipped through).
+        """
+        if self.source is None or image is None:
+            return
+        if self.claiming is not None:
+            if self.claiming.id != image.id:
+                self._behind = (image, done, failed)
+            return
+
+        def then(call: Callable, value) -> None:
+            call(value)
+            behind, self._behind = self._behind, None
+            if behind is not None and self.needs_claim(behind[0]):
+                self.claim_behind(*behind)
+
+        self.claim(image, lambda x: then(done, x), lambda m: then(failed, m))
 
     def holder(self) -> Optional[Assignment]:
         """The row the buttons act on: one's own (協業), else whoever holds the image."""
@@ -302,6 +327,9 @@ class AssignmentBar(QWidget):
         style = ""
         if self.error and not self.read_at:
             text = self.tr("分担: 取得に失敗（{m}）").format(m=self.error)
+        elif self.shared and self.claiming is not None and self.claiming.id == image.id and x is None:
+            # Taken behind the recording (claim_behind): it goes on meanwhile.
+            text, style = self.tr("分担: 担当を取得中…（記録はそのまま続けられる）"), "color: #2e7d32;"
         elif self.shared:
             text, style = self._shared_text(image)
         elif x is None:

@@ -449,6 +449,8 @@ class EsriObservationStore:
         #: The ids the last remove went through for, and the records of them marked (kept): when it raises, part may be done.
         self.last_removed: set[str] = set()
         self.last_marked: list[Observation] = []
+        #: Records just made here and never sent (expect_new): added without asking the layer about them first.
+        self.new: set[str] = set()
         self._layer = _EsriLayer(client, config.url, token, config.label, [config.fields["id"], config.fields["objectId"]])
 
     def _feature_of(self, o: Observation, types: dict[str, str], oid: str) -> dict[str, Any]:
@@ -660,16 +662,34 @@ class EsriObservationStore:
         features = self.client.query_all(self.config.url, " AND ".join(parts) or "1=1", self.token, limit=200_000)
         return [o for o in (self._record_of(f, oid) for f in features) if o is not None]
 
+    def expect_new(self, record_ids: Iterable[str]) -> None:
+        """
+        Records made just now, with ids of their own never sent (the book's
+        record_from): the next save adds them without asking the layer about
+        them first (a slow server: one request a save, not two; 2026-11-28).
+        One whose add then gets no answer is asked about when sent again, as
+        any other (#73).
+        """
+        self.new |= {i for i in record_ids if i}
+
+    def _unseen_yet(self, o: Observation) -> bool:
+        """Whether a record is one made just now that the layer cannot hold (expect_new; never sent, nor tried)."""
+        return o.id in self.new and o.id not in self.oids and o.id not in self.pending and o.id not in self.tried
+
     def _check(self, records: list[Observation], types: dict[str, str], oid: str) -> list[str]:
         """
         Asks the layer about the records before saving: those already there
         but not known here (an add whose answer was lost, #73) become
         updates; those changed by someone else since read are left out
-        (their reasons returned, #74).
+        (their reasons returned, #74). Records made just now (expect_new)
+        are not asked about: the layer cannot have them.
         """
         f = self.config.fields
         updated = f["updated"] if f["updated"] in types else None
-        found = self.client.find(self.config.url, f["id"], [o.id for o in records], self.token,
+        asked = [o.id for o in records if not self._unseen_yet(o)]
+        if not asked:
+            return []
+        found = self.client.find(self.config.url, f["id"], asked, self.token,
                                  out_fields=",".join(n for n in (f["id"], oid, updated) if n))
         conflicts = []
         for o in list(records):
@@ -699,7 +719,11 @@ class EsriObservationStore:
             return
         types, oid = self._layer.ready()
         failed: list[str] = []
-        conflicts = set(self._check(records, types, oid))
+        try:
+            conflicts = set(self._check(records, types, oid))
+        finally:
+            # Asked about once: sent again (an answer lost, a refusal), a record is asked about as any other.
+            self.new -= {o.id for o in records}
         self.last_conflicts = set(conflicts)
         records = [o for o in records if o.id not in conflicts]
         for i in range(0, len(records), 200):
@@ -816,6 +840,8 @@ class EsriAreaStore:
         self.token = token
         self.oids: dict[str, int] = {}
         self._layer = _EsriLayer(client, config.url, token, label, [config.fields["id"]])
+        #: Areas just made here and never sent (expect_new): added without asking the layer about them first.
+        self.new: set[str] = set()
 
     def _feature_of(self, a: CheckedArea, types: dict[str, str], oid: str) -> dict[str, Any]:
         f = self.config.fields
@@ -908,8 +934,10 @@ class EsriAreaStore:
         if not areas:
             return
         types, oid = self._layer.ready()
-        # Already there but not known here (an add whose answer was lost): changed, not added again (#73).
-        new = [a.id for a in areas if a.id not in self.oids]
+        # Already there but not known here (an add whose answer was lost): changed, not added again (#73). One made
+        # just now (expect_new) cannot be there: not asked about (a slow server: one request, 2026-11-28).
+        new = [a.id for a in areas if a.id not in self.oids and a.id not in self.new]
+        self.new -= {a.id for a in areas}
         if new:
             for area_id, attrs in self.client.find(self.config.url, self.config.fields["id"], new, self.token,
                                                     out_fields=f"{self.config.fields['id']},{oid}").items():
@@ -930,6 +958,10 @@ class EsriAreaStore:
                 failed.append((r.get("error") or {}).get("description") or "更新失敗")
         if failed:
             raise EsriError(f"{len(failed)} 件をサーバーが受け付けない", code="E305", detail=failed[0])
+
+    def expect_new(self, area_ids: Iterable[str]) -> None:
+        """Areas made just now with ids of their own: the next save adds them without asking about them first."""
+        self.new |= {i for i in area_ids if i}
 
     def know(self, area_ids: list[str]) -> None:
         """Asks the layer for the object ids of areas not known here (before deleting them for good)."""

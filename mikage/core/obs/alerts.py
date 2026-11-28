@@ -1763,15 +1763,44 @@ def build_lines(items: Sequence[AlertItem], report: AlertFormat, at: Moment) -> 
     return [line_of(item, i, report, at) for i, item in enumerate(items)]
 
 
+def new_batch() -> str:
+    """The id of one 通報 (BATCH_ID): written again with it, its rows that went in are not added twice (write_log_again)."""
+    return str(uuid.uuid4())
+
+
+def write_log_again(client: EsriClient, settings: AlertSettings, report: AlertFormat, items: Sequence[AlertItem], lines: Sequence[str],
+                    at: Moment, batch: str, token: Optional[str] = None) -> int:
+    """
+    A 通報 whose log rows did not all go in (or whose answer was lost)
+    written again: the records with a row of its batch already left out (by
+    the records reported, when the table keeps no batch); how many rows it has.
+    """
+    table = settings.table
+    if table is None or not items:
+        return 0
+    f = table.fields
+    types = _log_types(client, settings, token)
+    ids = [i.record.id for i in items]
+    if f["batch"] in types:
+        where = " AND ".join(f"({c})" for c in (table.where, f"{f['batch']} = {quote(batch)}") if c)
+        rows = client.query_all(table.url, where, token, out_fields=f["obsId"], geometry=False, limit=1_000_000)
+        there = {_text((r.get("attributes") or {}).get(f["obsId"])) for r in rows}
+    else:
+        there = reported_ids(client, settings, token, ids=ids)
+    rest = [(item, line) for item, line in zip(items, lines) if item.record.id not in there]
+    added = write_log(client, settings, report, [i for i, _l in rest], [line for _i, line in rest], at, token, batch=batch)
+    return len(items) - len(rest) + added
+
+
 def write_log(client: EsriClient, settings: AlertSettings, report: AlertFormat, items: Sequence[AlertItem], lines: Sequence[str], at: Moment,
-              token: Optional[str] = None) -> int:
-    """Adds a row per record to the Esri log table; the rows added (an EsriError if any failed)."""
+              token: Optional[str] = None, batch: Optional[str] = None) -> int:
+    """Adds a row per record to the Esri log table (`batch`: the 通報's id, new_batch); the rows added (an EsriError if any failed)."""
     table = settings.table
     if table is None or not items:
         return 0
     types = _log_types(client, settings, token)
     f = table.fields
-    batch = str(uuid.uuid4())
+    batch = batch or new_batch()
     adds = []
     for i, (item, line) in enumerate(zip(items, lines)):
         values: dict[str, Any] = {

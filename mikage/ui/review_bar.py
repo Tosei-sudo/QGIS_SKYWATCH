@@ -116,7 +116,11 @@ class ReviewBar(QWidget):
             return
         self.setVisible(True)
         rows = self.rows(self.image.id)
-        if rows is None:
+        dialog = self.dialog
+        if dialog is not None and dialog.task is not None and not dialog.isVisible() and dialog.image.id == self.image.id:
+            # Saved from the window put away (a slow server, tsudo 2026-11-28): back when the save does not go.
+            text, tip, style = self.tr("評価: 送信中…"), self.tr("画像の評価を保存中（サーバーの返事待ち）"), "color: #0369a1;"
+        elif rows is None:
             text, tip, style = (self.tr("評価: 取得に失敗") if self.error else self.tr("評価: …")), self.error, ""
         else:
             text, tip = summary_text(rows), "\n".join(lines_of(rows))
@@ -143,6 +147,7 @@ class ReviewBar(QWidget):
         reasons = list(getattr(book.vocabulary, "unseen_reasons", ()) or ())
         dialog = ImageReviewDialog(self.dock.context, image, footprint, self.dock.canvas, points, unseen, reasons, later, self.dock)
         dialog.saved.connect(self._saved)
+        dialog.sending.connect(self.render)
         dialog.finished.connect(lambda _r: self._closed(dialog))
         self.dialog = dialog
         dialog.show()

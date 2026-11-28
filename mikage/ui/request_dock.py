@@ -38,7 +38,7 @@ from ..qgis_io.org_areas_io import LAYER_PROPERTY as ORG_LAYER_PROPERTY
 from ..qgis_io.request_layers import layer_rows, requests_layer
 from ..qgis_io.tasks import run_task
 from . import last_inputs
-from .docks import PluginDock, ask_no, plain_label, plain_tip
+from .docks import SENDING_ROW, PluginDock, ask_no, plain_label, plain_tip
 from .emphasis import emphasize
 from .flow_layout import FlowLayout
 from .check_filter import CheckFilter
@@ -97,6 +97,15 @@ class RequestDock(PluginDock):
         self.shown: list[ImagingRequest] = []
         self.chosen: Optional[ImagingRequest] = None
         self.task = None
+        #: Saves waiting for the task running (a slow server, tsudo 2026-11-28: queued, not refused): (what, work, done, failed).
+        self._writes: list[tuple] = []
+        #: Requests saved from here and not answered yet (送信中: shown in the list as typed): id → what the ledger has
+        #: (None: nothing yet), listed again when a save does not go; and how many saves of each are not answered.
+        self.sending: dict[str, Optional[ImagingRequest]] = {}
+        self._unanswered: dict[str, int] = {}
+        #: Of the requests saved from here: the 更新日時 each save replaced → the one it left. A save queued behind one
+        #: of the same request, made from what that one showed, is based on what it left (not someone else's change).
+        self._stamps: dict[str, tuple[Optional[float], Optional[float], Optional[int]]] = {}
         self.form = None
         self.import_dialog = None
         self._loaded = False
@@ -254,23 +263,40 @@ class RequestDock(PluginDock):
         self.groups, self.groups_read = [], False
         self.reload()
 
-    def _start(self, what: str, work, done, failed=None) -> bool:
-        if self.task is not None:
+    def _start(self, what: str, work, done, failed=None, wait: bool = False) -> bool:
+        """
+        Runs `work` in a task (`done` with its result, `failed` with why). One at a time: a read is refused while
+        another task runs or a save waits (False: tried again, _again); a save (`wait`) waits its turn, before the reads.
+        """
+        if self.task is not None or (self._writes and not wait):
+            if wait:
+                self._writes.append((what, work, done, failed))
+                return True
             return False
 
         def finish(result):
             self.task = None
             self._update_buttons()
-            done(result)
+            try:
+                done(result)
+            finally:
+                self._next_write()
 
         def fail(message):
             self.task = None
             self._update_buttons()
-            (failed or self.status.setText)(message)
+            try:
+                (failed or self.status.setText)(message)
+            finally:
+                self._next_write()
 
         self.task = run_task(what, work, finish, fail)
         self._update_buttons()
         return True
+
+    def _next_write(self) -> None:
+        if self.task is None and self._writes:
+            self._start(*self._writes.pop(0), wait=True)
 
     def _again(self, call: Callable[[], None]) -> None:
         """
@@ -308,6 +334,9 @@ class RequestDock(PluginDock):
             if store is not self.store:
                 return
             requests, groups, note, clock = result
+            # Being saved from here (read before it went): as typed until the ledger answers.
+            shown = {r.id: r for r in self.requests if r.id in self.sending}
+            requests = [shown.pop(r.id, r) for r in requests] + list(shown.values())
             self.requests, self._loaded = requests, True
             self.clock_missing = clock
             self._shapes_asked = False
@@ -363,7 +392,8 @@ class RequestDock(PluginDock):
         for i, r in enumerate(self.shown):
             prio = priority_text(r.effective) + (f"・繰上 {r.boost}" if r.boost else "")
             mark = marks.get(r.id)
-            items = [QStandardItem(t) for t in (r.name + (self.tr("（送信待ち）") if r.id in waiting else ""),
+            late = self.tr("（送信中）") if r.id in self.sending else self.tr("（送信待ち）") if r.id in waiting else ""
+            items = [QStandardItem(t) for t in (r.name + late,
                                                 (CHANGED_MARK if mark else "") + self.area_text(r),
                                                 r.group, r.management_no, r.identification_no,
                                                 r.category + (f"（{r.repeat}）" if r.category == "定点" else ""),
@@ -378,7 +408,11 @@ class RequestDock(PluginDock):
                     tip += "\n" + self.mark_text(mark)
                     items[1].setForeground(QBrush(QColor("#b45309")))
                 items[1].setToolTip(tip)
-            if r.id in waiting:
+            if r.id in self.sending:
+                for item in items:
+                    item.setBackground(QBrush(QColor(SENDING_ROW)))
+                items[0].setToolTip(self.tr("送信中（台帳の返事待ち。そのまま操作を続けられる）"))
+            elif r.id in waiting:
                 for item in items:
                     item.setBackground(QBrush(QColor("#dbeafe")))
                 items[0].setToolTip(self.tr("送信待ち（まだ送っていない）"))
@@ -671,13 +705,15 @@ class RequestDock(PluginDock):
 
     def _update_buttons(self) -> None:
         ready = self.store is not None and self.task is None
-        for b in (self.new_button, self.reload_button):
-            b.setEnabled(ready)
+        # Saves wait their turn (a slow server, tsudo 2026-11-28): adding, changing and deleting are not held back by a task.
+        writes = self.store is not None
+        self.reload_button.setEnabled(ready)
+        self.new_button.setEnabled(writes)
         # Only once the ledger was read: what is new is told by it (#72).
         self.import_button.setEnabled(ready and self._loaded)
-        self.edit_button.setEnabled(ready and self.chosen is not None)
-        self.delete_button.setEnabled(ready and self.chosen is not None)
-        self.bulk_button.setEnabled(ready and bool(self.selected()))
+        self.edit_button.setEnabled(writes and self.chosen is not None)
+        self.delete_button.setEnabled(writes and self.chosen is not None)
+        self.bulk_button.setEnabled(writes and bool(self.selected()))
         self.event_button.setVisible(self.context.config.events is not None)
         self.event_button.setEnabled(bool(self.selected()))
         self.groups_button.setVisible(self.store is not None and bool(self.store.groups))
@@ -760,20 +796,87 @@ class RequestDock(PluginDock):
         return self.form
 
     def _save(self, request: ImagingRequest) -> None:
+        """
+        「保存」 on the form: closed now and the request listed as typed (送信中), saved in a task after those
+        waiting (a slow server, tsudo 2026-11-28); only it is put in the list once saved (the ledger is not read
+        again). Not saved: the list as it was and the form open again with it, why told.
+        """
+        store, form = self.store, self.form
+        if store is None:
+            return
         repo = self.repository()
-        form = self.form
+        last_inputs.write("request", remembered(request))
+        at = next((i for i, r in enumerate(self.requests) if r.id == request.id), None)
+        if request.id not in self.sending:
+            self.sending[request.id] = self.requests[at] if at is not None else None
+        self._unanswered[request.id] = self._unanswered.get(request.id, 0) + 1
+        shown = replace(request)
+        self.requests = [*self.requests[:at], shown, *self.requests[at + 1:]] if at is not None else [*self.requests, shown]
+        self.chosen = shown
+        if form is not None:
+            form.accept()
+        self.render()
+        self.status.setText(self.tr("「{name}」を保存中…").format(name=request.name))
+        sent = replace(request)
+        base = sent.updated
+
+        def work(task):
+            return repo.save_request(self._based(sent), _now_ms())
 
         def done(saved):
-            last_inputs.write("request", remembered(request))
-            self.chosen = saved
-            if form is not None:
-                form.accept()
-            self.reload()
+            if store is not self.store:
+                return
+            self._stamps[saved.id] = (base, saved.updated, saved.object_id)
+            self._settle(saved.id, saved, shown, saved)
+            self.status.setText(self.tr("「{name}」を保存").format(name=saved.name))
+            self.read_done.emit()  # the ledger's requests changed (as read): the org tab's count…
 
-        if not self._start(self.tr("撮像依頼の保存"), lambda task: repo.save_request(request, _now_ms()), done,
-                           lambda m: form.message.setText(self.tr("保存に失敗: {m}").format(m=m)) if form else self.status.setText(m)):
-            if form is not None:
-                form.message.setText(self.tr("ほかの処理の実行中。少し待ってから保存"))
+        def failed(message):
+            if store is not self.store:
+                return
+            self._settle(request.id, self.sending.get(request.id), shown)
+            text = self.tr("「{name}」の保存に失敗: {m}").format(name=request.name, m=message)
+            self.status.setText(text)
+            try:
+                open_ = self.form is not None and self.form.isVisible()
+            except RuntimeError:  # closed and deleted already
+                open_ = False
+            if not open_:
+                self.edit(request=request)
+                if self.form is not None:
+                    self.form.message.setText(text)
+            else:
+                self.iface.messageBar().pushWarning(self.tr("撮像依頼"), plain_tip(text + self.tr("（もう一度登録が必要）")))
+
+        self._start(self.tr("撮像依頼の保存"), work, done, failed, wait=True)
+
+    def _based(self, request: ImagingRequest) -> ImagingRequest:
+        """A save made from what an earlier save of the same request showed: based on what that one left (in the task)."""
+        stamp = self._stamps.get(request.id)
+        if stamp is not None and request.updated == stamp[0]:
+            request.updated, request.object_id = stamp[1], stamp[2] if stamp[2] is not None else request.object_id
+        return request
+
+    def _settle(self, request_id: str, kept: Optional[ImagingRequest], shown: ImagingRequest,
+                saved: Optional[ImagingRequest] = None) -> None:
+        """
+        A save answered: `kept` (what the ledger has; None: none) listed for the one shown while it went (unless
+        a later 「保存」 of it shows now); `saved`: what it saved, what a later save of it goes back to when that fails.
+        """
+        at = next((i for i, r in enumerate(self.requests) if r is shown), None)
+        if at is not None:
+            self.requests = [*self.requests[:at], *([kept] if kept is not None else []), *self.requests[at + 1:]]
+            if self.chosen is shown:
+                self.chosen = kept
+        left = self._unanswered.get(request_id, 1) - 1
+        if left > 0:
+            self._unanswered[request_id] = left
+            if saved is not None:
+                self.sending[request_id] = saved
+        else:
+            self._unanswered.pop(request_id, None)
+            self.sending.pop(request_id, None)
+        self.render()
 
     def _delete_clicked(self) -> None:
         r = self.chosen
@@ -783,14 +886,23 @@ class RequestDock(PluginDock):
                       yes=self.tr("削除")):
             return
         repo = self.repository()
+        store = self.store
 
         def done(count):
-            self.chosen = None
+            if store is not self.store:
+                return
+            # Only it goes from the list (the ledger is not read again).
+            self.requests = [x for x in self.requests if x.id != r.id]
+            if self.chosen is not None and self.chosen.id == r.id:
+                self.chosen = None
+            self.render()
             gone = self.tr("「{name}」を削除").format(name=r.name) if count else self.tr("「{name}」は台帳になし（ほかの人が削除済み）").format(name=r.name)
-            self.reload(lambda: self.status.setText(gone))
+            self.status.setText(gone)
+            self.read_done.emit()
 
-        self._start(self.tr("撮像依頼の削除"), lambda task: repo.delete_request(r), done,
-                    lambda m: self.status.setText(self.tr("削除に失敗: {m}").format(m=m)))
+        self.status.setText(self.tr("「{name}」を削除中…").format(name=r.name))
+        self._start(self.tr("撮像依頼の削除"), lambda task: repo.delete_request(self._based(replace(r))), done,
+                    lambda m: self.status.setText(self.tr("削除に失敗: {m}").format(m=m)), wait=True)
 
     def selected(self) -> list[ImagingRequest]:
         """The requests chosen in the list (several with Ctrl / Shift)."""
@@ -864,12 +976,11 @@ class RequestDock(PluginDock):
         def done(result):
             self.reload(lambda: (self.select(ids), self.status.setText(result.text())))
 
-        started = self._start(self.tr("撮像依頼の一括編集"),
-                              lambda task: repo.apply_change(chosen, change, _now_ms, task.isCanceled, task.progress),
-                              done, lambda m: self.status.setText(self.tr("一括編集に失敗: {m}").format(m=m)))
-        if not started:
-            self.status.setText(self.tr("ほかの処理の実行中。少し待ってから変更"))
-        return started
+        # Waits its turn behind the saves before it (a slow server, tsudo 2026-11-28: not refused).
+        return self._start(self.tr("撮像依頼の一括編集"),
+                           lambda task: repo.apply_change([self._based(replace(r)) for r in chosen], change, _now_ms, task.isCanceled,
+                                                          task.progress),
+                           done, lambda m: self.status.setText(self.tr("一括編集に失敗: {m}").format(m=m)), wait=True)
 
     # --- Layers ---------------------------------------------------------------------------------
 
@@ -1053,10 +1164,8 @@ class RequestDock(PluginDock):
                 self.tr("{n} 件を取り込み").format(n=saved)
                 + (self.tr("（失敗 {m} 件: {list}）").format(m=len(failed), list="、".join(failed[:3])) if failed else "")))
 
-        if not self._start(self.tr("撮像依頼の取り込み"), work, done,
-                           lambda m: form.message.setText(self.tr("取り込みに失敗: {m}").format(m=m)) if form else self.status.setText(m)):
-            if form is not None:
-                form.message.setText(self.tr("ほかの処理の実行中。少し待ってから保存"))
+        self._start(self.tr("撮像依頼の取り込み"), work, done,
+                    lambda m: form.message.setText(self.tr("取り込みに失敗: {m}").format(m=m)) if form else self.status.setText(m), wait=True)
 
     def import_rows(self, layer: Optional[QgsVectorLayer] = None, ask: bool = True, selected: Optional[bool] = None) -> None:
         """Takes in the features of a layer with every item from its attributes (as 「レイヤーへ書き出し」 writes them):

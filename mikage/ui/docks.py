@@ -23,6 +23,9 @@ from ..core import audit, errors, roles
 from ..qgis_io.context import PluginContext
 from . import error_help
 
+#: A row saved from here and not answered yet (送信中: a slow server, tsudo 2026-11-28), in every dock's list.
+SENDING_ROW = "#e0f2fe"
+
 
 def plain_tip(text: str) -> str:
     """

@@ -145,6 +145,14 @@ class FormPart:
             self.iface.messageBar().pushWarning(self.tr("観測記録"), plain_tip(self.tr(
                 "記録の保存に失敗。送信待ちに保管: {m}").format(m=message)))
 
+        if self.holds():
+            # A shared store: listed and drawn now (送信中), sent behind the screen (a slow server, tsudo 2026-11-28);
+            # a typed name of an individual not read here is looked for as it is sent.
+            held = self.hold(lambda b: b.hold_submit(lon, lat, values, present, editing, source, draft=draft or None, unseen=unseen,
+                                                     image=target))
+            if held is not None:
+                self.many.use_record(held.record)
+            return
         self.do(self.tr("記録"), lambda b: b.submit(lon, lat, values, present, editing, source, draft=draft or None, unseen=unseen, image=target),
                 lambda saved: lost(self.status.text()) if saved is None else self.many.use_record(saved), watch=True, failed=lost)
 

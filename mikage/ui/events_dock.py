@@ -31,6 +31,7 @@ from typing import Callable, Optional, Sequence
 from qgis.core import QgsFeature, QgsGeometry, QgsPointXY, QgsProject, QgsRectangle, QgsVectorLayer
 from qgis.PyQt import sip
 from qgis.PyQt.QtCore import QDateTime, QPoint, Qt
+from qgis.PyQt.QtGui import QBrush, QColor
 from qgis.PyQt.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDateTimeEdit, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
     QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QMenu, QPlainTextEdit, QPushButton, QTableWidget,
@@ -50,7 +51,7 @@ from ..qgis_io.pinned_layers import top_index
 from ..qgis_io.plan_layer import make_field
 from ..qgis_io.overviews_io import queue as overview_queue
 from ..qgis_io.tasks import run_task
-from .docks import PluginDock, ask_no, name_cancel, plain_tip
+from .docks import SENDING_ROW, PluginDock, ask_no, name_cancel, plain_tip
 from .ports import Ports
 from .fit import fit_text
 from .list_views import column_menus
@@ -143,7 +144,8 @@ class EventForm(QDialog):
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         name_cancel(buttons)
         self.button_box = buttons
-        #: Saves the values (in a task): `saver(values, done, failed)`; the form closes only once saved.
+        #: Saves the values: `saver(values, done, failed)`; the form closes on `done` (the dock's: at once, the save
+        #: then goes behind and the form opens again when it does not go; a slow server, tsudo 2026-11-28).
         self.saver: Optional[Callable] = None
         buttons.accepted.connect(self._accept)
         buttons.rejected.connect(self.reject)
@@ -239,6 +241,10 @@ class EventsDock(PluginDock):
         self._tasks: list = []
         #: Read again when the running reload ends (the event id to choose, or True).
         self._again = None
+        #: Events saved and not answered yet (送信中: listed as typed, kept over a read), by id.
+        self.sending: dict[str, Event] = {}
+        #: The event form opened last (_form).
+        self.form: Optional[EventForm] = None
 
         self.note = QLabel()
         self.note.setWordWrap(True)
@@ -474,7 +480,9 @@ class EventsDock(PluginDock):
                 again = self._again
                 self.reload(keep=again if isinstance(again, str) else chosen)
                 return
-            self.events, self.links = result
+            events, self.links = result
+            # Being saved from here: as typed until the layer answers.
+            self.events = [self.sending.get(e.id, e) for e in events] + [e for i, e in self.sending.items() if i not in {x.id for x in events}]
             self.reference_rows = {}
             self.render()
             if chosen:
@@ -510,8 +518,12 @@ class EventsDock(PluginDock):
         self.table.setRowCount(len(self.shown))
         for i, e in enumerate(self.shown):
             n = c.get(e.id, {})
-            for j, v in enumerate([e.name, e.kind, e.status, _local(e.start), _local(e.end), *(str(n.get(t, 0)) for t in TYPES)]):
+            late = self.tr("（送信中）") if e.id in self.sending else ""
+            for j, v in enumerate([e.name + late, e.kind, e.status, _local(e.start), _local(e.end), *(str(n.get(t, 0)) for t in TYPES)]):
                 item = QTableWidgetItem(v)
+                if late:
+                    item.setBackground(QBrush(QColor(SENDING_ROW)))
+                    item.setToolTip(self.tr("送信中（サーバーの返事待ち。そのまま操作を続けられる）"))
                 if j >= 5:
                     item.setTextAlignment(int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
                 self.table.setItem(i, j, item)
@@ -550,7 +562,8 @@ class EventsDock(PluginDock):
         ready = self.settings is not None and self.events is not None and self.task is None
         e = self.chosen()
         for key in ("edit", "close", "delete", "export", "summary"):
-            self.buttons[key].setEnabled(ready and e is not None)
+            # One being saved (送信中): changed once the layer has it (a second add of a new one is not sent meanwhile).
+            self.buttons[key].setEnabled(ready and e is not None and (key in ("export", "summary") or e.id not in self.sending))
         self.buttons["new"].setEnabled(ready)
         self.buttons["close"].setText(self.tr("再開") if e is not None and not e.open else self.tr("終了"))
         has_area = e is not None and bool(e.rings)
@@ -581,36 +594,79 @@ class EventsDock(PluginDock):
     def create(self) -> Optional[EventForm]:
         if self.settings is None:
             return None
-        form = EventForm(self, None, self._kinds(), self)
-        form.use_extent()
         event_id = new_event("").id
-        form.saver = lambda v, done, failed: self.save(Event(id=event_id, **v), lambda _s: done(), failed)
-        form.finished.connect(lambda _r: form.deleteLater())
-        form.open()
+        form = self._form(None, lambda v: Event(id=event_id, **v))
+        form.use_extent()
         return form
 
     def edit(self) -> Optional[EventForm]:
         e = self.chosen()
         if e is None or self.settings is None:
             return None
-        form = EventForm(self, e, self._kinds(), self)
+        return self._form(e, lambda v: Event(id=e.id, oid=e.oid, created_by=e.created_by, **v))
 
-        form.saver = lambda v, done, failed: self.save(Event(id=e.id, oid=e.oid, created_by=e.created_by, **v), lambda _s: done(), failed)
+    def _form(self, shown: Optional[Event], make: Callable[[dict], Event], then: Optional[Callable[[Event], None]] = None,
+              problem: str = "", new: Optional[bool] = None) -> EventForm:
+        """
+        An event's form (`shown`: what it starts with, None for a new one; `make`: the event of its values). 「保存」
+        closes it at once and the event is saved behind (a slow server, tsudo 2026-11-28); `then` with it once saved.
+        Not saved: the form opens again as it was typed, why told.
+        """
+        form = EventForm(self, shown, self._kinds(), self)
+        if new if new is not None else shown is None:
+            form.setWindowTitle(self.tr("新しいイベント"))
+        if problem:
+            form.problem.setText(problem)
+
+        def saver(v, done, _failed) -> None:
+            event = make(v)
+            done()
+            self.save(event, then, lambda m: self._form(event, make, then, self.tr("保存に失敗: {m}").format(m=m),
+                                                        new=shown is None if new is None else new))
+
+        form.saver = saver
         form.finished.connect(lambda _r: form.deleteLater())
         form.open()
+        self.form = form
         return form
 
     def save(self, event: Event, then: Optional[Callable[[Event], None]] = None, failed: Optional[Callable[[str], None]] = None) -> None:
-        """Saves the event (in a task), then reads the list again with it chosen."""
+        """
+        Saves the event (in a task): listed now as 送信中 and chosen; once saved, only it is put in the list (the
+        events are not read again). Not saved: the list as it was, `failed` with why.
+        """
         s = self.settings
         client, token = self.context.esri(), None
+        before = next((x for x in self.events or [] if x.id == event.id), None)
+        if self.events is not None:
+            self.events = [event if x.id == event.id else x for x in self.events] if before is not None else [*self.events, event]
+        self.sending[event.id] = event
+        if self.status_filter.currentData() and event.status != self.status_filter.currentData():
+            self.status_filter.setCurrentIndex(self.status_filter.findData(""))
+        self.render()
+        self.choose(event.id)
+
+        def put(kept: Optional[Event]) -> None:
+            if self.sending.get(event.id) is event:
+                self.sending.pop(event.id)
+            if s is not self.settings or self.events is None:
+                return
+            if kept is None:
+                self.events = [x for x in self.events if x.id != event.id]
+            elif any(x.id == kept.id for x in self.events):
+                self.events = [kept if x.id == kept.id else x for x in self.events]
+            else:
+                self.events = [*self.events, kept]
+            self.render()
 
         def done(saved: Event) -> None:
-            if self.status_filter.currentData() and saved.status != self.status_filter.currentData():
-                self.status_filter.setCurrentIndex(self.status_filter.findData(""))
-            self.reload(lambda: (self.say(self.tr("「{n}」を保存").format(n=saved.name)), then(saved) if then else None), keep=saved.id)
+            put(saved)
+            self.say(self.tr("「{n}」を保存").format(n=saved.name))
+            if then:
+                then(saved)
 
         def fail(message: str) -> None:
+            put(before)
             self._update_buttons()
             self.say(self.tr("イベントの保存に失敗: {m}").format(m=message))
             if failed is not None:
@@ -694,16 +750,9 @@ class EventsDock(PluginDock):
 
     def _create_then_link(self, items: Callable[[], Sequence[LinkItem]]) -> None:
         chosen = list(items())
-        form = EventForm(self, None, self._kinds(), self)
-        form.use_extent()
         event_id = new_event("").id
-
-        def saver(v, done, failed) -> None:
-            self.save(Event(id=event_id, **v), lambda saved: (done(), self.link_items([saved.id], chosen)), failed)
-
-        form.saver = saver
-        form.finished.connect(lambda _r: form.deleteLater())
-        form.open()
+        form = self._form(None, lambda v: Event(id=event_id, **v), lambda saved: self.link_items([saved.id], chosen))
+        form.use_extent()
         self.show()
         self.raise_()
 

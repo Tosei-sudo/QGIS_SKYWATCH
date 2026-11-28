@@ -213,6 +213,42 @@ class RemoveOutcome:
         return "・".join(parts)
 
 
+def _values_of(o: Observation) -> FormValues:
+    """What the form would say of a record (a draft of one not made in the form)."""
+    return FormValues(object=o.object_name, kind=o.kind, activity=o.activity, note=o.note, confidence=o.confidence,
+                      length=_text(o.length), heading=_text(o.heading), width=_text(o.width), quantity=_text(o.quantity))
+
+
+@dataclass
+class Held:
+    """
+    A record confirmed and shown at once while it is sent behind the screen
+    (a shared store; hold_submit, hold_carry: a slow server, tsudo 2026-11-28).
+    """
+    #: The record as it is saved.
+    record: Observation
+    #: The record as listed before (a change, a record held again), put back when it is not saved; None for a new one.
+    before: Optional[Observation]
+    #: What is kept in 「保存できなかった観測記録」 when it is not saved.
+    draft: Draft
+    #: The draft the form was opened from (it goes once saved).
+    replaces: str = ""
+    #: The form it came from (lon, lat, editing, source, FormValues), opened again when not saved; None: not from the form.
+    form: Optional[tuple] = None
+    #: What is said once saved.
+    done: str = ""
+    #: A typed name of an individual not among the records read (name, kind, the record changed): which thing it
+    #: is, looked for in the store when it is sent (send_held), not while the person waits.
+    resolve: Optional[tuple] = None
+
+
+@dataclass
+class Sent:
+    """What send_held did: the records saved (as kept), and those not, each with why and its draft's id."""
+    saved: list[Observation] = field(default_factory=list)
+    lost: list[tuple[Held, str, str]] = field(default_factory=list)
+
+
 class ObservationBook:
     """The records of one store, and what is done with them."""
 
@@ -254,6 +290,16 @@ class ObservationBook:
         self._read_at = 0
         #: The draft kept last (a save that did not go through).
         self.last_draft_id = ""
+        #: Records made here with ids of their own and not sent yet: saved without asking the store about them first
+        #: (EsriObservationStore.expect_new; a slow server, 2026-11-28).
+        self._made: set[str] = set()
+        #: Records confirmed and shown, waiting to be sent (by id), and those being sent (Held; send_held).
+        self._held: dict[str, Held] = {}
+        self._flight: dict[str, Held] = {}
+        #: A send of what is held is asked for already (ask_send).
+        self._send_asked = False
+        #: Checked areas shown and not taken by the store yet (by id; hold_area, send_area).
+        self._areas_sending: dict[str, CheckedArea] = {}
         #: The records a refresh found changed (by someone else): a form opened on one before is not saved over it.
         self.changed_by_others: set[str] = set()
         #: A shared store (Esri) is read only as needed (scope.py, 2026-11-18): the records around the images recorded on
@@ -314,10 +360,10 @@ class ObservationBook:
             records = []
             text = f"{self.store.label} から記録の取得に失敗: {_error_text(error)}"
         with self.lock:
-            self.records = records
+            self.records = self._with_sending(records)
             if not text.startswith(f"{self.store.label} から記録の取得に失敗"):
                 self._read_at = started
-            self.areas = areas
+            self.areas = self._with_areas_sending(areas)
             self._taxonomy = kept if kept is not None else list(self.vocabulary.taxonomy)
             self.spec_fields = fields if fields is not None else list(self.vocabulary.spec_fields)
             self.loaded = True
@@ -353,7 +399,7 @@ class ObservationBook:
             lambda: caught(lambda: self._find_areas(image_ids=[i.id for i in wanted]) if wanted else []))
         if failed is not None:
             with self.lock:
-                self.records, self._around = [], {}
+                self.records, self._around = self._with_sending([]), {}
                 self._around_failed = {i.id: (self._around_key(i), now_ms()) for i in wanted}
                 self.loaded = True
             return self._say(f"{self.store.label} から記録の取得に失敗: {_error_text(failed)}")
@@ -362,8 +408,8 @@ class ObservationBook:
             areas = []
             message = f"{self.area_store.label} から確認範囲の取得に失敗: {_error_text(areas_failed)}"
         with self.lock:
-            self.records = records
-            self.areas = areas
+            self.records = self._with_sending(records)
+            self.areas = self._with_areas_sending(areas)
             self._around = {i.id: self._around_key(i) for i in wanted}
             self._read_at = started
             self.loaded = True
@@ -415,7 +461,7 @@ class ObservationBook:
             return self._say(f"{self.store.label} から記録の取得に失敗: {_error_text(error)}")
         self._around_failed.pop(image.id, None)
         with self.lock:
-            self.records = merged(self.records, records)
+            self.records = self._with_sending(merged(self.records, records))
             self.areas = merged(self.areas, areas)
             self._around[image.id] = self._around_key(image)
         here = sum(1 for o in records if o.image_id == image.id and o.deleted_at is None)
@@ -435,7 +481,7 @@ class ObservationBook:
                 return [o for o in self.records if query.matches(o)]
         found = self.store.find(query)
         with self.lock:
-            self.records = merged(self.records, found)
+            self.records = self._with_sending(merged(self.records, found))
         return found
 
     def fetch_areas(self, image_ids: Sequence[str] = (), start: Optional[float] = None, end: Optional[float] = None) -> list[CheckedArea]:
@@ -486,19 +532,25 @@ class ObservationBook:
         except Exception:  # noqa: BLE001 (quiet: the next refresh tries again)
             return None
         with self.lock:
+            sending = set(self._held) | set(self._flight)
             if changed is not None and self.scoped:
                 changed = self._relevant(changed)
+            if changed is not None and sending:
+                # Being sent from here: the store's older one is not someone else's change.
+                changed = [o for o in changed if o.id not in sending]
             if changed is None and self.scoped:
                 before = {o.id: o for o in self.records}
                 news = [o for o in records if not _same(before.get(o.id), o)]
                 fresh = {o.id for o in records}
-                gone = {o.id for o in self.records if o.image_id in self._around and o.id not in fresh}
-                self.records = merged([o for o in self.records if o.id not in gone], records)
+                gone = {o.id for o in self.records if o.image_id in self._around and o.id not in fresh and o.id not in sending}
+                news = [o for o in news if o.id not in sending]
+                self.records = self._with_sending(merged([o for o in self.records if o.id not in gone], records))
             elif changed is None:
                 before = {o.id: o for o in self.records}
                 news = [o for o in records if not _same(before.get(o.id), o)]
-                gone = set(before) - {o.id for o in records}
-                self.records = records
+                gone = set(before) - {o.id for o in records} - sending
+                news = [o for o in news if o.id not in sending]
+                self.records = self._with_sending(records)
             else:
                 at = {o.id: i for i, o in enumerate(self.records)}
                 news = [o for o in changed if o.id not in at or not _same(self.records[at[o.id]], o)]
@@ -946,7 +998,7 @@ class ObservationBook:
         rows = [replace(o, updated_by=by) if o.id in known else replace(o, recorded_by=by, updated_by=by) for o in rows]
         rows = self._named(self._placed(_counted(rows)))
         try:
-            self.store.save(rows)
+            self._send(rows)
         except Exception as error:  # noqa: BLE001 (said, as the viewer)
             self._say(f"{self.store.label} への保存に失敗: {_error_text(error)}")
             return None
@@ -957,6 +1009,23 @@ class ObservationBook:
         if done:
             self._say(done)
         return rows
+
+    def _made_now(self, rows: Iterable[Observation]) -> list[Observation]:
+        """Records just made here (new ids of their own): their first save does not ask the store about them."""
+        rows = list(rows)
+        with self.lock:
+            self._made |= {o.id for o in rows}
+        return rows
+
+    def _send(self, rows: list[Observation]) -> None:
+        """Saves records in the store (those just made here added without asking about them first); raises what it raises."""
+        with self.lock:
+            fresh = [o.id for o in rows if o.id in self._made]
+            self._made -= set(fresh)
+        expect_new = getattr(self.store, "expect_new", None)
+        if fresh and callable(expect_new):
+            expect_new(fresh)
+        self.store.save(rows)
 
     def individual(self, kind: str) -> bool:
         """
@@ -972,17 +1041,19 @@ class ObservationBook:
         """Whether a name typed for a kind names one thing: an individual's own name (not its class's name, given when none is typed)."""
         return bool(name) and name not in path_of(kind) and name != "モノ" and self.individual(kind)
 
-    def flow_by_name(self, name: str, kind: str = "", ask: bool = False) -> Optional[ObjectFlow]:
+    def flow_by_name(self, name: str, kind: str = "", ask: bool = False, skip: Iterable[str] = ()) -> Optional[ObjectFlow]:
         """
         The thing a typed name means: one whose id it is, or an individual of
         that name (of `kind`'s classes when given). `ask`: looked for in the
         store too when not among the records read (a shared store; in a task).
+        `skip`: records left out (those being sent, which the name is looked for).
         """
         if not name:
             return None
+        skip = set(skip)
 
         def pick(records: Iterable[Observation]) -> Optional[ObjectFlow]:
-            everything = flows(records)
+            everything = flows([o for o in records if o.id not in skip] if skip else records)
             by_id = next((f for f in everything if f.object_id == name), None)
             if by_id is not None:
                 return by_id
@@ -1008,8 +1079,11 @@ class ObservationBook:
         return path[-1] if path else "モノ"
 
     def record_from(self, image: ObservedImage, lon: float, lat: float, editing: Optional[Observation], source: Optional[Observation],
-                    values: FormValues, present: bool, unseen: str = "") -> Observation:
-        """The record the form says (`unseen`: 「不可」, why; then neither there nor gone)."""
+                    values: FormValues, present: bool, unseen: str = "", ask: bool = True) -> Observation:
+        """
+        The record the form says (`unseen`: 「不可」, why; then neither there nor gone). `ask`: a typed name of an
+        individual not among the records read is looked for in the store (else it is looked for when sent: _resolve).
+        """
         now = now_ms()
         unseen = unseen.strip()
         if unseen:
@@ -1038,7 +1112,7 @@ class ObservationBook:
         confidence = (values.confidence or "").strip()
         if editing is not None:
             # The same thing unless another one's name (an individual's) or id was typed.
-            other = self.flow_by_name(name, kind, ask=True) if name and name != editing.object_name else None
+            other = self.flow_by_name(name, kind, ask=ask) if name and name != editing.object_name else None
             other = other if other is None or other.object_id != editing.object_id else None
             return replace(editing, object_id=other.object_id if other else editing.object_id,
                            object_name=other.name if other else (name or editing.object_name), kind=kind, activity=activity,
@@ -1048,15 +1122,15 @@ class ObservationBook:
             # 継続・同一候補: the same thing (a name typed for a thing that is not an individual renames it here).
             known = (source.object_id, name or source.object_name)
         else:
-            flow = self.flow_by_name(name, kind, ask=True)
+            flow = self.flow_by_name(name, kind, ask=ask)
             known = (flow.object_id, flow.name) if flow else None
-        return Observation(
+        return self._made_now([Observation(
             id=new_observation_id(), image_id=image.id, image_name=image.name, image_time=image.time, satellite=image.satellite,
             object_id=known[0] if known else new_object_id(),
             object_name=known[1] if known else (name or self.default_name(kind)),
             kind=kind, activity=activity, present=present, unseen=unseen, confidence=confidence, note=values.note, lon=lon, lat=lat,
             created_at=now, updated_at=now, deleted_at=None, **measure,
-        )
+        )])[0]
 
     def submit(self, lon: float, lat: float, values: FormValues, present: bool = True, editing: Optional[Observation] = None,
                source: Optional[Observation] = None, draft: Optional[str] = None, unseen: str = "",
@@ -1104,6 +1178,210 @@ class ObservationBook:
                               source.id if source else "", now_ms(), self.status, needs_check=crossed),
                         replaces=kept.id if kept else None)
         return None
+
+    # ---- 送信中: confirmed, shown at once, sent behind the screen (a slow server, tsudo 2026-11-28) ----------
+
+    def needs_store(self, values: FormValues, editing: Optional[Observation] = None, source: Optional[Observation] = None) -> bool:
+        """
+        Whether making the record the form says asks the store first: a name
+        typed of an individual (艦名…) or a thing's id not among the records
+        read (which thing it is). A held record looks for it as it is sent.
+        """
+        name = values.object.strip()
+        if not name or not self.scoped:
+            return False
+        kind = kind_of(path_of(values.kind))
+        if editing is not None and name == editing.object_name:
+            return False
+        if editing is None and source is not None and (name == source.object_name or not self.names_a_thing(name, kind)):
+            return False
+        if not (name.startswith("OBJ-") or self.names_a_thing(name, kind)):
+            return False
+        return self.flow_by_name(name, kind) is None
+
+    def hold_submit(self, lon: float, lat: float, values: FormValues, present: bool = True, editing: Optional[Observation] = None,
+                    source: Optional[Observation] = None, draft: Optional[str] = None, unseen: str = "",
+                    image: Optional[ObservedImage] = None) -> Optional[Held]:
+        """
+        As submit, but the record is put in the list at once (送信中) and kept
+        on this computer, to be sent by send_held (in a task). None: not
+        held (no image; someone else changed the record meanwhile: kept as a
+        draft, as submit does).
+        """
+        image = image if image is not None else self.current
+        if image is None:
+            self._say("画像なし。画像を開くか、＋ でファイルのない画像を追加")
+            return None
+        if editing is not None:
+            now = self.record(editing.id)
+            if now is not None and now != editing and editing.id in self.changed_by_others:
+                return self.submit(lon, lat, values, present, editing, source, draft, unseen, image)
+        # A typed name of an individual not read here is looked for when it is sent (in the task), not now.
+        resolve = self.needs_store(values, editing, source)
+        record = self.record_from(image, lon, lat, editing, source, values, present, unseen, ask=False)
+        present = record.present
+        kept = self.draft(draft) if draft else None
+        if kept is not None and editing is None:
+            # The same record as the first try: one the server took meanwhile is updated, not added twice (#73).
+            with self.lock:
+                self._made.discard(record.id)
+            record = replace(record, id=kept.record.id, created_at=kept.record.created_at)
+        self.last = FormValues(kind=record.kind, activity=record.activity if present else self.last.activity, confidence=record.confidence)
+        what = (f"（{record.activity}）" if record.activity else "") if present else f"（{state_text(record)}）"
+        d = Draft(record, {k: getattr(values, k) for k in FormValues.__dataclass_fields__}, present, editing.id if editing else "",
+                  editing.updated_at if editing else None, source.id if source else "", now_ms(), "送信中")
+        held = self._hold(record, d, kept.id if kept else "", (lon, lat, editing, source, values),
+                          f"{record.object_name}{what}を{'更新' if editing else '記録'}")
+        if resolve:
+            held.resolve = (values.object.strip(), kind_of(path_of(values.kind)), editing)
+        return held
+
+    def hold_carry(self, object_id: str, present: bool = True) -> Optional[Held]:
+        """As carry (the list's 「継続」「消失」), held as hold_submit is; None: nothing to carry."""
+        image = self.current
+        c = next((x for x in self.carried() if x.source.object_id == object_id), None)
+        if image is None or c is None:
+            return None
+        record = self._made_now([carried_into(c.source, image.ref, now_ms(), present=present, **({} if present else {"activity": ""}))])[0]
+        d = Draft(record, {k: getattr(_values_of(record), k) for k in FormValues.__dataclass_fields__}, present, "", None,
+                  c.source.id, now_ms(), "送信中")
+        return self._hold(record, d, "", None, f"{record.object_name} を{'継続' if present else '消失'}として記録")
+
+    def _hold(self, record: Observation, draft: Draft, replaces: str, form: Optional[tuple], done: str) -> Held:
+        by = self.observer()
+        with self.lock:
+            listed = {o.id: o for o in self.records}
+            prev = self._held.get(record.id) or self._flight.get(record.id)
+        record = replace(record, updated_by=by) if record.id in listed else replace(record, recorded_by=by, updated_by=by)
+        record = self._named(self._placed(_counted([record])))[0]
+        draft = replace(draft, record=record)
+        held = Held(record, prev.before if prev is not None else listed.get(record.id), draft, replaces, form, done)
+        with self.lock:
+            self._held[record.id] = held
+            self.records = merged(self.records, [record])
+        try:
+            # On this computer until the server takes it: QGIS gone meanwhile leaves it a draft (drafts.left_over).
+            hold = getattr(self.shelf, "hold", None)
+            if callable(hold):
+                hold(self.store.label, draft)
+        except Exception:  # noqa: BLE001 (sent all the same)
+            pass
+        self._say(f"{done}（送信中）")
+        return held
+
+    def _resolve(self, h: Held) -> None:
+        """
+        The thing a held record's typed name means, looked for in the store now (send_held, in the task): an
+        individual of that name known there makes the record one of its; none found (or the store not reached):
+        a new thing of that name, as when record_from finds none.
+        """
+        name, kind, editing = h.resolve
+        h.resolve = None
+        flow = self.flow_by_name(name, kind, ask=True, skip=self.sending_ids())
+        if flow is None or flow.object_id == h.record.object_id or (editing is not None and flow.object_id == editing.object_id):
+            return
+        was = h.record.object_id
+        # Every record held of the same new thing (the name typed again meanwhile) is of that individual too.
+        with self.lock:
+            for x in [*self._flight.values(), *self._held.values()]:
+                if x.record.object_id == was:
+                    record = replace(x.record, object_id=flow.object_id, object_name=flow.name)
+                    x.record, x.draft = record, replace(x.draft, record=record)
+            by_id = {x.record.id: x.record for x in [*self._flight.values(), *self._held.values()]}
+            self.records = [by_id.get(o.id, o) for o in self.records]
+
+    def ask_send(self) -> bool:
+        """Whether a send of what is held is to be started now (not asked already, something held)."""
+        with self.lock:
+            if self._send_asked or not self._held:
+                return False
+            self._send_asked = True
+            return True
+
+    def sending_ids(self) -> set[str]:
+        """The records confirmed and shown, not taken by the server yet (送信中)."""
+        with self.lock:
+            return set(self._held) | set(self._flight)
+
+    def _with_sending(self, records: list[Observation]) -> list[Observation]:
+        """Records read from the store with those being sent put over them (call with the lock held)."""
+        if not self._held and not self._flight:
+            return records
+        return merged(records, [h.record for h in (*self._flight.values(), *self._held.values())])
+
+    def send_held(self) -> Sent:
+        """
+        Sends what is held, all at once (in a task): those confirmed while the
+        last went are sent together. Those saved stay listed as kept; the
+        others are put back as they were (a new one goes) and kept in
+        「保存できなかった観測記録」 with why, as submit keeps them.
+        """
+        with self.lock:
+            batch = list(self._held.values())
+            self._held.clear()
+            self._send_asked = False
+            for h in batch:
+                self._flight[h.record.id] = h
+        out = Sent()
+        if not batch:
+            return out
+        for h in batch:
+            if h.resolve is not None:
+                self._resolve(h)
+        rows = [h.record for h in batch]
+        error: Optional[Exception] = None
+        try:
+            self._send(rows)
+            saved = {o.id for o in rows}
+        except Exception as e:  # noqa: BLE001 (each record kept, with why)
+            error = e
+            saved = set(getattr(self.store, "last_saved", None) or ()) & {o.id for o in rows}
+        crossed = set(getattr(self.store, "last_conflicts", None) or ()) if error is not None else set()
+        as_kept = {o.id: o for o in self._kept([h.record for h in batch if h.record.id in saved])}
+        mine = {h.record.id: h for h in batch}
+        with self.lock:
+            for h in batch:
+                self._flight.pop(h.record.id, None)
+            again = set(self._held)
+            listed = []
+            for o in self.records:
+                if o.id in again or o.id not in mine:
+                    listed.append(o)
+                elif o.id in as_kept:
+                    listed.append(as_kept[o.id])
+                elif mine[o.id].before is not None:
+                    listed.append(mine[o.id].before)
+            self.records = listed
+        why = _error_text(error) if error is not None else ""
+        for h in batch:
+            if h.record.id in saved:
+                out.saved.append(as_kept[h.record.id])
+                if h.replaces:
+                    self.drop_draft(h.replaces)
+                continue
+            text = (f"{h.record.object_name} はほかの人が先に変更したため保存せず（送信待ちに保管）" if h.record.id in crossed
+                    else f"{self.store.label} への保存に失敗: {why}")
+            if h.record.id in again:
+                # Changed again meanwhile: that one is sent next (and kept if it is not saved either).
+                continue
+            draft = replace(h.draft, kept_at=now_ms(), reason=text, needs_check=h.record.id in crossed)
+            try:
+                self.keep_draft(draft, replaces=h.replaces or None)
+            except Exception:  # noqa: BLE001 (still held on this computer: a draft at the next start)
+                continue
+            out.lost.append((h, text, draft.id))
+        try:
+            let_go = getattr(self.shelf, "let_go", None)
+            if callable(let_go):
+                let_go(self.store.label, [h.record.id for h in batch if h.record.id not in again and
+                                          (h.record.id in saved or any(x[0] is h for x in out.lost))])
+        except Exception:  # noqa: BLE001
+            pass
+        if out.lost:
+            self._say(out.lost[0][1] + (f"（ほか {len(out.lost) - 1} 件も送信待ちに保管）" if len(out.lost) > 1 else ""))
+        elif out.saved:
+            self._say(batch[0].done if len(out.saved) == 1 else f"{len(out.saved)} 件を記録")
+        return out
 
     def keep_typed(self, image: ObservedImage, lon: float, lat: float, values: FormValues, editing: Optional[Observation] = None,
                    source: Optional[Observation] = None, draft: Optional[str] = None, reason: str = "") -> Draft:
@@ -1491,8 +1769,8 @@ class ObservationBook:
         unseen = unseen.strip()
         if unseen:
             present = False
-        record = carried_into(c.source, image.ref, now_ms(), **{"present": present, **({} if present else {"activity": ""}),
-                                                                 "unseen": unseen, **changes})
+        record = self._made_now([carried_into(c.source, image.ref, now_ms(), **{"present": present, **({} if present else {"activity": ""}),
+                                                                                "unseen": unseen, **changes})])[0]
         what = unseen_label(unseen) if unseen else "継続" if present else "消失"
         saved = self._save_records([record], f"{record.object_name} を{what}として記録")
         return saved[0] if saved else None
@@ -1510,7 +1788,7 @@ class ObservationBook:
         if image is None or not rows:
             return []
         now = now_ms()
-        made = [carried_into(c.source, image.ref, now) for c in rows]
+        made = self._made_now(carried_into(c.source, image.ref, now) for c in rows)
         left = [f"確認範囲内の {len(inside)} 件"] * bool(inside) + [f"不可範囲内の {len(hidden)} 件"] * bool(hidden)
         note = f"（{'・'.join(left)}を除く）" if left else ""
         return self._save_records(made, f"{len(made)} のモノを継続として記録{note}") or []
@@ -1528,7 +1806,7 @@ class ObservationBook:
         if image is None or not rows:
             return []
         now = now_ms()
-        made = [carried_into(c.source, image.ref, now, present=False, activity="") for c in rows]
+        made = self._made_now(carried_into(c.source, image.ref, now, present=False, activity="") for c in rows)
         note = f"（不可範囲内の {len(hidden)} 件を除く）" if hidden else ""
         return self._save_records(made, f"{len(made)} のモノを消失として記録{note}") or []
 
@@ -1539,7 +1817,7 @@ class ObservationBook:
         if image is None or not rows:
             return []
         now = now_ms()
-        made = [carried_into(c.source, image.ref, now, present=False, activity="") for c in rows]
+        made = self._made_now(carried_into(c.source, image.ref, now, present=False, activity="") for c in rows)
         return self._save_records(made, f"{len(made)} のモノを消失として記録（確認範囲内）") or []
 
     def mark_unseen(self, only: Optional[Callable[[CarryOver], bool]] = None, quiet: bool = False) -> list[Observation]:
@@ -1552,8 +1830,8 @@ class ObservationBook:
         if image is None or not rows:
             return []
         now = now_ms()
-        made = [carried_into(c.source, image.ref, now, present=False, activity="",
-                             unseen=self.unseen_reason_at(c.source.lon, c.source.lat) or UNSEEN) for c in rows]
+        made = self._made_now(carried_into(c.source, image.ref, now, present=False, activity="",
+                                           unseen=self.unseen_reason_at(c.source.lon, c.source.lat) or UNSEEN) for c in rows)
         saved = self._save_records(made, "" if quiet else f"{len(made)} のモノを不可として記録（不可範囲内）")
         return saved or []
 
@@ -1566,6 +1844,21 @@ class ObservationBook:
         `unseen`: a 不可範囲 instead (why: 雲・霞…), of every kind; the things carried over into it on this image are
         recorded 不可 at once (tsudo 2026-11-19, 案A).
         """
+        area = self._new_area(ring, kind, note, image, unseen)
+        if area is None:
+            return None
+        try:
+            self._send_areas([area])
+        except Exception as error:  # noqa: BLE001
+            self._say(f"{self.area_store.label} への{'不可範囲' if area.unseen else '確認範囲'}の保存に失敗: {_error_text(error)}")
+            return None
+        area = self._kept_areas([area])[0]
+        with self.lock:
+            self.areas = [*self.areas, area]
+        return self._area_recorded(area)
+
+    def _new_area(self, ring: Sequence[Sequence[float]], kind: str, note: str, image: Optional[str], unseen: str) -> Optional[CheckedArea]:
+        """A checked area made (as add_area takes it), not saved; None (said) when it cannot be."""
         unseen = unseen.strip()
         if unseen and not self.keeps_unseen_areas():
             self._say("この保存先では不可範囲を記録できない（管理者に連絡: UNSEEN_REASON）［E704］")
@@ -1579,28 +1872,73 @@ class ObservationBook:
         if points[0] != points[-1]:
             points.append(list(points[0]))
         now = now_ms()
-        area = CheckedArea(id=new_area_id(), image_id=info.id, image_name=info.name, image_time=info.time, ring=points,
+        return CheckedArea(id=new_area_id(), image_id=info.id, image_name=info.name, image_time=info.time, ring=points,
                            kind="" if unseen else kind_of(path_of(kind)), note=note.strip(), created_at=now, updated_at=now, deleted_at=None,
                            recorded_by=self.observer(), unseen=unseen, satellite=info.satellite)
-        what = "不可範囲" if unseen else "確認範囲"
-        try:
-            self.area_store.save([area])
-        except Exception as error:  # noqa: BLE001
-            self._say(f"{self.area_store.label} への{what}の保存に失敗: {_error_text(error)}")
-            return None
-        area = self._kept_areas([area])[0]
-        with self.lock:
-            self.areas = [*self.areas, area]
-        here = self.current is not None and info.id == self.current.id
-        if unseen:
+
+    def _send_areas(self, areas: list[CheckedArea]) -> None:
+        """Areas made just now saved: added without asking the store about them first (one request; a slow server)."""
+        expect = getattr(self.area_store, "expect_new", None)
+        if expect is not None:
+            expect([a.id for a in areas])
+        self.area_store.save(areas)
+
+    def _area_recorded(self, area: CheckedArea) -> CheckedArea:
+        """A checked area saved: a 不可範囲's things carried over recorded 不可 in this image; what was recorded said."""
+        here = self.current is not None and area.image_id == self.current.id
+        if area.unseen:
             # The things that may be there: 不可 in this image (not left waiting as 前後の画像のモノ).
-            marked = self.mark_unseen(lambda c: bool(covering_areas([area], info.id, c.source.lon, c.source.lat, "", unseen=True)),
+            marked = self.mark_unseen(lambda c: bool(covering_areas([area], area.image_id, c.source.lon, c.source.lat, "", unseen=True)),
                                       quiet=True) if here else []
             self._say(f"{area_label(area)}を記録{f'（中の前後の画像のモノ {len(marked)} 件を不可として記録）' if marked else ''}")
             return area
         missing = len(self.inside_carried()) if here else 0
         self._say(f"{area_label(area)}を記録{f'（範囲内で記録のない前後の画像のモノ {missing} 件）' if missing else ''}")
         return area
+
+    def hold_area(self, ring: Sequence[Sequence[float]], kind: str = "", note: str = "", image: Optional[str] = None,
+                  unseen: str = "") -> Optional[CheckedArea]:
+        """
+        A checked area (as add_area takes it) shown now as 送信中 and not saved
+        yet: send_area saves it (in a task; a slow server, tsudo 2026-11-28).
+        """
+        area = self._new_area(ring, kind, note, image, unseen)
+        if area is None:
+            return None
+        with self.lock:
+            self._areas_sending[area.id] = area
+            self.areas = [*self.areas, area]
+        self._say(f"{area_label(area)}を記録（送信中）")
+        return area
+
+    def send_area(self, area: CheckedArea) -> Optional[CheckedArea]:
+        """
+        Saves a checked area held (hold_area): kept as the store keeps it (a
+        不可範囲 then records its things 不可, as add_area); None when it did
+        not save: it goes from the list (said why).
+        """
+        try:
+            self._send_areas([area])
+        except Exception as error:  # noqa: BLE001
+            with self.lock:
+                self._areas_sending.pop(area.id, None)
+                self.areas = [a for a in self.areas if a.id != area.id]
+            self._say(f"{self.area_store.label} への{'不可範囲' if area.unseen else '確認範囲'}の保存に失敗: {_error_text(error)}")
+            return None
+        kept = self._kept_areas([area])[0]
+        with self.lock:
+            self._areas_sending.pop(area.id, None)
+            self.areas = [kept if a.id == area.id else a for a in self.areas]
+        return self._area_recorded(kept)
+
+    def areas_sending(self) -> set[str]:
+        """The checked areas shown and not taken by the store yet (送信中)."""
+        with self.lock:
+            return set(self._areas_sending)
+
+    def _with_areas_sending(self, areas: list[CheckedArea]) -> list[CheckedArea]:
+        """Areas read from the store with those being sent put over them (call with the lock held)."""
+        return merged(areas, list(self._areas_sending.values())) if self._areas_sending else areas
 
     def add_areas(self, rings: Sequence[tuple], image: Optional[str] = None) -> Optional[list[CheckedArea]]:
         """
@@ -1630,7 +1968,7 @@ class ObservationBook:
         if not made:
             return []
         try:
-            self.area_store.save(made)
+            self._send_areas(made)
         except Exception as error:  # noqa: BLE001
             self._say(f"{self.area_store.label} への確認範囲の保存に失敗: {_error_text(error)}")
             return None

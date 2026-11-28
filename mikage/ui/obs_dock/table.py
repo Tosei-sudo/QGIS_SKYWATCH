@@ -15,7 +15,7 @@ from ...core.obs.api import Observation, class_by_name, find, kind_of, path_of, 
 from ..text_assist_ui import SummaryDialog
 from ..obs_overlay import UNSEEN_COLOR
 from ..row_buttons import RowButton
-from .common import REPORTED_ROW, WAITING_ROW
+from .common import REPORTED_ROW, SENDING_ROW, WAITING_ROW
 
 
 class TablePart:
@@ -51,7 +51,8 @@ class TablePart:
 
     def _row(self, cells: list, on_click: Optional[Callable] = None, on_double: Optional[Callable] = None,
              style: str = "", buttons: Optional[list[RowButton]] = None, selected: bool = False,
-             records: Optional[list[Observation]] = None, reported: bool = False, waiting: bool = False, key: str = "") -> None:
+             records: Optional[list[Observation]] = None, reported: bool = False, waiting: bool = False, key: str = "",
+             sending: bool = False) -> None:
         r = getattr(self, "_rows_filled", self.table.rowCount())
         if r >= self.table.rowCount():
             self.table.insertRow(r)
@@ -79,7 +80,12 @@ class TablePart:
                 item.setBackground(QColor(REPORTED_ROW))
                 item.setForeground(QColor("#1f2937"))
                 item.setToolTip(self.tr("通報済み"))
-            if waiting:
+            if sending:
+                # Confirmed and listed at once, the server not answered yet (a slow server: sent behind the screen).
+                item.setBackground(QColor(SENDING_ROW))
+                item.setForeground(QColor("#075985"))
+                item.setToolTip(self.tr("送信中（サーバーの返事待ち。そのまま記録を続けられる）"))
+            elif waiting:
                 # Not the local store: saved offline, on its way to this store's server.
                 item.setBackground(QColor(WAITING_ROW))
                 item.setForeground(QColor("#1e3a8a"))

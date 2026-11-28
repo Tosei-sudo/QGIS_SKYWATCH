@@ -15,7 +15,7 @@ from typing import Iterable, Optional, Sequence
 from ..esri import EsriClient
 from ..sources import EsriSource
 from .alerts import (
-    AlertFormat, AlertItem, AlertSettings, LogChanges, LogRow, Moment, load_log, poll_log, remove_log, reported_ids, write_log,
+    AlertFormat, AlertItem, AlertSettings, LogChanges, LogRow, Moment, load_log, poll_log, remove_log, reported_ids, write_log, write_log_again,
 )
 from .assignments import Assignment, assignments_of_images, load_assignments, release, take, update
 
@@ -55,8 +55,12 @@ class AlertLogRepository:
     def reported_ids(self, ids: Optional[Iterable[str]] = None) -> set[str]:
         return reported_ids(self.client, self.settings, self.token, ids)
 
-    def write_log(self, report: AlertFormat, items: Sequence[AlertItem], lines: Sequence[str], at: Moment) -> int:
-        return write_log(self.client, self.settings, report, items, lines, at, self.token)
+    def write_log(self, report: AlertFormat, items: Sequence[AlertItem], lines: Sequence[str], at: Moment,
+                  batch: Optional[str] = None) -> int:
+        return write_log(self.client, self.settings, report, items, lines, at, self.token, batch)
+
+    def write_log_again(self, report: AlertFormat, items: Sequence[AlertItem], lines: Sequence[str], at: Moment, batch: str) -> int:
+        return write_log_again(self.client, self.settings, report, items, lines, at, batch, self.token)
 
     def load_log(self, start: Optional[float] = None, end: Optional[float] = None, limit: int = 20_000) -> list[LogRow]:
         return load_log(self.client, self.settings, start, end, self.token, limit)

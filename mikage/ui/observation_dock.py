@@ -977,12 +977,16 @@ class ObservationDock(
         store = self.book.store if self.book is not None else None
         down = bool(getattr(store, "offline", False))
         n = len(self.waiting_ids())
+        sending = len(self.sending_ids())
         if down:
             self.offline_note.setText(tr("オフラインで作業中（最後に取得した記録を表示）。保存した記録は「送信待ち」（青）に保管し、つながったときに送信")
                                       + (tr("（送信待ち {n} 件）").format(n=n) if n else ""))
         elif n:
-            self.offline_note.setText(tr("送信待ちの記録 {n} 件（青）。ステータスバーの「送信待ち」から送信").format(n=n))
-        self.offline_note.setVisible(down or bool(n))
+            self.offline_note.setText(tr("送信待ちの記録 {n} 件（青）。ステータスバーの「送信待ち」から送信").format(n=n)
+                                      + (tr("。送信中 {m} 件").format(m=sending) if sending else ""))
+        elif sending:
+            self.offline_note.setText(tr("送信中の記録 {n} 件（水色、サーバーの返事待ち）。そのまま記録を続けられる").format(n=sending))
+        self.offline_note.setVisible(down or bool(n) or bool(sending))
 
     def say(self, message: str) -> None:
         if self.book is not None:
@@ -1000,12 +1004,72 @@ class ObservationDock(
         except Exception:  # noqa: BLE001 (never stops a record: saved without its pixels)
             book.locate = None
 
+    # ---- 送信中: shown at once, sent behind the screen (a slow server, tsudo 2026-11-28) ----------
+
+    def holds(self) -> bool:
+        """Whether a record confirmed is shown at once and sent behind the screen (a shared store's; a local one is saved at once)."""
+        s = self.store_set
+        return self.book is not None and s is not None and s.remote
+
+    def hold(self, make: Callable[[ObservationBook], Any]) -> Any:
+        """
+        A record confirmed (`make`: book.hold_submit, book.hold_carry): listed
+        and drawn now as 送信中, sent in a task (send_held); the Held, None
+        when nothing was held.
+        """
+        book = self.book
+        if book is None:
+            return None
+        self._place_records(book)
+        held = make(book)
+        if held is not None:
+            self.send_held()
+        self.render()
+        self._show_offline()
+        return held
+
+    def send_held(self) -> None:
+        """Sends what is held, in a task before the reads waiting (those confirmed meanwhile go with the next one)."""
+        book = self.book
+        if book is None or not book.ask_send():
+            return
+        self.do(self.tr("記録の送信"), lambda b: b.send_held(), after=self._held_sent, failed=lambda _m: self._show_offline())
+
+    def sending_ids(self) -> set[str]:
+        """The records confirmed and not taken by the server yet (送信中: marked in the list and on the map)."""
+        return self.book.sending_ids() if self.book is not None else set()
+
+    def _held_sent(self, sent) -> None:
+        """
+        What was sent: the saved ones checked against the 通報 conditions; the
+        first one not saved opened in the form again as it was typed (unless
+        another form is open), the rest told and kept, as before.
+        """
+        self._show_offline()
+        self.render_drafts()
+        if sent.saved and self._alert_watch() is not None:
+            self.check_alerts(sent.saved)
+        if not sent.lost:
+            return
+        again = next((x for x in sent.lost if x[0].form is not None), None)
+        if again is not None and self.pending is None and self.book is not None:
+            lon, lat, editing, source, values = again[0].form
+            self.book.last_draft_id = again[2]
+            self.restore_form(lon, lat, editing, source, values)
+            self.refresh(force=True)
+        n = len(sent.lost)
+        self.iface.messageBar().pushWarning(self.tr("観測記録"), plain_tip(self.tr("記録の保存に失敗。送信待ちに保管: {m}").format(
+            m=sent.lost[0][1]) + (self.tr("（{n} 件）").format(n=n) if n > 1 else "")))
+
     def do(self, description: str, work: Callable[[ObservationBook], Any], after: Optional[Callable[[Any], None]] = None,
-           watch: bool = False, failed: Optional[Callable[[str], None]] = None) -> Any:
+           watch: bool = False, failed: Optional[Callable[[str], None]] = None, read: bool = False) -> Any:
         """
         Runs what changes the book: at once for the local store (its result
         returned), else in a task, one after another (None returned; `after`
-        gets the result, `failed` the reason when the task fails).
+        gets the result, `failed` the reason when the task fails). `read`:
+        it only reads (the records around an image, others' changes…): what
+        saves goes before the reads still waiting, in its own order (a slow
+        server: a record confirmed does not wait behind them, 2026-11-28).
         """
         book, s = self.book, self.store_set
         if book is None or s is None:
@@ -1019,14 +1083,19 @@ class ObservationDock(
                 after(result)
             self.render()
             return result.result if isinstance(result, _Saved) else result
-        self._queue.append((description, work, after, book, failed))
+        item = (description, work, after, book, failed, read)
+        if read:
+            self._queue.append(item)
+        else:
+            at = next((i for i, x in enumerate(self._queue) if x[5]), len(self._queue))
+            self._queue.insert(at, item)
         self._next()
         return None
 
     def _next(self) -> None:
         if self._running or not self._queue:
             return
-        description, work, after, book, failed = self._queue.pop(0)
+        description, work, after, book, failed, _read = self._queue.pop(0)
         self._running = True
 
         def finish(result=None, message: Optional[str] = None) -> None:
@@ -1145,7 +1214,7 @@ class ObservationDock(
             reading.discard(key)
             self._after_read.pop(key, None)
 
-        self.do(self.tr("観測記録の取得"), work, after=after, failed=failed)
+        self.do(self.tr("観測記録の取得"), work, after=after, failed=failed, read=True)
 
     def _read_around(self) -> None:
         """The records around the image recorded now (a shared store), read in a task when not read yet."""
@@ -1162,7 +1231,7 @@ class ObservationDock(
             finally:
                 reading.discard(key)
 
-        self.do(self.tr("まわりの記録の取得"), work, failed=lambda _m: reading.discard(key))
+        self.do(self.tr("まわりの記録の取得"), work, failed=lambda _m: reading.discard(key), read=True)
 
     def fetch(self, description: str, work: Callable[[ObservationBook], Any], then: Callable[[Any], None],
               failed: Optional[Callable[[str], None]] = None) -> None:
@@ -1174,7 +1243,7 @@ class ObservationDock(
             if failed is not None:
                 failed(self.tr("観測記録の保存先なし"))
             return
-        self.do(description, work, after=then, failed=failed)
+        self.do(description, work, after=then, failed=failed, read=True)
 
     def with_records(self, ids: Sequence[str], then: Callable[[], Any]) -> bool:
         """
@@ -1259,7 +1328,7 @@ class ObservationDock(
         def failed(_message: str) -> None:
             finished()  # (a later refresh tries again)
 
-        self.do(self.tr("ほかの人の記録の取得"), lambda b: b.refresh(), after=done, failed=failed)
+        self.do(self.tr("ほかの人の記録の取得"), lambda b: b.refresh(), after=done, failed=failed, read=True)
 
     def _editing_changed(self) -> None:
         """The record open in the form, if someone else changed it: filled again (nothing typed yet) or told."""
@@ -1283,7 +1352,7 @@ class ObservationDock(
 
     def reload_taxonomy(self) -> None:
         """Reads the classification again from the store (others may have changed it), and the 備考's glossary."""
-        self.do(self.tr("分類の取得"), lambda b: b.reload_taxonomy())
+        self.do(self.tr("分類の取得"), lambda b: b.reload_taxonomy(), read=True)
         self.context.glossary.read(force=True)
 
     def _merge_chosen(self) -> None:
