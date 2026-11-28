@@ -82,6 +82,10 @@ class Fold(QgsCollapsibleGroupBox):
             # Already its state: this only lays it out as that (QGIS skipped it while hidden).
             self.setCollapsed(not on)
 
+    def heading(self) -> str:
+        """Its name without what is set inside (the title shows that too while it is closed)."""
+        return self._title
+
     def set_summary(self, text: str) -> None:
         """What is set inside, shown in the heading while it is closed ("" for nothing)."""
         self._summary = text

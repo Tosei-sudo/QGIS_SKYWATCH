@@ -203,6 +203,38 @@ def test_controls_inside_the_docks_and_how_long_they_are_shown(plugin):
     assert minutes >= 2
 
 
+def test_a_fold_opened_by_the_person_is_counted_by_its_name(plugin):
+    """
+    2026-11-28: opening a fold (ui/fold.py) showed a Python error (QGIS's collapseButton() is not in the
+    bindings). Counted by its name, without the conditions its closed heading shows; not when the code opens it.
+    """
+    p, iface, _store = plugin
+    keeper = p.feature_use
+    dock = p.docks["SatObsImageCatalog"]
+    dock.show()
+    settle()
+    dock.more.set_open(False)
+    dock.max_angle.setText("30")
+    dock.sensor_box.setEditText("SAR")
+    settle()
+    assert dock.more.title() == "詳細条件（SAR・角度 30° まで）"
+    title = p.dock_entry_text("SatObsImageCatalog")
+    keeper.walk("SatObsImageCatalog")
+    assert (title, "開く: 詳細条件") in keeper.controls
+    keeper.counter.take()
+    dock.more.set_open(True)
+    settle()
+    assert not any(f.startswith("開く: ") for (_d, f, _place) in counted(keeper))
+    dock.more.set_open(False)
+    dock.more.underMouse = lambda: True  # the person's click on its ▶
+    dock.more.set_open(True)
+    settle()
+    assert counted(keeper).get((title, "開く: 詳細条件", "DOCK")) == 1
+    del dock.more.underMouse
+    dock.more.set_open(False)
+    dock.clear_more()
+
+
 def test_sent_to_the_table_with_the_roles_and_shown_least_used_first(plugin, monkeypatch, tmp_path):
     p, iface, store = plugin
     keeper = p.feature_use
