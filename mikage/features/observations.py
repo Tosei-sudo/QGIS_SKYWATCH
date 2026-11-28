@@ -1,7 +1,7 @@
 """
 観測記録: 観測記録 (with the status bar's 送信待ち), 分類体系の編集, 移動体（AIS・ADS-B）,
-ダッシュボード, 「通報文の作成…」「通報記録の確認…」「自分の記録…」「観測記録のエクスポート…」
-「観測記録の一括取込み…」「分類体系の取り込み…」「分担…」「引き継ぎメモ…」, and the offline cache of the classifications.
+ダッシュボード, 「通報文の作成…」「通報記録の確認…」「自分の記録…」「観測記録の書き出し…」
+「観測記録の一括取り込み…」「分類体系の取り込み…」「分担…」「引き継ぎメモ…」, and the offline cache of the classifications.
 """
 from __future__ import annotations
 
@@ -58,12 +58,12 @@ class Observations(Feature):
             self.entry(name, text, lambda tab=tab: dock().open_alerts(tab), name="SatObsAlert" if tab == 0 else "SatObsAlertLog")
         # 「自分の記録」: the records one made, across the images, to look over and fix (tsudo, 2026-11-18).
         self.entry("my_records", "自分の記録…", lambda: dock().open_my_records(), name="SatObsMyRecords")
-        # 「観測記録のエクスポート」: the records of a period and a place as CSV / JSON (observationExports).
-        self.entry("obs_export", "観測記録のエクスポート…", lambda: dock().open_export(), name="SatObsObservationExport")
+        # 「観測記録の書き出し」: the records of a period and a place as CSV / JSON (observationExports).
+        self.entry("obs_export", "観測記録の書き出し…", lambda: dock().open_export(), name="SatObsObservationExport")
         # 「分類体系の取り込み」: a table (levels in columns from 大分類 on) into the chosen store's classification, after a dry run.
         self.entry("taxonomy_import", "分類体系の取り込み…", lambda: dock().open_taxonomy_import(), name="SatObsTaxonomyImport")
-        # 「観測記録の一括取込み」: a CSV or a layer into the chosen store, after a dry run.
-        self.entry("obs_import", "観測記録の一括取込み…", lambda: dock().open_import(), name="SatObsObservationImport")
+        # 「観測記録の一括取り込み」: a CSV or a layer into the chosen store, after a dry run.
+        self.entry("obs_import", "観測記録の一括取り込み…", lambda: dock().open_import(), name="SatObsObservationImport")
         # 「分担」 (assignments: who holds which image) and 「引き継ぎメモ」 (the shift handover).
         for name, text, tab in (("assignments", "分担…", 0), ("handover", "引き継ぎメモ…", 1)):
             self.entry(name, text, lambda tab=tab: dock().open_handover(tab), name="SatObsAssignments" if tab == 0 else "SatObsHandover")

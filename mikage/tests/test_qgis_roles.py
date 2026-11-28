@@ -104,7 +104,9 @@ def test_the_person_who_asks_sees_no_plan_files_nor_records(plugin):
     assert visible(p, "撮像依頼") and visible(p, "撮像予定") and not visible(p, "撮像計画ファイル出力") and not visible(p, "年間撮像上限…")
     assert not visible(p, "観測記録") and not visible(p, "通報文の作成…")
     menus = {m.title(): m for m in p._submenus}
-    assert menus["撮像依頼"].menuAction().isVisible() and menus["観測記録"].menuAction().isVisible()  # 移動体・ダッシュボード
+    # 移動体 (画像) and ダッシュボード (解析・処理) moved out of 観測記録 (2026-11-28): no 観測記録 menu for this role.
+    assert menus["撮像依頼"].menuAction().isVisible() and not menus["観測記録"].menuAction().isVisible()
+    assert menus["画像"].menuAction().isVisible() and menus["解析・処理"].menuAction().isVisible()
     # The records' dock put away, and kept away (QGIS's own Panels menu, a layout).
     assert not observations.isVisible()
     observations.show()
@@ -136,7 +138,7 @@ def test_the_observer_does_not_ask_and_the_trainer_does_not_record(plugin):
     assert not visible(p, "観測記録")
 
 
-def test_the_settings_file_is_changed_by_the_administrators_only(plugin, tmp_path):
+def test_the_settings_file_is_changed_by_the_administrators_only(plugin, tmp_path, monkeypatch):
     p = plugin
     path = tmp_path / "config.json"
     path.write_text("{}", encoding="utf-8")
@@ -149,7 +151,20 @@ def test_the_settings_file_is_changed_by_the_administrators_only(plugin, tmp_pat
     assert dialog.source.isReadOnly() and "管理者" in dialog.source.toolTip()
     dialog.deleteLater()
     dialog = SettingsDialog(p.context, p.iface.mainWindow(), may_change_source=True)
-    assert not dialog.source.isReadOnly()
+    assert not dialog.source.isReadOnly() and dialog.admin_fold is None
+    dialog.deleteLater()
+    # Another role than 管理者 (tsudo 2026-11-28): the settings file, the connections and the problems in 「管理者向け」, closed.
+    dialog = SettingsDialog(p.context, p.iface.mainWindow(), may_change_source=False, admin_rows=False)
+    fold = dialog.admin_fold
+    assert fold is not None and not fold.is_open() and fold.isAncestorOf(dialog.source) and fold.isAncestorOf(dialog.services)
+    assert not fold.isAncestorOf(dialog.recorder)
+    dialog.deleteLater()
+    # Problems in the settings file (the message bar's 設定…): shown, the fold open and its heading counting them.
+    monkeypatch.setattr(p.context, "problems", ["satellites: 読めない"])
+    dialog = SettingsDialog(p.context, p.iface.mainWindow(), may_change_source=False, admin_rows=False)
+    assert dialog.admin_fold.is_open() and dialog.problems.count() == 1
+    dialog.admin_fold.set_open(False)
+    assert dialog.admin_fold.title() == "管理者向け（問題 1 件）"
     dialog.deleteLater()
 
 
@@ -175,7 +190,7 @@ def test_the_roles_are_kept_in_the_table_under_the_user_name(with_table):
         assert not visible(p, "撮像計画ファイル出力") and roles_io.stored_codes() == ["OBSERVER"]
         # Ticked on the page: in use at once, then into the table (another person's rows untouched).
         page = p.open_first_setup()
-        assert page.chosen_roles() == ["観測記録の担当"] and "「tsudo」として保存" in page.where.text()
+        assert page.chosen_roles() == ["観測記録の担当"] and "「tsudo」さんの担当として保存" in page.where.text()
         page.role_checks["撮像計画の担当"].setChecked(True)
         page.relayout.setChecked(False)
         page.accept()

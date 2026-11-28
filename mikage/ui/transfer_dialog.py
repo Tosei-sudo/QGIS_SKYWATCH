@@ -14,7 +14,7 @@ from typing import Callable, Optional
 from qgis.core import QgsFeatureRequest, QgsProject, QgsVectorLayer
 from qgis.PyQt.QtCore import QCoreApplication, Qt
 from qgis.PyQt.QtWidgets import (
-    QCheckBox, QComboBox, QDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QPushButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout,
+    QCheckBox, QComboBox, QDialog, QFormLayout, QHBoxLayout, QLabel, QPushButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout,
 )
 
 from ..core.ai.api import TRANSFER_ROLES, DetectionOutput, Plan, Target, missing_fields, target_of
@@ -23,6 +23,7 @@ from ..qgis_io.detection_results import sent_moves
 from ..qgis_io.tasks import run_task
 from . import last_inputs
 from .fit import fit_text
+from .fold import Fold
 
 
 def _tr(text: str) -> str:
@@ -61,17 +62,14 @@ class TransferDialog(QDialog):
         self.plan_label.setWordWrap(True)
         self.plan_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         layout.addWidget(self.plan_label)
-        self.mapping_box = QGroupBox(_tr("属性の対応"))
-        self.mapping_box.setCheckable(True)
-        self.mapping_box.setChecked(False)
-        box = QVBoxLayout(self.mapping_box)
+        self.mapping_box = Fold(_tr("属性の対応"))
+        box = QVBoxLayout(self.mapping_box.body)
+        box.setContentsMargins(0, 0, 0, 0)
         self.mapping = QTreeWidget()
         self.mapping.setHeaderLabels([_tr("役割"), _tr("転記先の属性")])
         self.mapping.setRootIsDecorated(False)
         # A fixed set of columns: not dragged about by their header (Qt lets a tree's be).
         self.mapping.header().setSectionsMovable(False)
-        self.mapping.setVisible(False)
-        self.mapping_box.toggled.connect(self.mapping.setVisible)
         box.addWidget(self.mapping)
         layout.addWidget(self.mapping_box, 1)
         self.note = QLabel()

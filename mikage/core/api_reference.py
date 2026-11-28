@@ -79,7 +79,7 @@ ENTRIES: list[Entry] = [
     # ---- ドックと道具 ----
     Entry("observation_dock", "ドックと道具", "観測記録ドック",
           "ドックそのもの。記録の本体は book（記録・画像・分類体系）。画像を選ぶまで記録は読まないので、book.records は read_now() で読んでから。"
-          "一括取込みは open_import()。",
+          "一括取り込みは open_import()。",
           "dock = api.observation_dock\nlen(dock.read_now().records)",
           ["book", "read_now", "save_csv", "to_layers", "set_observer", "open_export", "open_import", "bulk_edit", "views"]),
     Entry("image_catalog", "ドックと道具", "画像カタログ", "画像の検索・一覧・開く。", "api.image_catalog.search()\n[r.id for r in api.image_catalog.records]",

@@ -45,6 +45,7 @@ from ..qgis_io.context import PluginContext
 from . import shortcuts
 from .docks import PluginDock, plain_tip
 from .flow_layout import FlowLayout
+from .fold import Fold
 
 KIND_ROLE = Qt.ItemDataRole.UserRole
 ADDING_ROLE = Qt.ItemDataRole.UserRole + 1
@@ -260,10 +261,9 @@ class TaxonomyDock(PluginDock):
         self.body.addWidget(self.status)
 
         # 「諸元の項目」.
-        self.fields_box = QGroupBox(tr("諸元の項目"))
-        self.fields_box.setCheckable(True)
-        self.fields_box.setChecked(False)
-        fl = QVBoxLayout(self.fields_box)
+        self.fields_box = Fold(tr("諸元の項目"))
+        fl = QVBoxLayout(self.fields_box.body)
+        fl.setContentsMargins(0, 0, 0, 0)
         self.fields_table = QTableWidget(0, 6)
         self.fields_table.setHorizontalHeaderLabels([tr("項目"), tr("種類"), tr("単位"), tr("使う所"), tr("大分類"), ""])
         self.fields_table.horizontalHeaderItem(3).setToolTip(tr("分類・個体のどちらの欄に出すか"))
@@ -276,8 +276,7 @@ class TaxonomyDock(PluginDock):
         row.addWidget(self._button(tr("項目の保存"), "", self.save_fields))
         row.addWidget(self._button(tr("取消"), "", self._reset_fields))
         fl.addLayout(row)
-        self.fields_box.toggled.connect(self._fields_toggled)
-        self._fields_toggled(False)
+        self.fields_box.opened.connect(self._fields_toggled)
         self.body.addWidget(self.fields_box)
 
         foot = QHBoxLayout()
@@ -787,8 +786,6 @@ class TaxonomyDock(PluginDock):
     # ---- 「諸元の項目」 ------------------------------------------------------
 
     def _fields_toggled(self, on: bool) -> None:
-        for w in self.fields_box.findChildren(QWidget):
-            w.setVisible(on)
         if on:
             self._render_fields()
 
@@ -1034,7 +1031,7 @@ class TaxonomyDock(PluginDock):
         finally:
             self._rendering = False
         self._render_detail()
-        if self.fields_box.isChecked():
+        if self.fields_box.is_open():
             self._render_fields()
 
     def _render_detail(self) -> None:
@@ -1137,7 +1134,7 @@ class TaxonomyDock(PluginDock):
         self.member_form.setTitle(f"{kind_of(path)} ▸ {name}（{label or self.tr('個体')}）")
         note = self.tr("分類「{c}」の個体。記録のモノ欄にこの名前か別名を入れると、この個体・分類で記録").format(c=path[-1])
         if not kept:
-            note += self.tr("。保存先（{s}）に個体の表がないので、別名・諸元・写真・備考は保存できない（設定ファイルの taxonomyTable.members）").format(
+            note += self.tr("。保存先（{s}）に個体の表がないので、別名・諸元・写真・備考は保存できない（管理者に連絡: taxonomyTable.members）").format(
                 s=book.taxonomy_store.label)
         self.member_note.setText(note)
         self.member_name_input.setText(name)

@@ -511,7 +511,7 @@ class OrgAreasPanel(QWidget):
             if not lst.editable:
                 parts.append(self.tr("地名のレイヤーがマップサービスなので変更できない（管理者に連絡: namedAreas に …/FeatureServer/<n>）"))
             if s.categories is None:
-                parts.append(self.tr("カテゴリーの表が未設定（namedAreas.categories）"))
+                parts.append(self.tr("カテゴリーの表なし（管理者に連絡: namedAreas.categories）"))
             elif lst.category_failure:
                 parts.append(self.tr("カテゴリーを取得できない: {m}").format(m=lst.category_failure))
         self.note.setText("。".join(parts))

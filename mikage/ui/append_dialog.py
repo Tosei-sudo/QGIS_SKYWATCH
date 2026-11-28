@@ -631,7 +631,7 @@ class AppendDialog(QDialog):
                     note += self.tr("。注意: ミカゲ自身の「{r}」の表（画面のチェックを通らずに書き込み）").format(r=role)
                 else:
                     self._blocked = tagged(code_text("E206", self.tr("（「{r}」はミカゲの画面で書く表。追加先にできるのは管理者の担当だけ。"
-                                                                    "観測記録は「観測記録の一括取込み」を使用）").format(r=role)), "E206")
+                                                                    "観測記録は「観測記録の一括取り込み」を使用）").format(r=role)), "E206")
         else:
             layer = append_io.target_layer(target)
             if layer is not None and layer.isEditable():

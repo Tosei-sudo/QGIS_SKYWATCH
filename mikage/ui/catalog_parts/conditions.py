@@ -71,15 +71,16 @@ class ConditionsPart:
         """A catalog without image files: 「ファイルなしで記録」 instead of 「開く」, and no paths to copy or folders to open."""
         files = self.has_files()
         for key in ("open", "copy", "folder"):
-            self.buttons[key].setVisible(files)
+            self.image_actions[key].setVisible(files)
         for option in (self.zoom_opened, self.match_crs, self.orientation_row):
             option.setVisible(files)
         # 「前の画像を閉じる」 for images recorded without their files too (tsudo 2026-11-25).
         self.close_previous.setVisible(files or self.allows("catalog.record"))
-        self.buttons["record"].setVisible(not files and self.allows("catalog.record"))
+        self.image_actions["record"].setVisible(not files and self.allows("catalog.record"))
         # A practice-only catalog in production (判読練習の指導者's): not watched (no new-image notices of it in production).
         chosen = self.catalog()
-        self.buttons["watch"].setVisible(chosen is None or not any(chosen is c for c in self.context.config.practice_catalogs))
+        self.image_actions["watch"].setVisible(chosen is None or not any(chosen is c for c in self.context.config.practice_catalogs))
+        self._summarize_options()
 
     def _show_keyword(self, catalog: Optional[CatalogConfig]) -> None:
         """「フリーワード」 only for a catalog with an image id or `fields.keywords`, its hint naming them."""
@@ -95,13 +96,14 @@ class ConditionsPart:
             "大文字・小文字、ひらがな・カタカナ、全角・半角は区別しない。Enter で検索").format(labels=labels))
 
     def conditions(self) -> CatalogSearch:
-        """The search the form describes (詳細条件 only while it is open; the free word only when the catalog has keyword fields)."""
+        """
+        The search the form describes (the free word only when the catalog has keyword fields). 詳細条件's
+        conditions open or closed (tsudo 2026-11-28, ui/fold.py): its closed heading says those set.
+        """
         catalog = self.catalog()
         keyword = self.keyword.text().strip() if catalog is not None and catalog.keyword_fields else ""
         acquired = _period(self.acquired_from, self.acquired_to)
         search = CatalogSearch(acquired_from=acquired[0], acquired_to=acquired[1], keyword=keyword)
-        if not self.more.isChecked():
-            return search
         registered, system = _period(self.registered_from, self.registered_to), _period(self.system_from, self.system_to)
         return replace(search, registered_from=registered[0], registered_to=registered[1],
                        system_registered_from=system[0], system_registered_to=system[1],
@@ -116,13 +118,11 @@ class ConditionsPart:
         period, every angle).
         """
         periods = [(self.tr("撮像日時"), self.acquired_from, self.acquired_to)] if days else []
-        numbers = []
-        if self.more.isChecked():
-            if days:
-                periods += [(self.tr("登録日時"), self.registered_from, self.registered_to),
-                            (self.tr("システム登録日時"), self.system_from, self.system_to)]
-            numbers += [(self.tr("角度"), self.max_angle)]
-            numbers += [(self.tr("方位角"), e) for e in (self.azimuth_from, self.azimuth_to)]
+        if days:
+            periods += [(self.tr("登録日時"), self.registered_from, self.registered_to),
+                        (self.tr("システム登録日時"), self.system_from, self.system_to)]
+        numbers = [(self.tr("角度"), self.max_angle)]
+        numbers += [(self.tr("方位角"), e) for e in (self.azimuth_from, self.azimuth_to)]
 
         def unread(label: str, edit: QLineEdit, kind: str) -> str:
             return self.tr("{label}の「{text}」は読めない。{kind}入力").format(label=label, text=edit.text().strip(), kind=kind)
@@ -145,6 +145,32 @@ class ConditionsPart:
             except ValueError:
                 return unread(label, edit, self.tr("数字で"))
         return None
+
+    def clear_more(self) -> None:
+        """「詳細条件 ▸ クリア」: every condition of 詳細条件 emptied."""
+        for edit in (self.registered_from, self.registered_to, self.system_from, self.system_to, self.max_angle,
+                     self.azimuth_from, self.azimuth_to, self.where):
+            edit.clear()
+        self.sensor_box.setEditText("")
+
+    def _summarize_more(self, *_args) -> None:
+        """詳細条件's heading while it is closed: the conditions set in it, shortly (「登録日時・角度 20° まで」)."""
+        parts = []
+        for label, a, b in ((self.tr("登録日時"), self.registered_from, self.registered_to),
+                            (self.tr("システム登録日時"), self.system_from, self.system_to)):
+            if a.text().strip() or b.text().strip():
+                parts.append(label)
+        sensor = self.sensor_box.currentText().strip()
+        if sensor:
+            parts.append(sensor)
+        if self.max_angle.text().strip():
+            angle = _number(self.max_angle)
+            parts.append(self.tr("角度 {a}° まで").format(a=f"{angle:g}") if angle is not None else self.tr("角度"))
+        if self.azimuth_from.text().strip() or self.azimuth_to.text().strip():
+            parts.append(self.tr("方位角"))
+        if self.where.text().strip():
+            parts.append(self.tr("条件"))
+        self.more.set_summary("・".join(parts))
 
     def extent(self) -> Optional[list[float]]:
         """The map's extent in WGS 84 ([xmin, ymin, xmax, ymax])."""

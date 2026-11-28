@@ -130,8 +130,6 @@ class TargetsPart:
 
     def _hide_rows(self) -> None:
         """Shows the rows of 「詳細条件」 that apply: the priority with features to rank, the forecast with a forecast service."""
-        if self.more.isCollapsed():
-            return
         for w in (self.priority, self.priority_label, self.priority_order, self.priority_order_label):
             w.setVisible(self._priority_shown)
         forecast = self.context.config.cloud_forecast is not None

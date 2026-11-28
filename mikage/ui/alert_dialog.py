@@ -115,7 +115,7 @@ class AlertDialog(QDialog):
         m.addLayout(form)
         row = QHBoxLayout()
         self.pick_button = QPushButton(self.tr("抽出"))
-        self.pick_button.setToolTip(self.tr("Esri の通報条件・ジオフェンス・通報済みを読み、条件に合う記録を抽出"))
+        self.pick_button.setToolTip(self.tr("通報の条件と通報済みの記録を読み、条件に合う記録を抽出"))
         self.pick_button.clicked.connect(self.pick)
         row.addWidget(self.pick_button)
         # 英訳 (`textAssist.tasks.translate`): the 備考 in English for a format that writes `note.en` (tsudo 2026-11-19).
@@ -144,10 +144,11 @@ class AlertDialog(QDialog):
         self.preview.setPlaceholderText(self.tr("通報文（ヘッダー・行・フッター）"))
         m.addWidget(self.preview, 1)
         row = QHBoxLayout()
-        self.send_button = QPushButton(self.tr("通報"))
+        # Named for what it does with the format chosen (tsudo 2026-11-28, 点検 14: 「通報」 read as sending): `_name_send`.
+        self.send_button = QPushButton(self.tr("記録してコピー"))
         self.send_button.clicked.connect(lambda: self.send(record=True))
-        self.copy_button = QPushButton(self.tr("コピーのみ"))
-        self.copy_button.setToolTip(self.tr("通報テーブルに記録せずクリップボードへコピー"))
+        self.copy_button = QPushButton(self.tr("記録せずにコピー"))
+        self.copy_button.setToolTip(self.tr("通報テーブルに記録せず、クリップボードへコピー"))
         self.copy_button.clicked.connect(lambda: self.send(record=False))
         row.addStretch(1)
         row.addWidget(self.copy_button)
@@ -231,18 +232,18 @@ class AlertDialog(QDialog):
                 i = select_.findData(s.default)
             select_.setCurrentIndex(max(0, i))
             select_.blockSignals(False)
+        # The line says only what is missing, and who sets it (tsudo 2026-11-28: no server's tables on the screen);
+        # what the conditions look at goes in 「抽出」's tooltip.
+        tip = self.tr("通報の条件と通報済みの記録を読み、条件に合う記録を抽出")
         if s is None:
-            self.note.setText(self.tr("設定ファイルに alertReports（通報の条件・フォーマット）なし"))
+            self.note.setText(self.tr("通報の設定がない（管理者に連絡: alertReports）"))
         else:
-            parts = [self.tr("通報条件: ") + (self.tr("Esri の条件テーブル") if s.rules else self.tr("なし（固定の条件のみ）"))]
-            if s.geofences:
-                parts.append(self.tr("ジオフェンスあり"))
-            if s.named_areas:
-                parts.append(self.tr("地名あり"))
-            if s.countries:
-                parts.append(self.tr("国あり"))
-            parts.append(self.tr("通報テーブル: ") + (self.tr("あり") if s.table else self.tr("なし（通報済みの管理なし）")))
-            self.note.setText("・".join(parts))
+            uses = [w for w, on in ((self.tr("ジオフェンス"), s.geofences), (self.tr("地名"), s.named_areas), (self.tr("国"), s.countries)) if on]
+            if uses:
+                tip += self.tr("（{w}も見る）").format(w="・".join(uses))
+            self.note.setText("" if s.table else self.tr("通報済みを記録する表がないため、通報済みの管理なし（管理者に連絡: alertReports.table）"))
+        self.note.setVisible(bool(self.note.text()))
+        self.pick_button.setToolTip(tip)
         for w in (self.pick_button, self.send_button, self.copy_button, self.format_select):
             w.setEnabled(s is not None)
         for w in (self.log_button, self.log_copy, self.log_remove):
@@ -342,7 +343,7 @@ class AlertDialog(QDialog):
         s = self.settings
         records = [o for o in records if o.deleted_at is None and all(i.record.id != o.id for i in self.items)]
         if s is None or not records:
-            self._say(self.tr("追加する記録なし（すでに一覧にある記録は追加しない）") if s else self.tr("設定ファイルに alertReports なし"))
+            self._say(self.tr("追加する記録なし（すでに一覧にある記録は追加しない）") if s else self.tr("通報の設定なし（管理者に連絡: alertReports）"))
             return
         self.tabs.setCurrentIndex(0)
         client = self.dock.context.esri()
@@ -452,8 +453,22 @@ class AlertDialog(QDialog):
             self.translate_button.setText(self.tr("英訳を中止"))
         return started
 
+    def _name_send(self, fmt) -> None:
+        """The send button's name and tooltip: what it does with the format (通報テーブル, clipboard, file); nothing is sent out."""
+        table = bool(self.settings and self.settings.table)
+        outs = [w for w, on in ((self.tr("コピー"), fmt is None or fmt.clipboard), (self.tr("ファイルに保存"), fmt is not None and fmt.file)) if on]
+        if len(outs) == 2:
+            outs = [self.tr("コピー・保存")]
+        what = (self.tr("記録して") if table else "") + "".join(outs) if outs else self.tr("記録")
+        self.send_button.setText(what)
+        steps = ([self.tr("通報テーブルに記録")] if table else []) + \
+                ([self.tr("クリップボードへコピー")] if fmt is None or fmt.clipboard else []) + \
+                ([self.tr("ファイルに保存")] if fmt is not None and fmt.file else [])
+        self.send_button.setToolTip(self.tr("チェックした記録を{s}。外へは送らない（送るのは貼り付けた先で）").format(s="・".join(steps) or self.tr("記録")))
+
     def _render_lines(self) -> None:
         fmt = self._format()
+        self._name_send(fmt)
         english = self._needs_english() and self.translator.offered
         self.translate_button.setVisible(english)
         for item in self.items:
@@ -521,9 +536,8 @@ class AlertDialog(QDialog):
 
     def send(self, record: bool = True, after: Optional[Callable[[str], None]] = None) -> None:
         """
-        「通報」: the lines to the Esri log table (in a task), then the
-        clipboard and the file as the format says; 「コピーのみ」 (record
-        False): the clipboard only.
+        「記録してコピー」 and the like (`_name_send`): the lines to the log table (in a task), then the
+        clipboard and the file as the format says; 「記録せずにコピー」 (record False): the clipboard only.
         """
         s, fmt = self.settings, self._format()
         items, lines = self.chosen()
@@ -541,7 +555,7 @@ class AlertDialog(QDialog):
             return
 
         def outputs(logged: int) -> None:
-            # First: whatever happens below, 「通報」 can be pressed again.
+            # First: whatever happens below, the button can be pressed again.
             self.send_button.setEnabled(True)
             said = [self.tr("通報テーブルに {n} 件").format(n=logged)] if s.table else []
             if fmt.clipboard:

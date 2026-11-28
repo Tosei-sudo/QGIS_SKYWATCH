@@ -1,6 +1,6 @@
 """
 分類体系の取り込み（表から）の読み込み (core/obs/taxonomy_import.py): a CSV
-file (UTF-8 or Shift_JIS, as 観測記録の一括取込み reads it), a sheet of an
+file (UTF-8 or Shift_JIS, as 観測記録の一括取り込み reads it), a sheet of an
 Excel or LibreOffice file (GDAL: the first row the columns' names, every
 cell as text), or a layer of the project (its attribute table).
 """

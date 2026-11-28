@@ -38,6 +38,7 @@ from qgis.PyQt.QtWidgets import (
     QLineEdit, QListWidget, QListWidgetItem, QMenu, QPushButton, QSpinBox, QStyle, QToolButton, QTreeView, QVBoxLayout, QWidget,
 )
 from ..qgis_io import qsettings
+from .docks import name_cancel
 from .fit import fit_text
 
 try:
@@ -513,6 +514,7 @@ class ColumnsDialog(QDialog):
         row.addLayout(side)
         layout.addLayout(row, 1)
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        name_cancel(self.buttons)
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
         layout.addWidget(self.buttons)

@@ -51,7 +51,7 @@ class FootprintsPart:
             self.overlay.choose(rows, [self.model.records[r].id for r in rows])
         has = bool(rows)
         for key in ("open", "record", "zoom", "copy", "folder", "similar"):
-            self.buttons[key].setEnabled(has)
+            self.image_actions[key].setEnabled(has)
         if len(rows) == 1:
             self.table.scrollTo(self.model.index(rows[0], 0))
 

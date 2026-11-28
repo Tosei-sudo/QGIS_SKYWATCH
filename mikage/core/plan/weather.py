@@ -49,7 +49,7 @@ def cloud_forecast_of(value: Any, problems: list[str]) -> Optional[CloudForecast
         if len(paths) == 1 and "url" not in value:
             (key, path), = paths.items()
             if isinstance(path, str) and path.strip():
-                return CloudForecastConfig("", label or "雲量予報（取込）", **{key: path.strip()})
+                return CloudForecastConfig("", label or "雲量予報（取り込み）", **{key: path.strip()})
         elif not paths and is_url(url):
             return CloudForecastConfig(url, label or "雲量予報")
     problems.append('cloudForecast は { "url": "…/v1/forecast" }・{ "folder": "…" }・{ "file": "….tif" } のどれか 1 つか false で指定')

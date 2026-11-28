@@ -204,7 +204,7 @@ def imaging_plan(dock, r: Reading, place, today: date, days: tuple) -> str:
 # ---- 観測記録 (features/observations.py) -----------------------------------------------------------------
 
 def obs_export(dock, r: Reading) -> str:
-    """観測記録のエクスポート: the conditions the sentence says (言葉で探す's readers, no model), the period of the card."""
+    """観測記録の書き出し: the conditions the sentence says (言葉で探す's readers, no model), the period of the card."""
     from ..core.text_tasks import search_draft
 
     dialog = dock.open_export()
@@ -218,7 +218,7 @@ def obs_export(dock, r: Reading) -> str:
         dialog.apply_search(found)
 
     dialog.prepare(fill)
-    return tr("観測記録のエクスポート: 文の条件を入れた（保存は画面で）")
+    return tr("観測記録の書き出し: 文の条件を入れた（保存は画面で）")
 
 
 def handover(dock) -> str:

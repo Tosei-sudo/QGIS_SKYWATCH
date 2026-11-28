@@ -378,3 +378,33 @@ def test_the_timeline(plugin):
     assert dock.table.currentIndex().row() == len(dock.shown) - 1
     dock.timeline_box.setChecked(False)
     assert not dock.timeline.isVisible()
+
+
+def test_no_gap_above_the_plan_button(plugin):
+    """点検 15 (tsudo 2026-11-28): the form's pane as tall as the form, a taller dock giving its room to the results."""
+    p, iface, _ = plugin
+    dock = p.api.imaging_plan
+    dock.resize(440, 500)
+    dock.show()
+    assert wait_for(lambda: dock._fitted)
+    APP.processEvents()
+
+    def form_fits() -> bool:
+        top = dock.splitter.sizes()[0]
+        return top <= dock.form_top.sizeHint().height() + 2
+    assert form_fits()
+    dock.resize(440, 900)
+    APP.processEvents()
+    assert form_fits()
+    # 詳細条件 opened: the pane grows with the form (at most 3/5), and shrinks back when it closes.
+    closed = dock.splitter.sizes()[0]
+    dock.more.set_open(True)
+
+    def opened() -> bool:
+        sizes = dock.splitter.sizes()
+        return sizes[0] > closed and abs(sizes[0] - min(dock.form_top.sizeHint().height() + 2, int(sum(sizes) * 0.6))) <= 2
+    assert wait_for(opened)
+    dock.more.set_open(False)
+    APP.processEvents()
+    assert wait_for(form_fits)
+    dock.hide()

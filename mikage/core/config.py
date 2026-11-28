@@ -152,7 +152,7 @@ class PluginConfig:
     feature_use: FeatureUseSettings = DEFAULT_FEATURE_USE
     #: `alertReports`: notable records as delimited text (通報); None hides it.
     alert_reports: Optional[AlertSettings] = None
-    #: `observationExports`: the named formats (CSV / JSON) of 観測記録のエクスポート, besides the built-in ones.
+    #: `observationExports`: the named formats (CSV / JSON) of 観測記録の書き出し, besides the built-in ones.
     observation_exports: Optional[ExportSettings] = None
     #: `assignments`: the Esri table of who holds which image (分担); None hides it.
     assignments: Optional[EsriSource] = None

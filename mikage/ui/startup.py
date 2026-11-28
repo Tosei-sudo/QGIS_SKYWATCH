@@ -56,7 +56,7 @@ class StartupLayers(QObject):
         """Adds the settings file's `layers` to the project."""
         entries = self.context.config.startup_layers
         if not entries:
-            self.iface.messageBar().pushInfo(TITLE, self.tr("設定ファイルに layers なし"))
+            self.iface.messageBar().pushInfo(TITLE, self.tr("組織で決めたレイヤーなし（管理者に連絡: layers）"))
             return
         # At start and in a new project the plugin adds them on its own: the project is still not changed.
         add_startup_layers(entries, self.context.source, self._finished, _empty if only_if_empty else (lambda: True),

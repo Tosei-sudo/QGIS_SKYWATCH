@@ -37,7 +37,7 @@ from qgis.gui import QgsMapLayerComboBox
 from qgis.PyQt.QtCore import QStringListModel, Qt, QTimer
 from qgis.PyQt.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QCompleter, QDoubleSpinBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel,
-    QLineEdit, QMenu, QPushButton, QSpinBox, QTableView, QToolButton, QVBoxLayout, QWidget,
+    QAction, QLineEdit, QMenu, QPushButton, QSpinBox, QTableView, QToolButton, QVBoxLayout, QWidget,
 )
 
 from ..core import roles
@@ -50,6 +50,7 @@ from .catalog_overlay import DrawTool, FootprintOverlay, FootprintTool
 from .docks import PluginDock, plain_label
 from .emphasis import LIGHT, emphasize
 from .flow_layout import FlowLayout
+from .fold import Fold
 from .list_views import ListViews, MenuToolButton
 from .map_orient import release_orienter, shared_orienter
 from .catalog_parts.conditions import ConditionsPart
@@ -199,16 +200,10 @@ class CatalogDock(
         form.addRow(self.keyword_label, self.keyword)
         self.body.addLayout(form)
 
-        self.more = QGroupBox(self.tr("詳細条件"))
-        self.more.setCheckable(True)
-        self.more.setChecked(False)
-        # Closed, the group is just its heading.
-        more_body = QWidget()
-        QVBoxLayout(self.more).addWidget(more_body)
-        self.more.layout().setContentsMargins(0, 0, 0, 0)
-        more_body.hide()
-        self.more.toggled.connect(more_body.setVisible)
-        more = QFormLayout(more_body)
+        # 「詳細条件」 (ui/fold.py): its conditions work open or closed; closed, its heading says those set.
+        self.more = Fold(self.tr("詳細条件"), "catalog/more")
+        more = QFormLayout(self.more.body)
+        more.setContentsMargins(0, 0, 0, 0)
         self.registered_from, self.registered_to = QLineEdit(), QLineEdit()
         more.addRow(self.tr("登録日時"), self._period_row(self.registered_from, self.registered_to))
         self.system_from, self.system_to = QLineEdit(), QLineEdit()
@@ -225,6 +220,17 @@ class CatalogDock(
         self.where = QLineEdit()
         self.where.setPlaceholderText(self.tr("SQL の条件"))
         more.addRow(self.tr("条件"), self.where)
+        clear_more = QPushButton(self.tr("クリア"))
+        clear_more.setToolTip(self.tr("詳細条件をすべて空にする"))
+        clear_more.clicked.connect(self.clear_more)
+        clear_row = QHBoxLayout()
+        clear_row.addStretch(1)
+        clear_row.addWidget(clear_more)
+        more.addRow(clear_row)
+        for edit in (self.registered_from, self.registered_to, self.system_from, self.system_to, self.max_angle,
+                     self.azimuth_from, self.azimuth_to, self.where):
+            edit.textChanged.connect(self._summarize_more)
+        self.sensor_box.editTextChanged.connect(self._summarize_more)
         self.body.addWidget(self.more)
 
         self.similar = QGroupBox(self.tr("類似画像の検索"))
@@ -290,9 +296,12 @@ class CatalogDock(
         # 「ビュー」: the columns, the sort and the search conditions kept under a name (per user).
         self.views = ListViews("catalog", self.table, {
             "catalog": self.catalog_box, "area": self.area_box, "savedArea": self.saved_box, "acquiredFrom": self.acquired_from, "acquiredTo": self.acquired_to,
-            "more": self.more, "registeredFrom": self.registered_from, "registeredTo": self.registered_to, "systemFrom": self.system_from,
+            "registeredFrom": self.registered_from, "registeredTo": self.registered_to, "systemFrom": self.system_from,
             "systemTo": self.system_to, "sensor": self.sensor_box, "maxAngle": self.max_angle, "azimuthFrom": self.azimuth_from,
             "azimuthTo": self.azimuth_to, "where": self.where, "unworkedOnly": self.unworked_only, "keyword": self.keyword,
+            # Last, after the conditions: a view kept while 詳細条件 was a check box, unchecked (its conditions then unused),
+            # reads as none (tsudo 2026-11-28); a view kept since has `true`.
+            "more": (lambda: True, lambda on: None if on else self.clear_more()),
         }, self._view_applied, self)
         row.addWidget(self.views.button)
         #: The 分担 of the listed images read again every minute while the dock is shown.
@@ -343,8 +352,13 @@ class CatalogDock(
         self.orienter = shared_orienter(self.canvas, self)
         self.orienter.said.connect(self._orienter_said)
 
+        # Under the list (tsudo 2026-11-28, 点検 9): 開く (or ファイルなしで記録)・範囲へ移動・地図で選択 and 「その他 ▾」;
+        # the rest in 「その他」's menu and the list's right-click menu (`actions`), the options in 「▶ 開き方と表示」.
         buttons = FlowLayout()
+        #: The buttons on the dock: open, record, zoom, pick, more.
         self.buttons: dict[str, QPushButton] = {}
+        #: What can be done with the chosen images, in 「その他 ▾」 and the right-click menu (open, record, zoom too; not `actions`, QWidget's).
+        self.image_actions: dict[str, QAction] = {}
         tips = {
             "open": self.tr("選んだ画像をラスターレイヤーとして開く（ダブルクリックでも）"),
             "zoom": self.tr("選んだ画像の範囲へ地図を移動"),
@@ -359,6 +373,7 @@ class CatalogDock(
             "record": self.tr("選んだ画像を、画像ファイルを開かずに観測記録の画像一覧へ（ID・撮像日時・範囲はカタログから。"
                               "生データが別システムにしかない画像に。ダブルクリックでも）。背景地図の上をクリックして記録"),
         }
+        on_dock = ("open", "record", "zoom")
         for key, text, slot in [
             ("open", self.tr("開く"), lambda: self.open_records(self.chosen())),
             ("record", self.tr("ファイルなしで記録"), lambda: self.record_without_files()),
@@ -368,18 +383,36 @@ class CatalogDock(
             ("layer", self.tr("レイヤーとして追加"), self.add_layer),
             ("similar", self.tr("類似画像の検索"), self._similar_of_chosen),
             ("watch", self.tr("この条件で監視…"), self._watch),
-            ("pick", self.tr("地図で選択"), None),
             ("event", self.tr("イベントに追加"), self.add_to_event),
         ]:
-            button = QPushButton(text)
-            button.setToolTip(tips[key])
-            if slot is None:
-                button.setCheckable(True)
-                button.toggled.connect(self._pick_toggled)
-            else:
-                button.clicked.connect(slot)
-            buttons.addWidget(button)
-            self.buttons[key] = button
+            action = QAction(text, self)
+            action.setToolTip(tips[key])
+            action.triggered.connect(lambda _on=False, slot=slot: slot())
+            self.image_actions[key] = action
+            if key in on_dock:
+                button = QPushButton(text)
+                button.setToolTip(tips[key])
+                button.clicked.connect(action.trigger)
+                # The button follows its action (shown, enabled) as the catalog and the choice change.
+                action.changed.connect(lambda b=button, a=action: (b.setEnabled(a.isEnabled()), b.setVisible(a.isVisible())))
+                buttons.addWidget(button)
+                self.buttons[key] = button
+        pick = QPushButton(self.tr("地図で選択"))
+        pick.setToolTip(tips["pick"])
+        pick.setCheckable(True)
+        pick.toggled.connect(self._pick_toggled)
+        buttons.addWidget(pick)
+        self.buttons["pick"] = pick
+        self.more_menu = QMenu(self)
+        for key in ("copy", "folder", "layer", "similar", "watch", "event"):
+            self.more_menu.addAction(self.image_actions[key])
+        more = QPushButton(self.tr("その他"))
+        more.setToolTip(self.tr("パスをコピー・フォルダを開く・レイヤーとして追加・類似画像の検索・監視・イベントに追加（一覧の右クリックでも）"))
+        more.setMenu(self.more_menu)
+        buttons.addWidget(more)
+        self.buttons["more"] = more
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._list_menu)
         # The much used (ui/emphasis.py): 「開く」 every time; 「ファイルなしで記録」 is shown instead of it
         # in a catalog of images without files (`imageFiles: false`), so it is pressed every time there.
         emphasize(self.buttons["open"])
@@ -398,8 +431,10 @@ class CatalogDock(
         holder.setLayout(buttons)
         self.body.addWidget(holder)
         # The options under the buttons, one to a row (tsudo, 2026-11-25: 「ボタンはまとめて幅に応じて並べて、
-        # チェックボックスは下段に1件1行」).
-        options = QVBoxLayout()
+        # チェックボックスは下段に1件1行」), in 「開き方と表示」 (ui/fold.py, tsudo 2026-11-28): its closed heading says them.
+        self.options_fold = Fold(self.tr("開き方と表示"), "catalog/options")
+        options = QVBoxLayout(self.options_fold.body)
+        options.setContentsMargins(0, 0, 0, 0)
         options.setSpacing(2)
         options.addWidget(self.close_previous)
         options.addWidget(self.zoom_opened)
@@ -418,7 +453,12 @@ class CatalogDock(
         footprint_row.addWidget(self.footprint_box)
         footprint_row.addStretch(1)
         options.addWidget(footprints)
-        self.body.addLayout(options)
+        self.body.addWidget(self.options_fold)
+        for check in (self.close_previous, self.zoom_opened, self.match_crs):
+            check.toggled.connect(self._summarize_options)
+        for box in (self.orientation_box, self.footprint_box):
+            box.currentIndexChanged.connect(self._summarize_options)
+        self._summarize_options()
 
         self.overlay: Optional[FootprintOverlay] = None
         self.tool = FootprintTool(self.canvas, self._picked)
@@ -430,6 +470,31 @@ class CatalogDock(
         context.configChanged.connect(self._config_changed)
         self._load_tolerance()
         self._config_changed()
+
+    def _list_menu(self, at) -> None:
+        """The list's right-click menu: what the buttons and 「その他」 do with the chosen images (those shown now)."""
+        menu = QMenu(self.table)
+        for key in ("open", "record", "zoom", None, "copy", "folder", "layer", "similar", "watch", "event"):
+            if key is None:
+                menu.addSeparator()
+            elif self.image_actions[key].isVisible():
+                menu.addAction(self.image_actions[key])
+        self._menu = menu
+        menu.popup(self.table.viewport().mapToGlobal(at))
+
+    def _summarize_options(self, *_args) -> None:
+        """「開き方と表示」's closed heading: the options changed from the first ones (those shown for the catalog), shortly."""
+        if getattr(self, "options_fold", None) is None:  # the catalog chosen while the dock is still being made
+            return
+        parts = [text for check, on, text in ((self.close_previous, True, self.tr("前を閉じる")),
+                                              (self.zoom_opened, False, self.tr("移動しない")),
+                                              (self.match_crs, True, self.tr("投影法を合わせる")))
+                 if not check.isHidden() and check.isChecked() == on]
+        if not self.orientation_row.isHidden() and self.orientation_box.currentData() not in (None, ORIENTATIONS[0]):
+            parts.append(self.orientation_box.currentText())
+        if self.footprint_box.currentData() != "outline":
+            parts.append(self.footprint_box.currentText())
+        self.options_fold.set_summary("・".join(parts))
 
     def _view_applied(self) -> None:
         """A view chosen: the list searched again with its conditions (when it was searched before)."""
@@ -468,12 +533,12 @@ class CatalogDock(
         self.catalog_box.setCurrentIndex(i if i >= 0 else 0)
         self.catalog_box.blockSignals(False)
         self.layers = {}
-        self.buttons["event"].setVisible(self.context.config.events is not None)
+        self.image_actions["event"].setVisible(self.context.config.events is not None)
         self.unworked_only.setVisible(self.context.config.assignments is not None)
         if self.context.config.assignments is None:
             self.unworked_only.setChecked(False)
         self.search_button.setEnabled(bool(self.catalogs()))
-        none = self.tr("設定ファイルに画像カタログなし")
+        none = self.tr("画像カタログなし（管理者に連絡: imageCatalogs）")
         if not self.catalogs():
             self.status.setText(none)
         elif self.status.text() == none:

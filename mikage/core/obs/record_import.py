@@ -1,5 +1,5 @@
 """
-観測記録の一括取込み (tsudo, 2026-11-08): rows of a CSV file or of a layer
+観測記録の一括取り込み (tsudo, 2026-11-08): rows of a CSV file or of a layer
 (another section's table, old records, the plugin's own export) become
 observation records of the chosen store.
 

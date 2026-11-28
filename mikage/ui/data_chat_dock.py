@@ -202,7 +202,7 @@ class DataChatDock(PluginDock):
         self.field.setEnabled(on)
         self._update_buttons()
         if not on:
-            self.say(self.tr("使えない: 設定ファイルの textAssist.tasks.dataChat にモデルがないか、個人の設定で生成 AI の機能を使わない"))
+            self.say(self.tr("使えない: 生成 AI のモデルがないか（管理者に連絡: textAssist.tasks.dataChat）、個人の設定で生成 AI の機能を使わない"))
         elif not self.chat.busy:
             self.say("")
 

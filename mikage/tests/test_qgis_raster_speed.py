@@ -199,7 +199,7 @@ def test_the_settings_file_can_stop_it(tmp_path):
     assert not raster_speed.as_bool(s.value(PARALLEL), True) and raster_speed.qgis_changed() == []
     assert raster_speed.last_options() == RasterSpeedOptions(enabled=False)  # for the next start, before the file is read
     dialog = plugin.open_raster_speed()
-    assert not dialog.use.isEnabled() and "rasterSpeed" in dialog.use.toolTip()
+    assert not dialog.use.isEnabled() and "組織の設定" in dialog.use.toolTip()
     plugin.unload()
     # Only QGIS's options left alone.
     path.write_text(json.dumps({"rasterSpeed": {"qgisSettings": False}}), encoding="utf-8")

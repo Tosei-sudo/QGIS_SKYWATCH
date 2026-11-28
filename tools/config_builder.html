@@ -1425,7 +1425,7 @@ const RESULT_GEOMETRY_LABELS = { ...GEOMETRY_LABELS, wkt: "WKT（POLYGON・POINT
   centerRadius: "緯度,経度,半径km", centerGeojson: "GeoJSON の Point" };
 /** 結果ファイル（resultFile）の持ち主のシステム。 */
 const systemOfResult = (rf) => (Array.isArray(state.requestExports) ? state.requestExports : []).find((x) => isObj(x) && x.resultFile === rf) || {};
-/** 列・スキーマの編集の違い（撮像依頼の日次出力・観測記録のエクスポート）。 */
+/** 列・スキーマの編集の違い（撮像依頼の日次出力・観測記録の書き出し）。 */
 const PROFILES = {
   request: {
     sources: () => K.exportSources, labels: SOURCE_LABELS, geometries: () => K.geometries, geometryLabels: GEOMETRY_LABELS,
@@ -1934,7 +1934,7 @@ const SPEC = [
         M("models", "モデルの一覧", { value: "auto", keyHelp: "名前（small・large など）", valueHelp: "置き場所か { \"path\", \"threads\" }、サーバーなら { \"url\", \"model\" }", help: "置き場所は genai_config.json のあるフォルダ、その .zip、または .zip の URL。相対パスは設定ファイルのフォルダから。共有フォルダ・zip・URL は初回に QGIS のプロファイルへコピー（展開）。threads はスレッド数（0 でコア数 − 1、最大 8）。社内サーバーの生成 AI は { \"url\": \"https://…/v1\", \"model\": \"サーバーでのモデル名\", \"timeoutSeconds\": 300 }（OpenAI 互換の chat/completions。vLLM・llama.cpp の server など。QGIS の認証設定とプロキシを使う）" }),
         TM("tasks", "タスクごとのモデル", [
           ["tidyNote", "備考を整える", "1B で可"], ["handoverDraft", "申し送りの下書き", "1B で可"],
-          ["noteFields", "項目の提案（備考から種別・活動などを拾う）", "3B 級向け"], ["searchWords", "言葉で探す（エクスポートの条件）", "3B 級向け"],
+          ["noteFields", "項目の提案（備考から種別・活動などを拾う）", "3B 級向け"], ["searchWords", "言葉で探す（書き出しの条件）", "3B 級向け"],
           ["summary", "まとめ（選んだ記録を数文に）", "3B 級向け"], ["translate", "英訳（通報の note.en）", "3B 級向け"],
           ["requestDraft", "依頼文から下書き（撮像依頼のフォーム）", "3B 級向け"],
           ["command", "文で操作（ツールバーの文から操作を選ぶ）", "3B 級向け"],
@@ -2012,8 +2012,8 @@ const SPEC = [
         const names = (Array.isArray(it.formats) ? it.formats : []).map((f) => f && f.name).filter(Boolean);
         if (!names.length) p.push(`${at}.formats: フォーマットが 1 つ以上必要`);
       } }) },
-    { key: "observationExports", label: "観測記録のエクスポート", doc: "観測記録のエクスポートobservationexports", help: "観測記録を期間・場所・大分類で絞って CSV・JSON に保存するときのフォーマット（名前付き、複数）。組み込みの「標準（CSV）」「標準（JSON）」はいつも選べる。撮像依頼の日次出力と同じく、CSV は列、JSON は列か JSON Schema（x-source）で組む。",
-      field: O("observationExports", "エクスポート", [
+    { key: "observationExports", label: "観測記録の書き出し", doc: "観測記録の書き出しobservationexports", help: "観測記録を期間・場所・大分類で絞って CSV・JSON に保存するときのフォーマット（名前付き、複数）。組み込みの「標準（CSV）」「標準（JSON）」はいつも選べる。撮像依頼の日次出力と同じく、CSV は列、JSON は列か JSON Schema（x-source）で組む。",
+      field: O("observationExports", "書き出し", [
         TJ("namedAreas", "地名（NamedArea）", { ph: "URL か { \"url\", \"fields\", \"where\" }", help: "項目 place・placeKind・places に使う地名のポリゴンのレイヤー。役割: " + Object.entries(K.roles.alertPlaces).map(([k, v]) => `${k}（${v}）`).join("・") + "。なければ alertReports の namedAreas" }),
         TJ("geofences", "ジオフェンス", { ph: "URL か { \"url\", \"fields\", \"where\" }", help: "項目 geofences に使うポリゴンのレイヤー。役割: " + Object.entries(K.roles.alertGeofences).map(([k, v]) => `${k}（${v}）`).join("・") + "。なければ alertReports の geofences" }),
         S("default", "既定のフォーマット", () => [K.obsBuiltinFormats[0], K.obsBuiltinFormats[1], ...((state.observationExports && state.observationExports.formats) || []).map((f) => f && f.name).filter(Boolean)]),
@@ -2241,7 +2241,7 @@ const DOC_FILES = {
   "複素-sar-画像sicdの表示compleximages": "docs/features/images.md",
   "観測記録": "docs/features/observations.md",
   "練習モードtraining": "docs/features/screen.md",
-  "観測記録のエクスポートobservationexports": "docs/features/observations.md",
+  "観測記録の書き出しobservationexports": "docs/features/observations.md",
   "起動時のレイヤー": "docs/features/map.md",
   "通報注目の記録alertreports": "docs/features/observations.md",
   "通知": "docs/features/images.md"

@@ -138,7 +138,7 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 | 入力の初期値（前回の入力） | `QgsSettings`（`mikage/last_inputs/…`） |
 | 定期照合（`scheduled_follow.py`）のログ・ロック・監査ログの控え | `%LOCALAPPDATA%\MIKAGE\scheduled_follow`（`--folder` で変更） |
 | 送信待ち（オフライン作業の変更・保存できなかった観測記録）とサーバーの控え | ユーザープロファイルの `mikage/offline_work.sqlite` |
-| 地名・国のポリゴンの控え（通報・エクスポート・式の関数で使った場所の分） | ユーザープロファイルの `mikage/place_cache.sqlite` |
+| 地名・国のポリゴンの控え（通報・書き出し・式の関数で使った場所の分） | ユーザープロファイルの `mikage/place_cache.sqlite` |
 | 監査ログ（日ごとのファイルと、送り先に送った位置 `sent.json`） | ユーザープロファイルの `mikage/audit/`（`auditLog.localFolder` で変更） |
 | 分類体系の取り込み（表から）の前の分類体系の控え（JSON、新しい 20 個） | ユーザープロファイルの `mikage/taxonomy-backups/` |
 

@@ -30,7 +30,7 @@ from ..core.request.api import (
 from ..core.request.api import _time, ScheduleRepository
 from ..core.request.api import RequestStoreConfig
 from ..qgis_io.tasks import run_task
-from .docks import plain_label, plain_tip
+from .docks import name_cancel, plain_label, plain_tip
 from .fit import fit_text
 from .list_views import column_menus
 
@@ -73,6 +73,7 @@ class UncountedDialog(QDialog):
         self.reason.setToolTip(self.tr("システムが年間の枚数に数えない理由（選ぶか書く）"))
         form.addRow(self.tr("理由"), self.reason)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        name_cancel(buttons)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         form.addRow(buttons)

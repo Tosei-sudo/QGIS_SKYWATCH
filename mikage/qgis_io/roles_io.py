@@ -112,13 +112,16 @@ class RoleKeeper(QObject):
         return edit_stamp.user_name()
 
     def where_kept(self) -> str:
-        """For the setup page: where the choice is kept, and whether it is there yet."""
+        """
+        For the setup page: where the choice is kept, and whether it is there yet (no server's table nor
+        settings file key on the screen, tsudo 2026-11-28; userRoles is in docs/admin).
+        """
         if self.source is None:
-            return "この PC だけに保存（設定ファイルに担当の表 userRoles がないため）"
+            return "この PC だけに保存（組織の担当の表がないため）"
         user = self.user() or "（利用者名なし）"
         if pending():
-            return f"Esri の担当の表に「{user}」として保存（未送信。次の起動か「適用」で送る）"
-        return f"Esri の担当の表に「{user}」として保存（別の PC でも同じ担当）"
+            return f"「{user}」さんの担当として保存（未送信。次の起動か「適用」で送る）"
+        return f"「{user}」さんの担当として保存（どの PC でも同じ担当）"
 
     def _use(self, codes: Sequence[str]) -> None:
         codes = roles.clean_codes(codes)

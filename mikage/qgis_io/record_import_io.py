@@ -1,4 +1,4 @@
-"""観測記録の一括取込み in QGIS (core/obs/record_import.py): a layer's features as rows, their points in WGS 84."""
+"""観測記録の一括取り込み in QGIS (core/obs/record_import.py): a layer's features as rows, their points in WGS 84."""
 from __future__ import annotations
 
 from typing import Any

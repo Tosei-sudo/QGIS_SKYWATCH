@@ -1,4 +1,4 @@
-"""観測記録のエクスポート (core/obs/export.py): the settings, which records, CSV / JSON by columns or a JSON Schema, place names."""
+"""観測記録の書き出し (core/obs/export.py): the settings, which records, CSV / JSON by columns or a JSON Schema, place names."""
 import json
 
 from mikage.core.config import parse_config

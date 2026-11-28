@@ -1,5 +1,5 @@
 """
-「観測記録のエクスポート」: the records of a period, a place, some 大分類 and
+「観測記録の書き出し」: the records of a period, a place, some 大分類 and
 確度 written as CSV or JSON by a named format (core/obs/export.py).
 
 The place is the map's extent, a polygon drawn on the map, the polygons of
@@ -51,14 +51,14 @@ def _time_edit(t: QTime) -> QDateTimeEdit:
 
 
 class ExportDialog(QDialog):
-    """「観測記録のエクスポート」 (kept by the observation dock; not modal, so the map can be drawn on)."""
+    """「観測記録の書き出し」 (kept by the observation dock; not modal, so the map can be drawn on)."""
 
     def __init__(self, dock, parent=None):
         super().__init__(parent)
         fit_text(self)
         self.dock = dock
         self.canvas = dock.canvas
-        self.setWindowTitle(self.tr("観測記録のエクスポート"))
+        self.setWindowTitle(self.tr("観測記録の書き出し"))
         self.drawn: Optional[list] = None
         self.named: Optional[list] = None
         self._tool = None
@@ -263,7 +263,7 @@ class ExportDialog(QDialog):
         named = s.named_areas is not None
         i = self.place_select.findData("named")
         self.place_select.model().item(i).setEnabled(named)
-        self.place_select.setItemData(i, None if named else self.tr("設定ファイルに namedAreas（地名レイヤー）なし"), Qt.ItemDataRole.ToolTipRole)
+        self.place_select.setItemData(i, None if named else self.tr("地名のレイヤーなし（管理者に連絡: namedAreas）"), Qt.ItemDataRole.ToolTipRole)
         if not named and self.place_select.currentData() == "named":
             self.place_select.setCurrentIndex(0)
         self._format_changed()
@@ -508,7 +508,7 @@ class ExportDialog(QDialog):
             else:
                 self._ask()
 
-        self.dock.fetch(self.tr("エクスポートする記録の取得"), lambda b: b.fetch(query), done, failed)
+        self.dock.fetch(self.tr("書き出す記録の取得"), lambda b: b.fetch(query), done, failed)
 
     def _records_read(self) -> None:
         """The records just read: the 大分類 they use listed, and those that match counted."""
@@ -612,7 +612,7 @@ class ExportDialog(QDialog):
             from ..core.obs.api import file_name_of
 
             kind = "JSON (*.json)" if f.format == "json" else "CSV (*.csv *.txt)"
-            path, _ = QFileDialog.getSaveFileName(self, self.tr("観測記録のエクスポート"), file_name_of(f, now), kind)
+            path, _ = QFileDialog.getSaveFileName(self, self.tr("観測記録の書き出し"), file_name_of(f, now), kind)
         if not path:
             return
         client = self.dock.context.esri()
@@ -644,7 +644,7 @@ class ExportDialog(QDialog):
             note = self.tr("（注意: {e}）").format(e="；".join(out.errors[:5]) + ("…" if len(out.errors) > 5 else "")) if out.errors else ""
             audit.record("export", "observations", path, count=out.count, detail={"format": getattr(f, "name", "") or ""}, file=path)
             self._say(self.tr("{n} 件を保存: {p}{note}").format(n=out.count, p=path, note=note))
-            self.dock.say(self.tr("観測記録をエクスポート: {p}").format(p=path))
+            self.dock.say(self.tr("観測記録を書き出し: {p}").format(p=path))
 
         def failed(message: str) -> None:
             self.save_button.setEnabled(True)
@@ -652,7 +652,7 @@ class ExportDialog(QDialog):
 
         self.save_button.setEnabled(False)
         self._say(self.tr("保存中…"))
-        run_task(self.tr("観測記録のエクスポート"), work, finished, failed)
+        run_task(self.tr("観測記録の書き出し"), work, finished, failed)
 
     def closeEvent(self, event) -> None:  # noqa: N802 (Qt's name)
         self._stop_drawing()

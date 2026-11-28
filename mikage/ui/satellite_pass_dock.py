@@ -15,7 +15,7 @@ from qgis.core import (
     QgsCategorizedSymbolRenderer, QgsFillSymbol, QgsLineSymbol, QgsPointXY, QgsProject, QgsRectangle, QgsRendererCategory,
     QgsWkbTypes,
 )
-from qgis.gui import QgsCollapsibleGroupBox, QgsRubberBand, QgsVertexMarker
+from qgis.gui import QgsRubberBand, QgsVertexMarker
 from qgis.PyQt.QtCore import QCoreApplication, QDateTime, Qt, QTimer
 from qgis.PyQt.QtGui import QColor, QStandardItem, QStandardItemModel
 from qgis.PyQt.QtWidgets import (
@@ -33,6 +33,7 @@ from ..qgis_io.pinned_layers import top_index
 from ..qgis_io.plan_layer import memory_layer
 from ..qgis_io.tasks import run_task
 from .docks import PluginDock
+from .fold import Fold
 from .satellite_kinds import always_names, daylight_names, fill_kinds, kind_combo
 from .plan_overlay import LabelItem
 from .last_inputs import InputMemory
@@ -203,11 +204,11 @@ class SatellitePassDock(PluginDock):
         form.addRow(self.end_label, self.end)
         self.body.addLayout(form)
 
-        more = QgsCollapsibleGroupBox(self.tr("詳細"))
-        more.setCollapsed(True)
-        more.collapsedStateChanged.connect(lambda collapsed: collapsed or self._mode_changed())
+        # 「詳細条件」 (ui/fold.py; 「詳細」 before tsudo 2026-11-28): the rows that do not apply hidden in its body.
+        more = Fold(self.tr("詳細条件"))
         self.more = more
-        more_form = QFormLayout(more)
+        more_form = QFormLayout(more.body)
+        more_form.setContentsMargins(0, 0, 0, 0)
         self.window = QComboBox()
         for minutes, label in WINDOWS:
             self.window.addItem(self.tr(label), minutes)
@@ -288,7 +289,7 @@ class SatellitePassDock(PluginDock):
 
     def _time_edit(self, value: QDateTime) -> QDateTimeEdit:
         edit = QDateTimeEdit(value)
-        edit.setDisplayFormat("yyyy/MM/dd HH:mm")
+        edit.setDisplayFormat("yyyy-MM-dd HH:mm")
         edit.setCalendarPopup(True)
         edit.dateTimeChanged.connect(self.schedule)
         return edit
