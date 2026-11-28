@@ -502,13 +502,27 @@ def save_request(client: EsriClient, store: RequestStoreConfig, token: Optional[
     return saved
 
 
+def _clock_names_missing(store: RequestStoreConfig, names: set) -> list[str]:
+    """The ledger's names of a request by the clock (時間帯 「時刻」: from, to) that its layer lacks."""
+    f = store.fields
+    return [f[k] for k in ("timeFrom", "timeTo") if f[k] not in names]
+
+
+def clock_missing(client: EsriClient, store: RequestStoreConfig, token: Optional[str]) -> list[str]:
+    """
+    The names of the 時刻 that the ledger lacks ([] with both): the form
+    does not offer 「時刻」 then (it could not be saved, _clock_missing).
+    """
+    names, _oid = _layer(client, store.url, token, store.label, (store.fields["id"],))
+    return _clock_names_missing(store, names)
+
+
 def _clock_missing(store: RequestStoreConfig, req: ImagingRequest, names: set) -> Optional[EsriError]:
     """
     A request by the clock (時間帯 「時刻」) for a ledger without its two
     attributes: not saved, rather than kept as any time (the 時刻 lost).
     """
-    f = store.fields
-    missing = [f[k] for k in ("timeFrom", "timeTo") if f[k] not in names]
+    missing = _clock_names_missing(store, names)
     if req.window is None or not missing:
         return None
     return EsriError(f"{store.label}に時間帯の時刻の項目がない（管理者に連絡: {'・'.join(missing)}）", code="E704")

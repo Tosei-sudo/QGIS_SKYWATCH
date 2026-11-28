@@ -135,6 +135,9 @@ class RequestForm(QDialog):
         #: The fields 依頼文から下書き filled (their style before), tinted until touched.
         self._marked: dict = {}
         self._unmarker = _Unmark(self._marked, self._unmark, self)
+        #: The ledger's names of the 時刻 that its layer lacks (the dock read them with the requests): 「時刻」 not
+        #: offered then, rather than refused at the save (tsudo 2026-11-28).
+        self.clock_missing = list(getattr(parent, "clock_missing", None) or ())
         self._build(known or {})
         self._fill(request)
         #: 依頼文から下書き (ui/request_draft.py): the row 「依頼文」 at the top, not for a batch.
@@ -324,6 +327,12 @@ class RequestForm(QDialog):
         self.orbit.addItems(ORBIT_DIRS)
         self.time_of_day = QComboBox()
         self.time_of_day.addItems(TIMES_OF_DAY)
+        if self.clock_missing:
+            item = self.time_of_day.model().item(self.time_of_day.findText(BY_CLOCK))
+            if item is not None:
+                item.setEnabled(False)
+                item.setToolTip(self._no_clock_text())
+            self.time_of_day.setToolTip(self._no_clock_text())
         for w, label in ((self.kind, "種別"), (self.look, "観測方向"), (self.orbit, "軌道方向"), (self.time_of_day, "時間帯")):
             kinds.addWidget(QLabel(self.tr(label)))
             kinds.addWidget(w)
@@ -635,6 +644,8 @@ class RequestForm(QDialog):
     def _time_of_day_changed(self, text: str) -> None:
         self.clock_row.setVisible(text == BY_CLOCK)
         self._clock_changed()
+        if text == BY_CLOCK and self.clock_missing:
+            self.message.setText(self._no_clock_text())
 
     def _clock_changed(self, *_args) -> None:
         """「日をまたぐ」 when the end comes before the start (22:00 〜 02:00)."""
@@ -1049,9 +1060,15 @@ class RequestForm(QDialog):
         for low, high, label in ((r.off_nadir_min, r.off_nadir_max, "オフナディア角"), (r.incidence_min, r.incidence_max, "入射角")):
             if low is not None and high is not None and low > high:
                 out.append(self.tr("{label}の下限が上限より大きい").format(label=label))
-        if r.time_of_day == BY_CLOCK and clock_minutes(r.time_from) == clock_minutes(r.time_to):
+        if r.time_of_day == BY_CLOCK and self.clock_missing:
+            # (one with 時刻 already, or 依頼文から下書き's)
+            out.append(self._no_clock_text())
+        elif r.time_of_day == BY_CLOCK and clock_minutes(r.time_from) == clock_minutes(r.time_to):
             out.append(self.tr("時刻の始まりと終わりが同じ"))
         return out
+
+    def _no_clock_text(self) -> str:
+        return self.tr("「時刻」は使えない: 台帳に時刻の項目がない（管理者に連絡: {c}）［E704］").format(c="・".join(self.clock_missing))
 
     def _save_clicked(self) -> None:
         r = self.value()

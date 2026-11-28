@@ -256,7 +256,7 @@ class ViewPart:
 
     def _origin_tip(self, ai) -> None:
         """The 出どころ cell of the row just added says all of it when pointed at (the model, the score, the result's id)."""
-        item = self.table.item(self._filled - 1, 5) if ai is not None else None
+        item = self.table.item(self._rows_filled - 1, 5) if ai is not None else None
         if item is not None:
             item.setToolTip(origin_text(ai))
 

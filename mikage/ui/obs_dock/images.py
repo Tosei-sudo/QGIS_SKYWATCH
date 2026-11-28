@@ -16,8 +16,9 @@ try:  # Qt6
 except ImportError:  # Qt5
     from qgis.PyQt.QtWidgets import QAction
 
-from ...core.obs.api import ObservationBook, ObservedImage
+from ...core.obs.api import FormValues, ObservationBook, ObservedImage, read_quantity
 from ...core.obs.api import SATELLITE_ORIGINS
+from ...core.util import read_number
 from ...qgis_io.geometry import from_wgs84, to_wgs84
 from ...qgis_io.image_order import bring_up
 from ...qgis_io.listed_layers import listed_image_of
@@ -95,6 +96,62 @@ class ImagesPart:
 
     def _layers_changed(self, *_args) -> None:
         self.refresh_images()
+
+    def _image_closing(self, layer_ids) -> None:
+        """
+        Layers about to go (the layer removed, 「前の画像を閉じる」, a new project): the image of a form with something
+        typed among them (tsudo 2026-11-28: with no other layer chosen, the form closed without a word and what was
+        typed was lost). What the form says is kept at once in 「保存できなかった観測記録」 (QGIS quit before the
+        question: still there, not sent by itself), then 保存 or 破棄 is asked, as when another image is chosen.
+        """
+        book, was = self.book, self._form_image
+        if book is None or was is None or self.pending is None:
+            return
+        image = next((i for i in book.images if i.id == was.id), was)
+        ids = list(image.layer_ids)
+        if not ids or not set(ids) <= set(layer_ids):
+            return  # listed without its file (it stays), or a file of it stays open
+        if not self._typed():
+            self.close_form()  # (nothing typed: it goes with its image, other images open or not)
+            return
+        lon, lat, editing, source = self.pending
+        values = self.form_values()
+        title = self.form.title()
+        kept = book.keep_typed(image, lon, lat, values, editing, source, draft=self._draft_id or None,
+                               reason=self.tr("画像を閉じたときに入力中（未記録）"))
+        self.close_form()
+        self.render_drafts()
+        # Asked once QGIS is done removing (a timer of the dock's own: gone with it).
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+        timer.timeout.connect(lambda: self._ask_closed_image(book, kept.id, image, title))
+        timer.timeout.connect(timer.deleteLater)
+        timer.start(0)
+
+    def _ask_closed_image(self, book, draft_id: str, image, title: str) -> None:
+        """保存 (recorded on the image closed) or 破棄 for what was typed when its image closed (_image_closing)."""
+        kept = book.draft(draft_id) if book is self.book else None
+        if kept is None:
+            return  # sent or thrown away meanwhile, or another store
+        answer = self.ask_unsaved(title, image.name, False)
+        if answer == "discard":
+            book.drop_draft(draft_id)
+            self.render_drafts()
+            return
+        r = kept.record
+        values = FormValues(**{k: kept.values.get(k, "") for k in FormValues.__dataclass_fields__})
+        try:
+            read_quantity(values.quantity)
+            for text in (values.length, values.width, values.heading):
+                read_number(text)
+        except ValueError:
+            # (as the form: not saved without the number; it is put right in the form, from the list)
+            self.say(self.tr("「{t}」は数値が読めないため「保存できなかった観測記録」に保管（画像を開き直し、一覧からフォームで開いて直す）").format(t=title))
+            return
+        editing = book.record(kept.editing_id) if kept.editing_id else None
+        source = book.record(kept.source_id) if kept.source_id else None
+        self.do(self.tr("記録"), lambda b: b.submit(r.lon, r.lat, values, True, editing, source, draft=draft_id, image=image),
+                lambda saved: self.render_drafts() if saved is None else self.many.use_record(saved), watch=True)
 
     def _layer_renamed(self, node, _name: str) -> None:
         """A layer renamed in the layer panel: an image's (not from the catalog: its name shown, obs_images.shown_name)."""

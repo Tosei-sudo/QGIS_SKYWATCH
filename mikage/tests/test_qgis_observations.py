@@ -1898,6 +1898,161 @@ def test_something_typed_is_asked_about_before_the_form_goes_otherwise(plugin, m
     assert not dock.active and not dock.form.isVisible() and len(asked) == 9
 
 
+
+
+def test_nothing_is_asked_about_a_form_unchanged_after_the_list_is_drawn_again(plugin, monkeypatch):
+    """
+    tsudo 2026-11-28: 保存・破棄・入力に戻る was asked with nothing changed in the form. The list drawn again (a
+    record read, the map moved, a refresh) set the form's values at opening to its count of rows (the same name,
+    since 2026-11-26), so every form looked typed.
+    """
+    p, iface, dock, layers, _ = plugin
+    book = dock.book
+    asked = []
+    monkeypatch.setattr(dock, "ask_leave", lambda title, doing: asked.append(doing) or "back")
+    monkeypatch.setattr(dock, "ask_unsaved", lambda title, name, back: asked.append(name) or "back")
+    dock.set_active(True)
+    dock.map_clicked(139.7, 35.6, None)
+    dock.object_input.setText("あおば")
+    dock.submit()
+    [a] = book.living()
+    for open_it in (lambda: dock.map_clicked(139.72, 35.62, None), lambda: dock.open_form(a.lon, a.lat, editing=a)):
+        open_it()
+        dock.render()
+        dock.map_clicked(139.74, 35.64, None)
+        dock.render()
+        dock.step(1)
+        dock.step(-1)
+        assert asked == []
+    # Something typed: asked as before.
+    dock.map_clicked(139.76, 35.66, None)
+    dock.object_input.setText("はるな")
+    dock.render()
+    dock.map_clicked(139.78, 35.68, None)
+    assert asked == ["別の場所に記録する"]
+
+
+def test_a_form_kept_in_the_drafts_is_asked_about_only_when_changed(plugin, monkeypatch):
+    """
+    tsudo 2026-11-28: a form that came back after its save failed (kept in 「保存できなかった観測記録」), or opened
+    from that list, asked 保存・破棄・入力に戻る at the next click elsewhere, nothing changed since. Now only when
+    something was changed in it; closed unchanged, it stays in the list.
+    """
+    p, iface, dock, layers, _ = plugin
+    book = dock.book
+    asked = []
+    monkeypatch.setattr(dock, "ask_leave", lambda title, doing: asked.append(doing) or "discard")
+
+    def refuse(records):
+        raise OSError("ネットワークに接続できません")
+
+    real_save = book.store.save
+    monkeypatch.setattr(book.store, "save", refuse)
+    dock.set_active(True)
+    dock.map_clicked(139.7, 35.6, None)
+    dock.object_input.setText("あおば")
+    dock.note_input.setText("入港")
+    dock.submit()
+    assert dock.form.isVisible() and dock.note_input.text() == "入港"
+    [kept] = book.drafts()
+    # Nothing changed since it came back: nothing asked, it stays in the list.
+    dock.map_clicked(139.72, 35.62, None)
+    assert asked == [] and dock.pending[:2] == (139.72, 35.62) and dock.object_input.text() == ""
+    assert [d.id for d in book.drafts()] == [kept.id]
+    # Opened from the list: the same.
+    dock.close_form()
+    assert dock.open_draft(kept.id) and dock.note_input.text() == "入港"
+    dock.map_clicked(139.74, 35.64, None)
+    assert asked == [] and [d.id for d in book.drafts()] == [kept.id]
+    # Changed in the form: asked, as any form typed.
+    dock.close_form()
+    assert dock.open_draft(kept.id)
+    dock.note_input.setText("入港直後")
+    dock.map_clicked(139.76, 35.66, None)
+    assert asked == ["別の場所に記録する"]
+    # Not kept anywhere (refused before a draft was made): asked, nothing changed since.
+    monkeypatch.setattr(book.store, "save", real_save)
+    book.drop_draft(kept.id)
+    monkeypatch.setattr(type(book), "submit", lambda self, *a, **k: None)
+    dock.map_clicked(139.7, 35.6, None)
+    dock.object_input.setText("はるな")
+    dock.submit()
+    assert dock.form.isVisible() and dock.object_input.text() == "はるな" and book.drafts() == []
+    dock.map_clicked(139.72, 35.62, None)
+    assert asked == ["別の場所に記録する", "別の場所に記録する"]
+
+
+def test_a_form_typed_when_its_image_is_closed_is_kept_then_asked_about(plugin, monkeypatch):
+    """
+    tsudo 2026-11-28: the image closed (the layer removed with no other chosen, 「前の画像を閉じる」, a new project)
+    with something typed in its form: the form closed without a word and what was typed was lost. Now it is kept in
+    「保存できなかった観測記録」 at once (QGIS quit before the question: still there, not sent by itself), then
+    保存 or 破棄 is asked, as when another image is chosen (F10).
+    """
+    p, iface, dock, layers, tmp_path = plugin
+    book = dock.book
+    project = QgsProject.instance()
+    asked, answer = [], ["discard"]
+    monkeypatch.setattr(dock, "ask_unsaved", lambda title, name, back: asked.append((title, name, back)) or answer[0])
+    dock.set_active(True)
+    on = book.current
+    layer = next(x for x in layers if x.id() in on.layer_ids)
+    source = layer.source()
+    dock.map_clicked(139.7, 35.6, None)
+    dock.object_input.setText("あおば")
+    dock.note_input.setText("入港")
+    # Another image closed: the form stays as typed.
+    project.removeMapLayers([next(x for x in layers if x is not layer).id()])
+    assert dock.form.isVisible() and dock.object_input.text() == "あおば" and book.drafts() == []
+
+    def close_it(layer):
+        name = next(i.name for i in book.images if i.id == on.id)  # (a layer's name for an image not from the catalog)
+        project.removeMapLayers([layer.id()])
+        # Kept before anything is asked.
+        assert not dock.form.isVisible() and asked == []
+        [kept] = book.drafts()
+        assert (kept.record.object_name, kept.record.image_id) == ("あおば", on.id) and kept.needs_check and "画像を閉じた" in kept.reason
+        assert p.offline.work.counts() == {"draft": 1}
+        assert wait_for(lambda: asked)
+        assert asked.pop() == ("新規の記録", name, False)
+
+    # 破棄: nothing kept, nothing recorded.
+    close_it(layer)
+    assert book.drafts() == [] and book.living() == []
+
+    def open_again():
+        again = QgsRasterLayer(source, "again")
+        project.addMapLayers([again])
+        iface.setActiveLayer(again)
+        dock.set_active(True)
+        dock.map_clicked(139.7, 35.6, None)
+        dock.object_input.setText("あおば")
+        return again
+
+    # 保存: recorded on the image closed.
+    answer[0] = "save"
+    again = open_again()
+    dock.note_input.setText("入港")
+    close_it(again)
+    assert [(o.object_name, o.note, o.image_id) for o in book.living()] == [("あおば", "入港", on.id)] and book.drafts() == []
+    # A number that cannot be read: kept, said (put right in the form from the list).
+    again = open_again()
+    dock.length_input.setText("百")
+    close_it(again)
+    assert len(book.living()) == 1 and [d.values["length"] for d in book.drafts()] == ["百"]
+    assert "数値が読めない" in dock.status.text()
+    # Nothing typed: closed with its image, nothing kept, nothing asked.
+    for d in book.drafts():
+        book.drop_draft(d.id)
+    again = QgsRasterLayer(source, "again")
+    project.addMapLayers([again])
+    iface.setActiveLayer(again)
+    dock.set_active(True)
+    dock.map_clicked(139.72, 35.62, None)
+    project.removeMapLayers([again.id()])
+    wait_for(lambda: False, 100)
+    assert not dock.form.isVisible() and book.drafts() == [] and asked == []
+
 def test_another_store_chosen_asks_about_something_typed_first(plugin, tmp_path, monkeypatch):
     """操作性点検の再検証 R6: the store switched in the dock let the form go without a word."""
     p, iface, dock, layers, _ = plugin

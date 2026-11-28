@@ -22,6 +22,7 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ..core import edit_stamp
+from ..core.esri import EsriError
 from ..core.request.api import RequestChange, RequestRepository
 from ..core.request.api import requests_of_plan
 from ..core.request.api import first_group, offered
@@ -102,6 +103,9 @@ class RequestDock(PluginDock):
         #: The 依頼グループ of the store's table (core/request/groups.py), and whether the table was read.
         self.groups: list = []
         self.groups_read = False
+        #: The ledger's names of the 時刻 (時間帯 「時刻」) its layer lacks, read with the requests (None: not known yet):
+        #: the form does not offer 「時刻」 then (tsudo 2026-11-28; it was refused only at the save, E704).
+        self.clock_missing: Optional[list[str]] = None
         #: 依頼文から下書き on the form (ui/request_draft.py): the named areas, the ledger, the batch for several places.
         from .request_draft import DraftHost
 
@@ -224,6 +228,7 @@ class RequestDock(PluginDock):
         self.store_choice.setVisible(len(stores) > 1)
         self.store = stores[0] if stores else None
         self.requests, self.chosen, self._loaded = [], None, False
+        self.clock_missing = None
         self.groups, self.groups_read = [], False
         self.render()
         if self.store is None:
@@ -245,6 +250,7 @@ class RequestDock(PluginDock):
         stores = self.context.config.request_stores
         self.store = stores[index] if 0 <= index < len(stores) else None
         self.chosen, self._loaded = None, False
+        self.clock_missing = None
         self.groups, self.groups_read = [], False
         self.reload()
 
@@ -292,13 +298,18 @@ class RequestDock(PluginDock):
         def work(task):
             requests = repo.load_requests(task.isCanceled)
             groups, note = repo.read_groups(task.isCanceled)
-            return requests, groups, note
+            try:
+                clock = repo.clock_missing()  # (the layer's names, as just read)
+            except EsriError:
+                clock = None  # not known: refused at the save as before
+            return requests, groups, note, clock
 
         def done(result):
             if store is not self.store:
                 return
-            requests, groups, note = result
+            requests, groups, note, clock = result
             self.requests, self._loaded = requests, True
+            self.clock_missing = clock
             self._shapes_asked = False
             if groups is not None:
                 self.groups, self.groups_read = groups, True
