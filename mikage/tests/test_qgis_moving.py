@@ -271,3 +271,40 @@ def test_detections_checked_against_a_feed(dock):
     assert ok and [f["ais_status"] for f in context.getMapLayer(results["OUTPUT"]).getFeatures()] == ["なし", "なし", "一致"]
     _, ok = algorithm.run({"INPUT": detections.id(), "FEED": detections.id(), "OUTPUT": "memory:"}, context, QgsProcessingFeedback())
     assert not ok
+
+
+def test_a_history_layer_left_after_unload_is_removed_with_nothing_of_the_plugin_run(tmp_path, monkeypatch):
+    """
+    The layers of a history file stay in the project when the plugin is unloaded (updated): their removal later (a new
+    project, the layer removed) ran the unloaded dock's hook, which stopped a timer already deleted (RuntimeError).
+    """
+    import gc
+    import sys
+    import traceback
+
+    from qgis.PyQt.QtCore import QCoreApplication, QEvent
+
+    errors = []
+    monkeypatch.setattr(sys, "excepthook", lambda kind, value, tb: errors.append("".join(traceback.format_exception(kind, value, tb))))
+    QgsSettings().remove("mikage")
+    settings.set_config_source("")
+    iface = FakeIface()
+    p = small_plugin(iface, Observations)
+    p.initGui()
+    path = tmp_path / "ais.csv"
+    rows = history([(0, 139.0, 35), (20, 139.1, 35)])
+    path.write_text("mmsi,timestamp,lat,lon\n" + "".join(f"{r['mmsi']},{r['timestamp']},{r['lat']},{r['lon']}\n" for r in rows))
+    layer = p.api.moving.open_history(str(path))
+    points = layer.points
+    p.unload()
+    del layer
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    gc.collect()
+    try:
+        assert QgsProject.instance().mapLayer(points.id()) is points
+        QgsProject.instance().removeAllMapLayers()
+        wait_for(lambda: False, 50)
+        assert errors == [], "\n".join(errors)
+    finally:
+        QgsProject.instance().removeAllMapLayers()
+        QgsSettings().remove("mikage")

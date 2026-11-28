@@ -262,7 +262,8 @@ class CatalogDock(
 
         row = QHBoxLayout()
         self.search_button = emphasize(QPushButton(self.tr("検索")))
-        self.search_button.clicked.connect(self.search)
+        # (A lambda: clicked's checked=False would land in `searched`, and the search's end raised TypeError.)
+        self.search_button.clicked.connect(lambda: self.search())
         row.addWidget(self.search_button)
         self.status = plain_label(QLabel())
         self.status.setWordWrap(True)

@@ -120,3 +120,33 @@ def test_hovering_the_graph_shows_the_values_with_qt5_and_qt6_events(monkeypatch
     chart.mouseMoveEvent(Qt5Event() if qt5 else Qt6Event())
     assert len(shown) == 1 and isinstance(shown[0][0], QPoint)
     assert shown[0][1].splitlines()[0] == "B2" and shown[0][1].splitlines()[1].startswith("1: 2")
+
+
+def test_the_images_file_is_closed_when_the_plugin_is_unloaded(tmp_path):
+    """
+    A value read: the dock kept the image's GDAL dataset (the file open) after the plugin was unloaded (updated), until
+    Python collected the dock; one closed after GDAL was gone took the process down ("corrupted size vs. prev_size").
+    """
+    import gc
+
+    QgsSettings().remove("mikage")
+    settings.set_config_source("")
+    iface = FakeIface()
+    p = small_plugin(iface, Enhance)
+    p.initGui()
+    layer = tiff(tmp_path / "kept.tif")
+    QgsProject.instance().addMapLayer(layer)
+    iface.canvas.setDestinationCrs(layer.crs())
+    iface.canvas.setExtent(QgsRectangle(0, 0, 10, 10))
+    try:
+        dock = p.api.spectral
+        iface.setActiveLayer(layer)
+        assert dock.add_point(QgsPointXY(3.5, 5.5)) is not None
+        p.unload()
+        gc.collect()
+        # The layer is still the active one (QGIS keeps it): nothing of the plugin holds its file.
+        assert dock.image is None
+        assert not [o for o in gc.get_objects() if isinstance(o, gdal.Dataset) and o.GetDescription().endswith("kept.tif")]
+    finally:
+        QgsProject.instance().removeAllMapLayers()
+        QgsSettings().remove("mikage")

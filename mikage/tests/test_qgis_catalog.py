@@ -143,6 +143,43 @@ def test_search_list_footprints_and_sorting(plugin):
     assert not dock.more_button.isVisibleTo(dock)
 
 
+def test_the_search_button_lists_the_images_with_no_python_error(plugin):
+    """
+    「検索」 clicked: its clicked's checked=False once landed in search's `searched` (the callback of ミカゲと話す,
+    2026-11-28), and the end of every search clicked so raised TypeError (logged 「結果の表示で失敗」; a failed
+    search the same).
+    """
+    from qgis.core import QgsApplication
+
+    p, _iface, _folder, fake, _ = plugin
+    dock = p.api.image_catalog
+    dock.show()
+    dock.area_box.setCurrentIndex(dock.area_box.findData("none"))
+    logged = []
+
+    def log(message, *_args):
+        logged.append(message)
+
+    QgsApplication.messageLog().messageReceived.connect(log)
+    try:
+        dock.search_button.click()
+        assert wait_for(lambda: dock.search_button.isEnabled() and dock.model.rowCount() == 3)
+        wait_for(lambda: False, 50)
+        # Failed (the server's error) the same: said, nothing raised.
+        from mikage.core.esri import EsriError
+
+        def down(_url, _form):
+            raise EsriError("down")
+
+        fake.answer = down
+        dock.search_button.click()
+        assert wait_for(lambda: dock.search_button.isEnabled() and "失敗" in dock.status.text()), dock.status.text()
+        wait_for(lambda: False, 50)
+    finally:
+        QgsApplication.messageLog().messageReceived.disconnect(log)
+    assert not [m for m in logged if "結果の表示で失敗" in m or "Traceback" in m], logged
+
+
 def test_read_more_adds_the_next_images_of_the_search_as_it_was(plugin, tmp_path):
     """「続きを読む」: `maxResults` at a time, newest first, the search's area and conditions kept, the rows chosen and the order too."""
     p, iface, folder, fake, layer = plugin

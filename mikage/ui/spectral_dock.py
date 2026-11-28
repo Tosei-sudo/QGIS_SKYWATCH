@@ -499,6 +499,9 @@ class SpectralDock(PluginDock):
 
     def close_down(self) -> None:
         self.measure_button.setChecked(False)
+        # The image's file closed (GDAL's dataset): kept open, the file stayed in use after the plugin was unloaded
+        # (updated) until Python collected the dock, and one closed after GDAL was gone took the process down.
+        self.image = None
         for signal, slot in ((self.canvas.mapToolSet, self._tool_set), (self.iface.currentLayerChanged, self._layer_changed)):
             try:
                 signal.disconnect(slot)
