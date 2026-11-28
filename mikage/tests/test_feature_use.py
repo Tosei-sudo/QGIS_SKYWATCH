@@ -257,3 +257,51 @@ def test_periods_and_days():
     where = fu.where_of(source, "2026-11-01", "2026-11-28", role="ADMIN")
     assert where.startswith("USE_DATE >= TIMESTAMP '") and "USE_DATE < TIMESTAMP '" in where
     assert "ROLE_NAMES = 'ADMIN'" in where and where.endswith("(SITE = 'A')")
+
+
+# ---- 迷い ------------------------------------------------------------------------------------------------
+
+
+def test_waits_are_kept_in_bands_and_left_out_of_the_uses():
+    assert [fu.band_of(s) for s in (0, 5, 5.1, 30, 31, 120, 121, 300, 301)] == ["5S", "5S", "30S", "30S", "2M", "2M", "5M", "5M", "LONG"]
+    assert fu.wait_place(fu.DOCK_FIRST, 12) == "DOCK_FIRST:30S" and fu.wait_of("DLG_CANCEL:LONG") == (fu.DLG_CANCEL, fu.LONG)
+    assert fu.wait_of("MENU") == ("", "") and fu.wait_of("OTHER:5S") == ("", "")
+    # Every PLACE_KIND fits the table's 16 characters.
+    assert max(len(fu.wait_place(k, s)) for k in fu.WAITS for s in (1, 400)) <= 16
+    assert all(len(p) <= 16 for p in (*fu.PLACES, *fu.NOT_USES))
+    assert fu.is_use("MENU") and fu.is_use("SHOWN") and not fu.is_use("MENU_PICK:5S") and not fu.is_use(fu.ERROR)
+    # A search kept: digits as #, MAX_MISS at most.
+    assert fu.search_label("座標 35.6 139.7 を探す") == "座標 # # を探す" and len(fu.search_label("あ" * 50)) == fu.MAX_MISS
+    groups = [("", "撮像依頼", "MENU", "a", 3, 0.0), ("", "撮像依頼", "MENU_PICK:2M", "a", 1, 0.8),
+              ("", "撮像依頼", "DOCK_NONE:5S", "b", 2, 0.1), ("撮像依頼", "E104", fu.ERROR, "b", 1, 0.0)]
+    summary = fu.summarize(groups)
+    assert [(line.feature, line.count, line.users) for line in summary.lines] == [("撮像依頼", 3, 1)]
+
+
+def test_the_waits_summed_by_feature_the_most_hesitated_over_first():
+    groups = [
+        ("", "撮像依頼", "MENU_PICK:5S", "a", 3, 0.1), ("", "撮像依頼", "MENU_PICK:2M", "b", 2, 2.0),
+        ("", "撮像依頼", "DOCK_FIRST:30S", "a", 4, 1.0), ("", "撮像依頼", "DOCK_NONE:5S", "b", 2, 0.1),
+        ("", "撮像依頼", "DOCK_NONE:LONG", "b", 5, 0.0), ("", "撮像依頼", fu.HELP_FROM, "b", 1, 0.0),
+        ("撮像依頼", "E104", fu.ERROR, "a", 2, 0.0), ("撮像依頼", "E101", fu.ERROR, "b", 1, 0.0),
+        ("", "監査ログ…", "DLG_OK:5S", "a", 1, 0.0),
+        ("", fu.MESSAGE_BAR, fu.HELP_FROM, "a", 0, 0.0), ("", "E101", fu.ERROR, "a", 1, 0.0),
+        ("", "最初にすること", fu.HELP_PAGE, "a", 2, 0.0), ("", "最初にすること", fu.HELP_PAGE, "b", 1, 0.0),
+        ("", "座標 #", fu.HELP_MISS, "a", 1, 0.0), ("", "検索", fu.HELP_FIND, "a", 4, 0.0),
+        ("", "撮像依頼", "MENU", "a", 9, 0.0),
+    ]
+    w = fu.summarize_waits(groups)
+    first = w.lines[0]
+    assert (first.dock, first.feature) == ("", "撮像依頼")
+    # Over 30 s: 2; closed unused: 2 (not the 5 left over 5 min); help 1; errors 3.
+    assert (first.slow, first.given_up, first.quick, first.help_from, first.error_count, first.score) == (2, 2, 2, 1, 3, 8)
+    assert fu.middle(first.pick) == "5 秒まで" and fu.middle(first.first) == "5〜30 秒" and fu.middle({}) == ""
+    assert fu.errors_text(first.errors) == "E104 ×2・E101" and first.people == {"a", "b"}
+    bar = next(line for line in w.lines if line.feature == fu.MESSAGE_BAR)
+    assert bar.errors == {"E101": 1}
+    assert [(h.kind, h.text, h.count, len(h.people)) for h in w.helps] == [
+        (fu.HELP_MISS, "座標 #", 1, 1), (fu.HELP_PAGE, "最初にすること", 3, 2)]
+    assert (w.searches, w.misses) == (4, 1)
+    text = fu.wait_csv(w)
+    assert text.splitlines()[0].startswith("ドック,機能,迷い,メニューで選ぶまで") and ",撮像依頼,8,5 秒まで,5〜30 秒,2,2,2,1,E104 ×2・E101,2" in text
+    assert "見つからなかった検索: 座標 #" in text

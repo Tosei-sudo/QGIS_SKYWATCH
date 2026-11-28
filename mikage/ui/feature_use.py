@@ -20,6 +20,16 @@ it is chosen, and the counts are kept and sent in the background.
   controls are looked for when it is shown and at each save (new ones made
   meanwhile); a control in a dialog of the dock is not counted.
 - How long each dock is shown (in front), and the plugin running.
+- 迷い (tsudo, 2026-11-28): how long until an entry was chosen in the plugin's
+  menu (or the menu closed with nothing chosen), until a dock opened by the
+  person was first used (or closed unused), until a window of the plugin was
+  closed with OK (or otherwise); a clock that stops while QGIS is not in
+  front (QGuiApplication.applicationStateChanged), in bands (core BANDS).
+  The help: the screen in front when it was opened, the sections read (one
+  at the top of the page for READ seconds), the searches and the words of
+  those that found nothing. The error codes shown (ui/error_help.set_seen).
+  No filter on every event of QGIS: the signals above, and focusChanged to
+  find the plugin's windows as they open.
 
 On the main thread only `Counter.add`. The file and the table: a hidden task
 every SAVE_MINUTES (sending every `sendMinutes`, the first FIRST_SEND seconds
@@ -31,8 +41,11 @@ import time
 from typing import Callable, Iterable, Optional
 
 from qgis.core import Qgis, QgsMessageLog
-from qgis.PyQt.QtCore import QCoreApplication, QObject, QTimer
-from qgis.PyQt.QtWidgets import QAbstractButton, QComboBox, QFormLayout, QLabel, QTabBar, QToolButton, QWidget
+from qgis.PyQt import sip
+from qgis.PyQt.QtCore import QCoreApplication, QObject, Qt, QTimer
+from qgis.PyQt.QtWidgets import (
+    QAbstractButton, QApplication, QComboBox, QDialog, QDockWidget, QFormLayout, QLabel, QTabBar, QToolButton, QWidget,
+)
 
 try:  # Qt 6
     from qgis.PyQt.QtGui import QShortcut
@@ -42,6 +55,7 @@ except ImportError:  # Qt 5
 from ..core import feature_use as fu
 from ..qgis_io import qsettings
 from ..qgis_io.tasks import run_task
+from . import error_help
 from .audit_status import LOG_TAG, plugin_version
 
 #: The profile's id in the table (QgsSettings, made once).
@@ -54,6 +68,18 @@ POPUP_CLAIM = 120
 MENU_CLOSED = 1.0
 #: Qt's own buttons (the others named Q… are its parts: a dock's close and float, a table's corner, a box's clear…).
 QT_BUTTONS = frozenset({"QPushButton", "QToolButton", "QCheckBox", "QRadioButton", "QCommandLinkButton"})
+#: The plugin's own package (its windows are those of classes of it).
+ROOT = __name__.split(".")[0]
+#: Windows of the plugin not timed: the help (reading, not hesitating).
+NOT_TIMED = frozenset({"HelpDialog"})
+#: A dock used this long ago (s) is still the one in front when the help is opened from the menu.
+RECENT = 120
+
+
+def plugin_window(window) -> bool:
+    """A window of the plugin's own (a QDialog of a class of it), not the help."""
+    cls = type(window)
+    return isinstance(window, QDialog) and cls.__module__.split(".")[0] == ROOT and cls.__name__ not in NOT_TIMED
 
 
 def qt_part(button) -> bool:
@@ -158,7 +184,23 @@ class FeatureUseKeeper(QObject):
         self.controls: dict[tuple[str, str], None] = {}
         self._connections: list = []
         self._group_box, self._collapse_button = _collapse_classes()
-        self._connect(context.configChanged, self._config_read)
+        # 迷い: the clock of QGIS in front, the menu, the docks opened, the windows of the plugin open.
+        self._away_total = 0.0
+        self._away_since: Optional[float] = None
+        self._menu_session = 0
+        self._menu_opened: Optional[float] = None
+        self._menu_last = ""
+        self._menu_title = ""
+        self._dock_names: dict[str, str] = {}
+        self._dock_wait: dict[str, float] = {}
+        self._dialogs: dict[int, tuple] = {}
+        self._last_dock: Optional[tuple[str, float]] = None
+        self._connect(context.configChanged, self._config_read, context)
+        app = QApplication.instance()
+        if app is not None:
+            self._connect(app.applicationStateChanged, self._app_state, app)
+            self._connect(app.focusChanged, self._focus, app)
+        error_help.set_seen(self.error_seen)
         self.timer = QTimer(self)
         self.timer.setInterval(fu.SAVE_MINUTES * 60_000)
         self.timer.timeout.connect(lambda: self.tick())
@@ -173,9 +215,10 @@ class FeatureUseKeeper(QObject):
 
     # ---- the settings ----------------------------------------------------------------------------------
 
-    def _connect(self, signal, slot) -> None:
+    def _connect(self, signal, slot, owner=None) -> None:
+        """A connection undone at unload (not when `owner`, the signal's object, is deleted by then)."""
         signal.connect(slot)
-        self._connections.append((signal, slot))
+        self._connections.append((signal, slot, owner))
 
     def _config_read(self) -> None:
         c = self.context
@@ -207,8 +250,166 @@ class FeatureUseKeeper(QObject):
     # ---- what is used ----------------------------------------------------------------------------------
 
     def used(self, feature: str, place: str, dock: str = "") -> None:
-        if self.settings.enabled and not self._closed:
-            self.counter.add(feature, place, dock)
+        if not self.settings.enabled or self._closed:
+            return
+        self.counter.add(feature, place, dock)
+        if dock and place in (fu.DOCK, "KEY"):
+            name = self._dock_names.get(dock)
+            start = self._dock_wait.pop(name, None) if name else None
+            if start is not None:
+                self._waited(fu.DOCK_FIRST, dock, start)
+            self._last_dock = (dock, time.monotonic())
+
+    # ---- 迷い ------------------------------------------------------------------------------------------
+
+    def _app_state(self, state) -> None:
+        now = time.monotonic()
+        if state == Qt.ApplicationState.ApplicationActive:
+            if self._away_since is not None:
+                self._away_total += now - self._away_since
+                self._away_since = None
+        elif self._away_since is None:
+            self._away_since = now
+
+    def clock(self) -> float:
+        """Seconds of QGIS in front (stopped while another program is)."""
+        now = time.monotonic()
+        away = self._away_total + (now - self._away_since if self._away_since is not None else 0.0)
+        return now - away
+
+    def _waited(self, kind: str, feature: str, start: float, dock: str = "") -> None:
+        if not self.settings.enabled or self._closed or not feature:
+            return
+        seconds = max(0.0, self.clock() - start)
+        place = fu.wait_place(kind, seconds)
+        self.counter.add(feature, place, dock, minutes=0.0 if place.endswith(fu.LONG) else seconds / 60)
+
+    def watch_menu(self, root, submenus: Iterable) -> None:
+        """The plugin's menu (under QGIS's プラグイン): opened until an entry is chosen, or closed with nothing chosen."""
+        if root is None:
+            return
+        self._menu_title = fu.label_of(root.title())
+        self._connect(root.aboutToShow, self._menu_shown, root)
+        self._connect(root.aboutToHide, self._menu_hidden, root)
+        for menu in submenus:
+            if menu is not None and menu is not root:
+                self._connect(menu.aboutToShow, lambda menu=menu: self._submenu_shown(menu), menu)
+
+    def _menu_shown(self) -> None:
+        self._menu_session += 1
+        self._menu_opened = self.clock()
+        self._menu_last = ""
+
+    def _submenu_shown(self, menu) -> None:
+        try:
+            self._menu_last = fu.label_of(menu.title())
+        except RuntimeError:
+            pass
+
+    def _menu_hidden(self) -> None:
+        # The entry chosen triggers just after the menu closes (and is counted a moment later).
+        session = self._menu_session
+        QTimer.singleShot(int(MENU_CLOSED * 1000), lambda: self._menu_gone(session))
+
+    def _menu_gone(self, session: int) -> None:
+        if self._closed or session != self._menu_session or self._menu_opened is None:
+            return
+        self._waited(fu.MENU_NONE, tr("メニュー: {m}").format(m=self._menu_last or self._menu_title), self._menu_opened)
+        self._menu_opened = None
+
+    def dock_opened(self, name: str) -> None:
+        """A dock opened by the person (its entry, its key): until a control in it is used, or it is closed."""
+        try:
+            if name in self._docks and self._docks[name][0].isVisible():
+                self._dock_wait[name] = self.clock()
+        except RuntimeError:
+            pass
+
+    def _focus(self, _old, new) -> None:
+        """A window of the plugin's taking the focus: timed from now until it is closed (once while it is open)."""
+        if new is None or self._closed or not self.settings.enabled:
+            return
+        try:
+            window = QWidget.window(new)
+            if id(window) in self._dialogs or not plugin_window(window):
+                return
+            if not window.property(MARK):
+                window.setProperty(MARK, True)
+                window.finished.connect(lambda result, window=window: self._dialog_done(window, result))
+            dock, feature = self._dialog_feature(window)
+        except RuntimeError:
+            return
+        self._dialogs[id(window)] = (window, self.clock(), dock, feature)
+
+    def _dialog_done(self, window, result: int) -> None:
+        kept = self._dialogs.pop(id(window), None)
+        if kept is None or kept[0] is not window:
+            return
+        _w, start, dock, feature = kept
+        accepted = result == QDialog.DialogCode.Accepted or result == 1
+        self._waited(fu.DLG_OK if accepted else fu.DLG_CANCEL, feature, start, dock)
+
+    def _dialog_feature(self, window) -> tuple[str, str]:
+        """(dock, feature) of a window of the plugin: its menu entry when it has one (「監査ログ…」), else its title in its dock."""
+        title = fu.label_of(window.windowTitle())
+        texts = set(self._entries.values())
+        for text in (f"{title}…", title):
+            if text in texts:
+                return "", text
+        return self.dock_of(window.parentWidget()), title
+
+    def dock_of(self, widget) -> str:
+        """The title of the plugin's dock a widget is in, "" when in none."""
+        docks = {id(dock): title for dock, title in self._docks.values()}
+        try:
+            while widget is not None:
+                if isinstance(widget, QDockWidget) and id(widget) in docks:
+                    return docks[id(widget)]
+                widget = widget.parentWidget()
+        except RuntimeError:
+            pass
+        return ""
+
+    def screen_of(self, widget) -> str:
+        """The screen a widget is on: a dock's title, a window of the plugin's (its entry), else 「地図・そのほか」."""
+        if widget is None:
+            return fu.ELSEWHERE
+        try:
+            window = QWidget.window(widget)
+            if plugin_window(window):
+                return self._dialog_feature(window)[1]
+        except RuntimeError:
+            return fu.ELSEWHERE
+        return self.dock_of(widget) or fu.ELSEWHERE
+
+    def help_opened(self) -> None:
+        """The help opened: from the screen in front (a window of the plugin's, the dock with the focus or last used)."""
+        if not self.settings.enabled or self._closed:
+            return
+        try:
+            active = QApplication.activeWindow()
+            screen = self.screen_of(active) if plugin_window(active) else self.screen_of(QApplication.focusWidget())
+        except RuntimeError:
+            screen = fu.ELSEWHERE
+        if screen == fu.ELSEWHERE and self._last_dock is not None and time.monotonic() - self._last_dock[1] <= RECENT:
+            screen = self._last_dock[0]
+        self.counter.add(screen, fu.HELP_FROM)
+
+    def watch_help(self, dialog) -> None:
+        """The help window's sections read and searches (its signals)."""
+        self._connect(dialog.sectionRead, lambda title: self.used(title, fu.HELP_PAGE), dialog)
+        self._connect(dialog.searched, self._searched, dialog)
+
+    def _searched(self, text: str, hits: int) -> None:
+        self.used(tr("検索"), fu.HELP_FIND)
+        if hits == 0 and fu.search_label(text):
+            self.used(fu.search_label(text), fu.HELP_MISS)
+
+    def error_seen(self, code: str, widget) -> None:
+        """An error code shown: on a status line (`widget`) or the message bar (None)."""
+        if not self.settings.enabled or self._closed:
+            return
+        self.counter.add(code, fu.ERROR, self.screen_of(widget) if widget is not None else fu.MESSAGE_BAR)
 
     def claim(self, action, place: str) -> None:
         """The next trigger of `action` (just after) is from `place` (a help link, 文で操作)."""
@@ -229,13 +430,13 @@ class FeatureUseKeeper(QObject):
             self._entries[action] = text
             menu = action.menu()
             if menu is not None:
-                self._connect(menu.triggered, lambda child, text=text: self._defer(text, child, popup=True))
-                self._connect(menu.aboutToHide, lambda text=text: self._popup_closed.__setitem__(text, time.monotonic()))
+                self._connect(menu.triggered, lambda child, text=text: self._defer(text, child, popup=True), menu)
+                self._connect(menu.aboutToHide, lambda text=text: self._popup_closed.__setitem__(text, time.monotonic()), menu)
             else:
-                self._connect(action.triggered, lambda _on=False, action=action, text=text: self._defer(text, action))
+                self._connect(action.triggered, lambda _on=False, action=action, text=text: self._defer(text, action), action)
         for menu in menus:
             if menu is not None:
-                self._connect(menu.aboutToHide, self._a_menu_closed)
+                self._connect(menu.aboutToHide, self._a_menu_closed, menu)
         if toolbar is not None:
             self.watch_toolbar(toolbar)
 
@@ -268,6 +469,7 @@ class FeatureUseKeeper(QObject):
         place = self._claims.pop(action, None)
         self._claims.clear()
         from_menu = now - self._menu_closed <= MENU_CLOSED
+        chosen_at = self._menu_opened
         if popup:
             if self._popup_claims.pop(text, 0) > now:
                 return  # opened from a help link: counted there
@@ -276,12 +478,19 @@ class FeatureUseKeeper(QObject):
             place = place or ("MENU" if from_menu else "TOOLBAR" if self._on_toolbar(text) else fu.OTHER)
         elif place is None:
             place = "MENU" if from_menu else fu.OTHER
+        if place == "MENU" and chosen_at is not None:
+            self._menu_opened = None
+            self._waited(fu.MENU_PICK, text, chosen_at)
         try:
             if action in self._dock_actions and not action.isChecked():
                 return  # a dock closed from its entry
         except RuntimeError:
             return
         self.used(text, place)
+        if action in self._dock_actions:
+            name = next((n for n, (dock, _t) in self._docks.items() if dock.toggleViewAction() is action), None)
+            if name is not None:
+                self.dock_opened(name)
 
     def _on_toolbar(self, text: str) -> bool:
         bar = getattr(self, "_toolbar", None)
@@ -294,8 +503,14 @@ class FeatureUseKeeper(QObject):
     def watch_shortcuts(self, actions: dict, dock_titles: dict, opens: dict) -> None:
         """The plugin's keys (name → action); a key that opens a dock counts as that dock's entry."""
         for name, action in actions.items():
-            feature = dock_titles.get(opens.get(name, ""), "") or fu.label_of(action.text())
-            self._connect(action.triggered, lambda _on=False, feature=feature: self.used(feature, "KEY"))
+            dock = opens.get(name, "")
+            feature = dock_titles.get(dock, "") or fu.label_of(action.text())
+            self._connect(action.triggered, lambda _on=False, feature=feature, dock=dock: self._key_used(feature, dock), action)
+
+    def _key_used(self, feature: str, dock: str) -> None:
+        self.used(feature, "KEY")
+        if dock:
+            QTimer.singleShot(0, lambda: None if self._closed else self.dock_opened(dock))
 
     def watch_docks(self, docks: dict, titles: dict) -> None:
         """The docks (object name → dock) with their titles: shown when and for how long, and their controls."""
@@ -303,7 +518,8 @@ class FeatureUseKeeper(QObject):
         for name, dock in docks.items():
             title = titles.get(name) or dock.windowTitle()
             self._docks[name] = (dock, title)
-            self._connect(dock.visibilityChanged, lambda on, name=name: self._visibility(name, on))
+            self._dock_names[title] = name
+            self._connect(dock.visibilityChanged, lambda on, name=name: self._visibility(name, on), dock)
             if dock.isVisible() and name not in self._shown:
                 self._shown[name] = now
                 self.used(title, fu.SHOWN)
@@ -323,6 +539,9 @@ class FeatureUseKeeper(QObject):
             start = self._shown.pop(name, None)
             if start is not None and self.settings.enabled:
                 self.counter.add(title, fu.SHOWN, count=0, minutes=fu.elapsed_minutes(start))
+            opened = self._dock_wait.pop(name, None)
+            if opened is not None:
+                self._waited(fu.DOCK_NONE, title, opened)
 
     def walk(self, name: str) -> int:
         """Listens to the dock's controls not listened to yet; how many it found."""
@@ -522,9 +741,12 @@ class FeatureUseKeeper(QObject):
                 except OSError:
                     pass
         self._closed = True
-        for signal, slot in self._connections:
+        error_help.set_seen(None)
+        self._dialogs.clear()
+        for signal, slot, owner in self._connections:
             try:
-                signal.disconnect(slot)
+                if owner is None or not sip.isdeleted(owner):
+                    signal.disconnect(slot)
             except (TypeError, RuntimeError):
                 pass
         self._connections.clear()
