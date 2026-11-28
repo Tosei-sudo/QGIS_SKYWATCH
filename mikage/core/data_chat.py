@@ -210,8 +210,13 @@ def schema_of(tables: Sequence[Table], values: Optional[dict[tuple[str, str], li
     values = values or {}
     shown: list[Shown] = []
     labels: dict[str, str] = {}
+    kinds = [t.kind for t in tables]
     for t in tables:
         title, cols = NOTES.get(t.kind, (KINDS.get(t.kind, ("", t.title))[1] or t.title, ()))
+        if kinds.count(t.kind) > 1:
+            # Two or more of a kind (画像カタログ by sensor or by system …): told apart by the settings file's names.
+            own = own_label(t)
+            title = f"{title}「{own}」" if own else title
         have = {c.name.upper(): c.name for c in t.columns} if t.columns else None
         s = Shown(t, title)
         for col in cols:
@@ -275,6 +280,23 @@ def schema_text(schema: Schema) -> str:
     return "\n".join(lines)
 
 
+def own_label(table: Table) -> str:
+    """The settings file's name of a table (its `label`: 「SAR」 of 「画像カタログ（SAR）」); "" when it has none."""
+    what = KINDS.get(table.kind, ("", ""))[1]
+    title = table.title or ""
+    if what and title.startswith(what + "（") and title.endswith("）"):
+        return title[len(what) + 1:-1]
+    return "" if title == what else title
+
+
+def _repeated(schema: Schema) -> list[tuple[str, list[Shown]]]:
+    """The kinds two or more tables are of, with those tables (in their order)."""
+    by: dict[str, list[Shown]] = {}
+    for s in schema.shown:
+        by.setdefault(s.table.kind, []).append(s)
+    return [(k, v) for k, v in by.items() if len(v) > 1]
+
+
 def rules_text(schema: Schema, more: Sequence[str] = ()) -> str:
     """The rules, with the tables' own names."""
     out = ["決まり:"]
@@ -289,6 +311,10 @@ def rules_text(schema: Schema, more: Sequence[str] = ()) -> str:
     present = schema.column("observation", "present")
     if present:
         out.append(f"- 「最後に確認した」は {present} = 1 の記録")
+    for kind, same in _repeated(schema):
+        what = KINDS.get(kind, ("", kind))[1] or kind
+        names = "・".join(f"{s.table.name}（{own_label(s.table) or '名前なし'}）" for s in same)
+        out.append(f"- {what}は {names}の {len(same)} つ。名前で言われたらその表、言われなければ UNION ALL で全部を合わせる")
     out += [f"- {r}" for r in more]
     out.append("- 読み取りだけ。表を変える頼み（停止にする・消すなど）や、表にない情報（天気など）は SQL を書かず「NG: 理由」と 1 行で書く")
     out.append("- 答えは SQL だけ（説明は書かない）")

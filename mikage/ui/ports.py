@@ -82,6 +82,19 @@ class CatalogPort(Protocol):
     def sensor_values(self) -> Optional[list]:
         """The sensors the catalog chosen lists (none before they are read); None when it has no sensor attribute."""
 
+    def catalogs(self) -> list:
+        """The catalogs it lists (the settings file's shown now)."""
+
+    def search_every(self, start: str, end: str, corners: Optional[list], catalogs: list,
+                     sensors_for: Callable[[Any, Optional[list]], Any], done: Callable[[list], None]) -> None:
+        """
+        画像検索 in each of `catalogs` behind the screen (period, corners or the map's extent, each one's sensors from
+        `sensors_for`); `done([(catalog, records, how many match, "" or why not), …])` once all are read.
+        """
+
+    def catalog_label(self, catalog) -> str:
+        """A catalog's name as it lists it."""
+
 
 class RequestsPort(Protocol):
     """撮像依頼 (ui/request_dock.py)."""

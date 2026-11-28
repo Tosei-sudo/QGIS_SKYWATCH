@@ -196,7 +196,10 @@ class AnswerCard(QFrame):
 
 
 class ImagesCard(QFrame):
-    """The images 画像検索 found: how many, the newest with 「開く」, 「カタログで見る」."""
+    """
+    The images 画像検索 found: how many (each catalog's too, when it searched several), the newest with 「開く」, and
+    「カタログで見る」 (one for each catalog with images).
+    """
 
     def __init__(self, found: ImagesFound, dock: "ChatDock"):
         super().__init__()
@@ -205,31 +208,50 @@ class ImagesCard(QFrame):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(8, 6, 8, 6)
         n, total = len(found.records), found.total
+        several = len(found.parts) > 1
         if not n:
             said = self.tr("{w}: 画像なし").format(w=found.said)
         elif total is not None and total > n:
             said = self.tr("{w}: {t:,} 枚（新しい {n:,} 枚を読んだ）").format(w=found.said, t=total, n=n)
         else:
             said = self.tr("{w}: {n:,} 枚").format(w=found.said, n=n)
+        if several:
+            each = []
+            for p in found.parts:
+                if p.problem:
+                    each.append(self.tr("{c} は探せない（{m}）").format(c=p.label, m=p.problem))
+                elif p.total is not None and p.total > len(p.records):
+                    each.append(self.tr("{c} {t:,} 枚").format(c=p.label, t=p.total))
+                else:
+                    each.append(self.tr("{c} {k:,} 枚").format(c=p.label, k=len(p.records)))
+            said += "（" + "・".join(each) + "）"
+        elif found.parts:
+            # One catalog: named when 画像カタログ lists others too (the sentence named it).
+            if len(dock.listed_catalogs()) > 1:
+                said = self.tr("「{c}」・{s}").format(c=found.parts[0].label, s=said)
         self.said = QLabel(said)
         self.said.setWordWrap(True)
         self.said.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         lay.addWidget(self.said)
         self.open_buttons: list[QPushButton] = []
+        labels = {id(p.catalog): p.label for p in found.parts}
         if n:
             grid = QGridLayout()
             grid.setHorizontalSpacing(8)
             for i, r in enumerate(found.records[:SHOWN_IMAGES]):
-                for j, text in enumerate((f"{i + 1}.", jst_text(r.acquired), r.sensor or "", r.id or "")):
+                texts = [f"{i + 1}.", jst_text(r.acquired), r.sensor or "", r.id or ""]
+                if several:
+                    texts.insert(2, labels.get(id(found.catalogs[i]), ""))
+                for j, text in enumerate(texts):
                     label = QLabel(text)
                     label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
                     grid.addWidget(label, i, j)
                 b = QPushButton(self.tr("開く"))
                 b.setToolTip(plain_tip(self.tr("この画像を開く（画像カタログの一覧から開くのと同じ）")))
                 b.clicked.connect(lambda _on=False, i=i: dock.open_shown(self.shown, [i]))
-                grid.addWidget(b, i, 4)
+                grid.addWidget(b, i, len(texts))
                 self.open_buttons.append(b)
-            grid.setColumnStretch(3, 1)
+            grid.setColumnStretch(len(texts) - 1, 1)
             lay.addLayout(grid)
             more = self.tr("番号で「2枚目を開いて」「いちばん新しいのを開いて」とも書ける")
             if n > SHOWN_IMAGES:
@@ -239,10 +261,16 @@ class ImagesCard(QFrame):
             hint.setStyleSheet(NOTE_STYLE)
             lay.addWidget(hint)
         flow = FlowLayout()
-        self.catalog_button = QPushButton(self.tr("カタログで見る"))
-        self.catalog_button.setToolTip(plain_tip(self.tr("画像カタログを前に出す（この検索の一覧）")))
-        self.catalog_button.clicked.connect(lambda _on=False: dock.show_found(found))
-        flow.addWidget(self.catalog_button)
+        #: 「カタログで見る」 for each catalog with images (one catalog: one button, even with none).
+        self.catalog_buttons: list[QPushButton] = []
+        parts = [p for p in found.parts if p.records] if several else found.parts[:1]
+        for part in parts:
+            b = QPushButton(self.tr("{c}で見る").format(c=part.label) if several else self.tr("カタログで見る"))
+            b.setToolTip(plain_tip(self.tr("画像カタログを前に出す（この検索の一覧）")))
+            b.clicked.connect(lambda _on=False, part=part: dock.show_found(found, part))
+            flow.addWidget(b)
+            self.catalog_buttons.append(b)
+        self.catalog_button = self.catalog_buttons[0] if self.catalog_buttons else None
         holder = QWidget()
         holder.setLayout(flow)
         lay.addWidget(holder)
@@ -619,9 +647,14 @@ class ChatDock(PluginDock):
             self._tell(said)
         return said
 
-    def show_found(self, found: ImagesFound) -> None:
+    def show_found(self, found: ImagesFound, part) -> None:
         if self.host is not None:
-            self._tell(self.host.show_images(found))
+            self._tell(self.host.show_images(found, part))
+
+    def listed_catalogs(self) -> list:
+        """The catalogs 画像カタログ lists (none without it)."""
+        catalogs = getattr(self.host, "catalogs", None)
+        return list(catalogs() or []) if catalogs is not None else []
 
     def list_in_catalog(self, shown: chat.Shown) -> None:
         if self.host is not None:

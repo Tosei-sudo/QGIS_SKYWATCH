@@ -34,13 +34,22 @@ from ..qgis_io.place_search import place_search_of
 from ..qgis_io.tasks import run_task
 from ..ui import command_runs as runs
 from ..ui.chat_dock import ChatDock
-from ..ui.chat_operation import ImagesFound
+from ..ui.chat_operation import FoundIn, ImagesFound, images_found
 from .base import DockSpec, Feature, tr
 
 #: The side of the square taken around a point or a place found by a geocoder (km).
 POINT_KM = 5.0
 #: How long the named areas read are kept (s).
 AREAS_SECONDS = 600
+
+
+#: Catalog names that say nothing of which one (a catalog named so is not taken as named by a sentence).
+PLAIN_CATALOG_NAMES = frozenset({"画像", "カタログ", "画像カタログ", "衛星画像"})
+
+
+def named_catalogs(text: str, catalogs: Sequence[Any]) -> list:
+    """The catalogs a sentence names by their `label` (「レーダーで…」), not by a plain one such as 「画像」."""
+    return [c for c in catalogs if len(c.label or "") >= 2 and c.label not in PLAIN_CATALOG_NAMES and c.label in text]
 
 
 class Chat(Feature):
@@ -232,43 +241,77 @@ class Chat(Feature):
     # ---- images ------------------------------------------------------------------------------------------
 
     def search_images(self, reading: Reading, place: Any, done: Callable[[Optional[ImagesFound], str], None]) -> None:
-        """画像検索 in 画像カタログ behind the screen (its own search, its list replaced): done(found, "") or done(None, why)."""
+        """
+        画像検索 behind the screen in every catalog 画像カタログ lists, at once (only those the sentence names, when it
+        names some; tsudo 2026-11-28 「複数画像カタログがある場合はどうなる？」), its form and list untouched: each
+        catalog's sensors 衛星・種別 names, the place's polygon (none: the map's extent). done(found, "") or done(None, why).
+        """
         port = self.ports.catalog()
         if port is None or not self.context.config.image_catalogs or not self.host.allows(tr("画像カタログ")):
             done(None, tr("画像カタログを使えない（設定ファイルに imageCatalogs がない、または担当）"))
             return
-        try:
-            reading.catalog_sensors = self._catalog_sensors(reading.sensors)
-        except RuntimeError as error:
-            done(None, str(error))
-            return
-        said = runs.catalog_said(reading, place.label if place is not None else tr("地図の表示範囲"))
+        catalogs = port.catalogs()
+        catalogs = named_catalogs(reading.text, catalogs) or catalogs
+        words = list(reading.sensors)
+        satellites, known = self.satellites(), self.context.known_names()
+        picked: dict[int, list[str]] = {}
 
-        def searched(found, problem: str) -> None:
-            if found is None:
-                done(None, problem)
+        def sensors_for(catalog, values: Optional[list]):
+            # (In the search's task: pick_sensors only reads what it is given.)
+            if not words or values is None:
+                return []  # No 衛星・種別, or a catalog without a sensor attribute: every sensor (as 画像カタログ's search).
+            pick = pick_sensors(words, values, satellites, known)
+            if pick.sensors:
+                picked[id(catalog)] = list(pick.sensors)
+                return list(pick.sensors)
+            if any(w in KINDS for w in pick.missing) and not pick.listed:
+                return tr("センサーの一覧が読めず、{k}で探せない（衛星・種別を消すか、衛星の名前で）").format(
+                    k="・".join(w for w in pick.missing if w in KINDS))
+            return tr("「{w}」に当たるセンサーがない（衛星・種別を直すか消す）").format(w="、".join(words))
+
+        first, last = reading.period or (None, None)
+        where = place.label if place is not None else tr("地図の表示範囲")
+
+        def over(results: list) -> None:
+            parts = [FoundIn(c, port.catalog_label(c), sorted(records, key=lambda r: -(ms_of(r.acquired) or 0)), total, problem)
+                     for c, records, total, problem in results]
+            if not parts or all(p.problem for p in parts):
+                several = len(parts) > 1
+                done(None, "／".join(f"「{p.label}」: {p.problem}" if several else p.problem for p in parts)
+                     or tr("検索できる画像カタログがない"))
                 return
-            catalog, records, total = found
-            # Newest first (as the catalog asks the server for them; whatever order they came in).
-            newest = sorted(records, key=lambda r: -(ms_of(r.acquired) or 0))
-            done(ImagesFound(catalog, newest, total, said), "")
+            reading.catalog_sensors = list(dict.fromkeys(x for c, *_ in results for x in picked.get(id(c), [])))
+            done(images_found(parts, runs.catalog_said(reading, where), lambda r: ms_of(r.acquired) or 0), "")
 
-        runs.catalog(port, reading, place, front=False, searched=searched)
+        port.search_every(first.isoformat() if first else "", last.isoformat() if last else "", runs.place_corners(place),
+                          catalogs, sensors_for, over)
+
+    def catalogs(self) -> list:
+        """The catalogs 画像カタログ lists (none without it)."""
+        port = self.ports.catalog()
+        return list(port.catalogs()) if port is not None else []
 
     def open_images(self, found: ImagesFound, indexes: Sequence[int]) -> str:
+        """Those of the images found opened (as from 画像カタログ's list), each with its catalog."""
         port = self.ports.catalog()
-        records = [found.records[i] for i in indexes if 0 <= i < len(found.records)]
-        if port is None or not records:
+        chosen = [(found.catalogs[i], found.records[i]) for i in indexes if 0 <= i < len(found.records)]
+        if port is None or not chosen:
             return ""
-        port.open_catalog_records(found.catalog, records)
-        return tr("画像を開いた: {s}").format(s="、".join(r.id or "?" for r in records))
+        groups: dict[int, tuple[Any, list]] = {}
+        for catalog, record in chosen:
+            groups.setdefault(id(catalog), (catalog, []))[1].append(record)
+        for catalog, records in groups.values():
+            port.open_catalog_records(catalog, records)
+        return tr("画像を開いた: {s}").format(s="、".join(r.id or "?" for _c, r in chosen))
 
-    def show_images(self, found: ImagesFound) -> str:
+    def show_images(self, found: ImagesFound, part: FoundIn) -> str:
+        """A catalog's images found listed in 画像カタログ (that catalog chosen), the dock in front."""
         port = self.ports.catalog()
         if port is None:
             return ""
-        port.show_event_records(found.catalog, found.records, found.said)
-        return tr("画像カタログに一覧: {s}").format(s=found.said)
+        said = tr("「{c}」・{s}").format(c=part.label, s=found.said) if len(found.parts) > 1 else found.said
+        port.show_event_records(part.catalog, part.records, said)
+        return tr("画像カタログに一覧: {s}").format(s=said)
 
     def open_image_ids(self, ids: Sequence[str]) -> str:
         port = self.ports.catalog()
