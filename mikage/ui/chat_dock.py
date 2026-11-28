@@ -291,6 +291,14 @@ class ChatDock(PluginDock):
         self.list.setSpacing(8)
         self.list.addStretch(1)
         self.scroll.setWidget(holder)
+        # Room for a card or two however small the dock (the intro above wraps to several lines when narrow).
+        self.scroll.setMinimumHeight(220)
+        #: Whether the list follows its bottom (a sentence or card added, or the person at the bottom): a card
+        #: laid out later (its table, an answer's text) keeps it there; scrolled up to read, it stays put.
+        self._at_bottom = True
+        bar = self.scroll.verticalScrollBar()
+        bar.valueChanged.connect(lambda v: setattr(self, "_at_bottom", v >= self.scroll.verticalScrollBar().maximum() - 4))
+        bar.rangeChanged.connect(self._ranged)
         self.body.addWidget(self.scroll, 1)
         self.status = QLabel("")
         self.status.setWordWrap(True)
@@ -379,6 +387,7 @@ class ChatDock(PluginDock):
             old = self.items.pop(0)
             self.list.removeWidget(old)
             old.deleteLater()
+        self._at_bottom = True
         QTimer.singleShot(0, self._to_bottom)
         self._update_buttons()
         return widget
@@ -387,6 +396,11 @@ class ChatDock(PluginDock):
         if not sip.isdeleted(self):
             bar = self.scroll.verticalScrollBar()
             bar.setValue(bar.maximum())
+
+    def _ranged(self, _low: int, high: int) -> None:
+        """The list grew (a card added or laid out): kept at its bottom while it follows it."""
+        if self._at_bottom:
+            self.scroll.verticalScrollBar().setValue(high)
 
     def cards(self, kind: type) -> list:
         """The cards of a kind, oldest first."""
