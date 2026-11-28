@@ -8,7 +8,7 @@ could be folded away (the review of 2026-11-27 found too much shown at once).
 Counted, never one line per click: (day, roles, plugin version, dock, feature,
 place) → how many times, and how many minutes (a dock shown, the plugin
 running). The places (PLACES): the plugin's menu, its toolbar, a key, the map's
-right-click menu, a help link, 文で操作, a control inside a dock, a dock shown,
+right-click menu, a help link, ミカゲと話す (文で操作 until 2026-11-28), a control inside a dock, a dock shown,
 the plugin started.
 
 Never in it: what was typed or chosen (a box's text, a list's value), the
@@ -61,7 +61,7 @@ PLACES: dict[str, str] = {
     "KEY": "キー",
     "MAP_MENU": "地図の右クリック",
     "HELP": "ヘルプのリンク",
-    "COMMAND": "文で操作",
+    "COMMAND": "ミカゲと話す",
     "OTHER": "そのほか",
     "DOCK": "ドックの中",
     "SHOWN": "ドックの表示",

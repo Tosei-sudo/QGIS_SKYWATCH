@@ -13,7 +13,7 @@ satellite there, of satellites the catalog gives no kind, or of satellites of se
 
 The kinds and the words for them (2026-11-26: IR, and the kinds of the settings) are those in use (kinds()).
 
-Pure Python: a sentence's words are read by core/text_command.py, the card and the search are the plugin's.
+Pure Python: a sentence's words are read by core/text_command.py (ミカゲと話す), the card and the search are the plugin's.
 """
 from __future__ import annotations
 

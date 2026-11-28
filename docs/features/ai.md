@@ -115,7 +115,7 @@ AI の結果から取り込んだ記録は、どの AI のどの結果から来�
 - 観測記録ドックの一覧の「出どころ」列に `AI検出 0.87` のように出る（指すとモデル・確信度・レイヤーと ID・継続の判定）。記録を開くと入力欄の「備考」の下に「出どころ」の行が出る（AI の記録だけ。直せない）
 - 記録を人が直しても出どころは変わらない（その結果から作った記録のまま）。手で「継続」した記録は人の記録（出どころは空）
 - 二重取り込み・誤検出・AI 学習の「必ず背景にする範囲」は、この列だけで判定する。前からある記録の備考の印 `[AI:…]` は読まない（列へ移す SQL は [docs/arcgis-setup.md](../arcgis-setup.md#観測記録に-ai-の出どころの列を足す)）
-- 書き出し（`aiSource`・`aiLayer`・`aiResultId`・`aiScore`・`aiModel`・`aiDetectedAt`・`aiContinuation`。標準の CSV・JSON では末尾）、通報の項目、レイヤーとして追加、データに質問、ダッシュボードのビュー `VW_OBS_RECORD` でも使える
+- 書き出し（`aiSource`・`aiLayer`・`aiResultId`・`aiScore`・`aiModel`・`aiDetectedAt`・`aiContinuation`。標準の CSV・JSON では末尾）、通報の項目、レイヤーとして追加、ミカゲと話す、ダッシュボードのビュー `VW_OBS_RECORD` でも使える
 
 ### 継続の判定（aiContinuation）
 

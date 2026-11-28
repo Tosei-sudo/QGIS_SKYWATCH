@@ -48,8 +48,14 @@ def shown(plugin):
     return [re.sub(r"^通知（\d+）$", "通知", a.text()) for a in plugin.toolbar.actions()]
 
 
+def offered(plugin, buttons):
+    """`buttons` less the entries hidden here (「ミカゲと話す」 only while the settings give it a model: none in these tests)."""
+    return [b for b in buttons if b not in plugin.hidden_entries]
+
+
 def test_without_a_role_the_toolbar_is_as_before(plugin):
-    assert shown(plugin) == toolbar_buttons.DEFAULT
+    assert "ミカゲと話す" in toolbar_buttons.DEFAULT and "ミカゲと話す" in plugin.hidden_entries
+    assert shown(plugin) == offered(plugin, toolbar_buttons.DEFAULT)
     # 「背景地図」 opens its list on a click.
     base_maps = next(a for a in plugin.toolbar.actions() if a.text() == "背景地図")
     assert plugin.toolbar.widgetForAction(base_maps).popupMode() == QToolButton.ToolButtonPopupMode.InstantPopup
@@ -80,20 +86,20 @@ def test_choosing_a_role_changes_the_buttons(plugin):
     page = plugin.open_first_setup()
     page.role_checks["観測記録の担当"].setChecked(True)
     page.accept()
-    assert shown(plugin) == toolbar_buttons.ROLE_SETS["観測記録の担当"]
+    assert shown(plugin) == offered(plugin, toolbar_buttons.ROLE_SETS["観測記録の担当"])
     # Two roles: the first one's buttons, then the other's new ones; help and this page last.
     page = plugin.open_first_setup()
     page.role_checks["撮像計画の担当"].setChecked(True)
     page.accept()
     both = shown(plugin)
-    assert both == toolbar_buttons.standard("撮像計画の担当 ＋ 観測記録の担当")
+    assert both == offered(plugin, toolbar_buttons.standard("撮像計画の担当 ＋ 観測記録の担当"))
     assert both[:3] == ["撮像計画", "衛星パス", "移動目標撮像計画…"] and both[-2:] == ["使い方（ヘルプ）…", "ツールバーのボタン…"]
     assert len(set(both)) == len(both) and {"撮像計画ファイル出力", "観測記録", "通報文の作成…"} <= set(both)
     page = plugin.open_first_setup()
     for check in page.role_checks.values():
         check.setChecked(False)
     page.accept()
-    assert shown(plugin) == toolbar_buttons.DEFAULT
+    assert shown(plugin) == offered(plugin, toolbar_buttons.DEFAULT)
 
 
 def test_the_requester_role_asks_and_looks_and_does_not_plan(plugin):
@@ -108,20 +114,20 @@ def test_the_requester_role_asks_and_looks_and_does_not_plan(plugin):
     assert window.dockWidgetArea(docks["SatObsRequests"]) == Qt.DockWidgetArea.RightDockWidgetArea
     assert window.dockWidgetArea(docks["SatObsPlaceSchedule"]) == Qt.DockWidgetArea.BottomDockWidgetArea
     buttons = shown(plugin)
-    assert buttons == toolbar_buttons.ROLE_SETS["撮像を依頼する人"]
+    assert buttons == offered(plugin, toolbar_buttons.ROLE_SETS["撮像を依頼する人"])
     assert {"撮像依頼", "撮像予定", "地点ごとの撮像予定"} <= set(buttons)
     assert not {"撮像計画", "撮像計画ファイル出力", "衛星パス"} & set(buttons)
 
 
 def test_own_buttons_are_kept_per_role(plugin):
     use(plugin, "画像判読")
-    assert shown(plugin) == toolbar_buttons.ROLE_SETS["画像判読"]
+    assert shown(plugin) == offered(plugin, toolbar_buttons.ROLE_SETS["画像判読"])
 
     dialog = plugin.open_toolbar_buttons()
     assert dialog.isVisible() and dialog.role_name == "画像判読"
     items = {dialog.list.item(i).text(): dialog.list.item(i) for i in range(dialog.list.count())}
     # The ticked ones first, in toolbar order; then the rest.
-    assert dialog.picked() == toolbar_buttons.ROLE_SETS["画像判読"]
+    assert dialog.picked() == offered(plugin, toolbar_buttons.ROLE_SETS["画像判読"])
     items["スペクトル"].setCheckState(Qt.CheckState.Unchecked)
     items["パンシャープン…"].setCheckState(Qt.CheckState.Checked)
     dialog.list.setCurrentItem(items["観測記録"])
@@ -130,26 +136,26 @@ def test_own_buttons_are_kept_per_role(plugin):
     dialog.accept()
     mine = shown(plugin)
     assert "スペクトル" not in mine and "パンシャープン…" in mine
-    assert mine.index("観測記録") == toolbar_buttons.ROLE_SETS["画像判読"].index("観測記録") - 2
+    assert mine.index("観測記録") == offered(plugin, toolbar_buttons.ROLE_SETS["画像判読"]).index("観測記録") - 2
     assert toolbar_buttons.own("画像判読") == mine
 
     # Another role: its standard; back: the person's own again.
     use(plugin, "撮像計画の担当")
-    assert shown(plugin) == toolbar_buttons.ROLE_SETS["撮像計画の担当"]
+    assert shown(plugin) == offered(plugin, toolbar_buttons.ROLE_SETS["撮像計画の担当"])
     use(plugin, "画像判読")
     assert shown(plugin) == mine
     # The same with one more role: kept apart (「画像判読 ＋ 管理者」).
     use(plugin, "画像判読", "管理者")
     assert plugin.open_toolbar_buttons().role_name == "画像判読 ＋ 管理者"
     plugin.toolbar_dialog.reject()
-    assert shown(plugin) == toolbar_buttons.standard("画像判読 ＋ 管理者") and "接続と表の点検…" in shown(plugin)
+    assert shown(plugin) == offered(plugin, toolbar_buttons.standard("画像判読 ＋ 管理者")) and "接続と表の点検…" in shown(plugin)
     use(plugin, "画像判読")
 
     # 「担当の標準に戻す」: forgotten.
     dialog = plugin.open_toolbar_buttons()
     dialog.reset_button.click()
     dialog.accept()
-    assert shown(plugin) == toolbar_buttons.ROLE_SETS["画像判読"]
+    assert shown(plugin) == offered(plugin, toolbar_buttons.ROLE_SETS["画像判読"])
     assert toolbar_buttons.own("画像判読") is None
 
 
@@ -161,7 +167,7 @@ def test_own_buttons_with_texts_no_longer_there_or_not_of_the_roles(plugin):
     assert shown(plugin) == ["観測記録", "背景地図"]
     toolbar_buttons.set_own("画像判読", None)
     plugin.toolbar_buttons.apply()
-    assert shown(plugin) == toolbar_buttons.ROLE_SETS["画像判読"]
+    assert shown(plugin) == offered(plugin, toolbar_buttons.ROLE_SETS["画像判読"])
     # A name no role has (a layout of the person's own, before roles): the standard without a role.
     assert toolbar_buttons.standard("夜間当番") == toolbar_buttons.DEFAULT
     # A broken setting: the standard.

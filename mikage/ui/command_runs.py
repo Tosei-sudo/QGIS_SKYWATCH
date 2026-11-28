@@ -1,6 +1,6 @@
 """
-What each operation of 文で操作 does (core/text_command.OPERATIONS), on the
-screen it is given: the values of the card put in it, then only what its
+What each operation of 「ミカゲと話す」 does (core/text_command.OPERATIONS; 文で
+操作's until 2026-11-28), on the screen it is given: the values of the card put in it, then only what its
 own button would that reads (計算, 検索, 表示). Writing, importing, saving and
 sending stay the screen's own buttons, with their own questions.
 
@@ -151,22 +151,31 @@ def outage(dialog, r: Reading) -> str:
 
 # ---- 画像 (features/images.py) --------------------------------------------------------------------------
 
-def catalog(dock, r: Reading, place) -> str:
+def catalog(dock, r: Reading, place, front: bool = True, searched=None) -> str:
     """
     画像カタログ: searched over the period and the place (its polygon; else the map's extent), and the sensors 衛星・種別
-    names (features/command.py: the catalog's; none: every sensor, whatever the センサー box had).
+    names (features/chat.py: the catalog's; none: every sensor, whatever the センサー box had). Not `front`: searched
+    behind (ミカゲと話す's answer), `searched` told what was found (CatalogDock.search_area_period).
     """
     first, last = r.period or (None, None)
     start, end = (first.isoformat() if first else ""), (last.isoformat() if last else "")
     ring = None
     if place is not None and place.rings:
         ring = [list(p) for p in place.rings[0]] if place.kind == "範囲" else corners_of(place.rings)
-    dock.search_area_period(start, end, ring, sensor=SENSOR_SEPARATOR.join(r.catalog_sensors))
+    dock.search_area_period(start, end, ring, sensor=SENSOR_SEPARATOR.join(r.catalog_sensors), extent=True, front=front,
+                            searched=searched)
     where = place.label if place is not None else tr("地図の表示範囲")
-    said = tr("画像カタログ: {w}・{a}〜{b}").format(w=where, a=start or tr("指定なし"), b=end or tr("指定なし"))
+    return tr("画像カタログ: {w} を検索").format(w=catalog_said(r, where))
+
+
+def catalog_said(r: Reading, where: str) -> str:
+    """Where, when and which sensors 画像検索 searched (「呉・2026-11-21〜2026-11-27・SAR（3 センサー）」)."""
+    first, last = r.period or (None, None)
+    said = tr("{w}・{a}〜{b}").format(w=where, a=first.isoformat() if first else tr("指定なし"),
+                                      b=last.isoformat() if last else tr("指定なし"))
     if r.catalog_sensors:
         said += tr("・{s}（{n} センサー）").format(s="・".join(r.sensors), n=len(r.catalog_sensors))
-    return said + tr(" を検索")
+    return said
 
 
 def watch(dock, place) -> str:

@@ -133,7 +133,7 @@ def test_menu_toolbar_keys_help_and_command_are_told_apart(plugin):
     settle()
     on_toolbar = layouts in p.toolbar.actions()
     assert counted(keeper).get(("", "背景地図", "TOOLBAR" if on_toolbar else "OTHER")) == 1
-    # A key, a help link, 文で操作.
+    # A key, a help link, ミカゲと話す.
     keeper.counter.take()
     p.shortcuts.actions["ShowCatalog"].trigger()
     p.run_menu_entry("撮像計画")

@@ -1,12 +1,14 @@
 """
-「データに質問」 (ui/data_chat_dock.py, qgis_io/data_chat_io.py) with a model of
-the test's own and Esri tables in memory: the entry only while the task has
-a model, a question answered (the model's SQL run by 「データ分析」's engine,
-records deleted left out and the place joined on the server's side, the
-sentence checked against the table), a sentence that does not match
-replaced, an SQL that fails given back once, a question the tables cannot
-answer, a follow-up, 「データ分析で開く」, the audit log's line, 文で操作's
-field handing a question over, and a model on a server.
+The questions of 「ミカゲと話す」 (ui/chat_dock.py, qgis_io/data_chat_io.py;
+データに質問 until 2026-11-28) with a model of the test's own and Esri tables
+in memory: the entry only while the task has a model, a question answered
+(the model's SQL run by 「データ分析」's engine, records deleted left out and
+the place joined on the server's side, the sentence checked against the
+table), a sentence that does not match replaced, an SQL that fails given
+back once, a question the tables cannot answer, a follow-up, the records an
+answer lists opened (its button, 「2件目を開いて」), 「データ分析で開く」, the
+audit log's line, the older settings read as the chat, and a model on a
+server.
 """
 import json
 import os
@@ -27,7 +29,7 @@ from mikage.core import audit  # noqa: E402
 from mikage.core.esri import EsriClient, EsriError  # noqa: E402
 from mikage.core.text_assist import TextModel  # noqa: E402
 from mikage.features.analysis import Analysis  # noqa: E402
-from mikage.features.command import Command  # noqa: E402
+from mikage.features.chat import Chat  # noqa: E402
 from mikage.qgis_io import settings  # noqa: E402
 from mikage.qgis_io.ai_runtime import AiError  # noqa: E402
 from mikage.qgis_io.context import PluginContext  # noqa: E402
@@ -36,6 +38,7 @@ from mikage.tests.fake_esri import FakeEsri, FakeLayer  # noqa: E402
 from mikage.tests.feature_harness import small_plugin  # noqa: E402
 from mikage.tests.qgis_fakes import FakeIface, wait_for  # noqa: E402
 from mikage.tests.test_qgis_text_assist import FakeWriter  # noqa: E402
+from mikage.ui.chat_dock import AnswerCard, NoteCard, Said  # noqa: E402
 
 OBS = "https://example.com/arcgis/rest/services/Obs/FeatureServer/0"
 AREAS = "https://example.com/arcgis/rest/services/Places/FeatureServer/0"
@@ -63,7 +66,7 @@ def plugin(tmp_path, monkeypatch):
     QgsProject.instance().clear()
     QgsSettings().remove("mikage")
     settings._set("local_gpkg", str(tmp_path / "local.gpkg"))
-    _config(tmp_path, {"models": {"pc": "models/qwen"}, "tasks": {"dataChat": "pc"}})
+    _config(tmp_path, {"models": {"pc": "models/qwen"}, "tasks": {"chat": "pc"}})
     fake = FakeEsri()
     obs = fake.add_layer(OBS, FakeLayer({"OBS_ID": S, "IMAGE_ID": S, "IMAGE_TIME": D, "OBJECT_ID": S, "KIND": S, "ACTIVITY": S,
                                          "CONFIDENCE": S, "OBSERVER": S, "CREATED_AT": D, "UPDATED_AT": D, "DELETED_AT": D,
@@ -80,7 +83,7 @@ def plugin(tmp_path, monkeypatch):
                  "DELETED_AT": _ms(deleted) if deleted else None, "NAMED_AREA_OBJECTID": place}, {"x": 135.3, "y": 35.5})
     iface = FakeIface()
     monkeypatch.setattr(PluginContext, "esri", lambda self: EsriClient(fake))
-    p = small_plugin(iface, Analysis, Command)
+    p = small_plugin(iface, Analysis, Chat)
     p.initGui()
     for dock in p.docks.values():
         dock.hide()
@@ -106,7 +109,7 @@ def _model(p, replies, params=9.0):
 
     a._writer_of = writer_of
     a._folder_of = lambda source, base, cancelled=lambda: False: os.path.join(os.path.dirname(base), source)
-    assert wait_for(lambda: a.has("dataChat"))
+    assert wait_for(lambda: a.has("chat"))
     return loaded
 
 
@@ -123,10 +126,10 @@ def records(monkeypatch):
 
 
 def _ask(dock, question):
-    before = len(dock.cards)
-    assert dock.ask(question)
-    assert wait_for(lambda: len(dock.cards) > before and not dock.chat.busy)
-    return dock.cards[0].answer
+    before = len(dock.cards(AnswerCard))
+    assert dock.send(question)
+    assert wait_for(lambda: len(dock.cards(AnswerCard)) > before and not dock.busy)
+    return dock.last(AnswerCard).answer
 
 
 def _queries(fake, url):
@@ -135,27 +138,31 @@ def _queries(fake, url):
 
 def test_the_entry_shows_only_while_the_task_has_a_model(plugin):
     p, _iface, _fake, tmp_path = plugin
-    assert "データに質問" not in p.hidden_entries and p.allows("データに質問")
-    _config(tmp_path, {"models": {"pc": "models/qwen"}, "tasks": {"command": "pc"}})
+    assert "ミカゲと話す" not in p.hidden_entries and p.allows("ミカゲと話す")
+    _config(tmp_path, {"models": {"pc": "models/qwen"}, "tasks": {"tidyNote": "pc"}})
     p.context.reload()
-    assert wait_for(lambda: "データに質問" in p.hidden_entries)
+    assert wait_for(lambda: "ミカゲと話す" in p.hidden_entries)
     dock = p.docks["SatObsDataChat"]
-    assert not dock.chat.offered and not dock.field.isEnabled() and not dock.ask("何件？")
-    assert p.open_data_chat("何件？") is None
+    assert not dock.chat.offered and not dock.field.isEnabled() and not dock.send("何件？")
+    assert p.open_chat("何件？") is None
     # The person turned the generative AI off: the same.
+    _config(tmp_path, {"models": {"pc": "models/qwen"}, "tasks": {"chat": "pc"}})
+    p.context.reload()
+    assert wait_for(lambda: "ミカゲと話す" not in p.hidden_entries)
+    p.context.text_assist.set_enabled(False)
+    assert "ミカゲと話す" in p.hidden_entries
+    p.context.text_assist.set_enabled(True)
+    assert "ミカゲと話す" not in p.hidden_entries
+    # The older データに質問 alone: read as the chat.
     _config(tmp_path, {"models": {"pc": "models/qwen"}, "tasks": {"dataChat": "pc"}})
     p.context.reload()
-    assert wait_for(lambda: "データに質問" not in p.hidden_entries)
-    p.context.text_assist.set_enabled(False)
-    assert "データに質問" in p.hidden_entries
-    p.context.text_assist.set_enabled(True)
-    assert "データに質問" not in p.hidden_entries
+    assert wait_for(lambda: "ミカゲと話す" not in p.hidden_entries) and dock.chat.offered
 
 
 def test_a_question_answered_from_the_tables(plugin, records):
     p, _iface, fake, _tmp = plugin
     loaded = _model(p, [SQL, "先月の舞鶴の確定の記録は 2 件でした。"])
-    dock = p.open_data_chat()
+    dock = p.open_chat()
     answer = _ask(dock, "先月の舞鶴の記録で、確定は何件？")
     assert answer.refused == "" and answer.by_model and answer.sentence == "先月の舞鶴の確定の記録は 2 件でした。"
     # Two records: the one deleted and the 推定 one left out, 呉's and November's too.
@@ -180,8 +187,9 @@ def test_a_question_answered_from_the_tables(plugin, records):
     answer_conversation, answer_tokens, _one = loaded[0].asked[1]
     assert answer_tokens == 240 and "結果の表（1 行）:\n件数\n2" not in answer_conversation[1]["content"]
     assert answer_conversation[1]["content"].endswith("COUNT(*)\n2")
-    # The card: the sentence, the table (件数), how it was found.
-    card = dock.cards[0]
+    # The question in the chat, then the card: the sentence, the table (件数), how it was found.
+    card = dock.last(AnswerCard)
+    assert isinstance(dock.items[-2], Said) and dock.items[-2].label.text() == "先月の舞鶴の記録で、確定は何件？"
     assert card.sentence.text() == answer.sentence and "生成 AI（表と照合済み）" in card.how.text()
     assert card.table.horizontalHeaderItem(0).text() == "件数" and card.table.item(0, 0).text() == "2"
     assert "SQL（生成 AI が書いたもの）" in card.detail.toPlainText() and "読んだ表: TBL_OBSERVATION" in card.detail.toPlainText()
@@ -195,17 +203,17 @@ def test_a_question_answered_from_the_tables(plugin, records):
 def test_a_sentence_that_does_not_match_the_table_is_replaced(plugin):
     p, _iface, _fake, _tmp = plugin
     _model(p, [SQL, "先月の舞鶴の確定の記録は 5 件でした。"])
-    dock = p.open_data_chat()
+    dock = p.open_chat()
     answer = _ask(dock, "先月の舞鶴の記録で、確定は何件？")
     assert not answer.by_model and answer.sentence == "2 件でした。"
     assert any("表にない数 5" in n for n in answer.notes)
-    assert "プログラム" in dock.cards[0].how.text()
+    assert "プログラム" in dock.last(AnswerCard).how.text()
 
 
 def test_an_sql_that_fails_is_given_back_once(plugin):
     p, _iface, _fake, _tmp = plugin
     loaded = _model(p, ["SELECT NOPE FROM TBL_OBSERVATION", "SELECT COUNT(*) FROM TBL_OBSERVATION", "4 件でした。"])
-    dock = p.open_data_chat()
+    dock = p.open_chat()
     answer = _ask(dock, "記録は何件？")
     assert answer.result.rows == [(5,)] and not answer.by_model and answer.sentence == "5 件でした。"
     assert any("1 回目の SQL がエラー" in n and "NOPE" in n for n in answer.notes)
@@ -215,16 +223,16 @@ def test_an_sql_that_fails_is_given_back_once(plugin):
     _model(p, ["SELECT * FROM TBL_SATELLITE_OUTAGE", "SELECT * FROM TBL_SATELLITE_OUTAGE"])
     answer = _ask(dock, "障害中の衛星は？")
     assert answer.result is None and "つながっていない表: TBL_SATELLITE_OUTAGE" in answer.refused
-    assert dock.cards[0].table is None
+    assert dock.last(AnswerCard).table is None
 
 
 def test_a_question_the_tables_cannot_answer(plugin, records):
     p, _iface, _fake, _tmp = plugin
     _model(p, ["NG: 天気のデータはつながっていません"])
-    dock = p.open_data_chat()
+    dock = p.open_chat()
     answer = _ask(dock, "明日の舞鶴の天気は？")
     assert answer.result is None and answer.refused == "この質問には表から答えられない（生成 AI: 天気のデータはつながっていません）"
-    assert dock.cards[0].sentence.text() == answer.refused and not dock.cards[0].buttons
+    assert dock.last(AnswerCard).sentence.text() == answer.refused and not dock.last(AnswerCard).buttons
     assert records[-1][3]["result"] == "error" and records[-1][3]["detail"]["refused"] == answer.refused
 
 
@@ -232,7 +240,7 @@ def test_a_follow_up_and_a_new_conversation(plugin):
     p, _iface, _fake, _tmp = plugin
     second = SQL.replace("'舞鶴'", "'呉'")
     loaded = _model(p, [SQL, "2 件でした。", second, "1 件でした。", SQL, "2 件でした。"])
-    dock = p.open_data_chat()
+    dock = p.open_chat()
     _ask(dock, "先月の舞鶴の記録で、確定は何件？")
     answer = _ask(dock, "では呉は？")
     assert answer.result.rows == [(1,)]
@@ -248,12 +256,14 @@ def test_a_follow_up_and_a_new_conversation(plugin):
 
 def test_the_table_opened_in_data_analysis_saved_and_copied(plugin, tmp_path):
     p, _iface, _fake, _tmp = plugin
-    _model(p, ["SELECT PLACE_NAME, KIND FROM TBL_OBSERVATION WHERE IMAGE_TIME < '2026-11-01' ORDER BY PLACE_NAME, KIND",
-               "呉と舞鶴に記録がありました。"])
-    dock = p.open_data_chat()
+    # No question (no 「？」): the model asked for an operation first (「なし」), then the tables.
+    loaded = _model(p, ["操作: なし", "SELECT PLACE_NAME, KIND FROM TBL_OBSERVATION WHERE IMAGE_TIME < '2026-11-01' ORDER BY PLACE_NAME, KIND",
+                        "呉と舞鶴に記録がありました。"])
+    dock = p.open_chat()
     answer = _ask(dock, "10 月までの記録の地名と種別")
+    assert loaded[0].keeps == [False, True, False] and loaded[0].asked[0][0][-1]["content"] == "依頼: 10 月までの記録の地名と種別"
     assert answer.result.columns == ["PLACE_NAME", "KIND"] and len(answer.result.rows) == 4
-    card = dock.cards[0]
+    card = dock.last(AnswerCard)
     assert [card.table.horizontalHeaderItem(i).text() for i in range(2)] == ["地名", "種別のパス"]
     card.buttons["analysis"].click()
     analysis = p.docks["SatObsAnalysis"]
@@ -269,25 +279,33 @@ def test_the_table_opened_in_data_analysis_saved_and_copied(plugin, tmp_path):
     assert QApplication.clipboard().text().splitlines()[0] == "PLACE_NAME\tKIND"
 
 
-def test_the_command_field_hands_a_question_over(plugin):
-    p, iface, _fake, _tmp = plugin
-    _model(p, [SQL, "2 件でした。"])
-    box = p.command_box
-    # 文で操作 has no model here: the field shows for データに質問.
-    assert box.offered and box.toolbar.isVisibleTo(iface.mainWindow())
-    assert "先月の舞鶴の記録は何件？" in box.field.placeholderText()
-    box.submit("先月の舞鶴の記録で、確定は何件？")
-    dock = p.docks["SatObsDataChat"]
-    assert dock.isVisible() and wait_for(lambda: len(dock.cards) == 1 and not dock.chat.busy)
-    assert dock.cards[0].answer.result.rows == [(2,)] and box.field.text() == ""
+def test_the_records_an_answer_lists_open_from_it(plugin, monkeypatch):
+    """An answer listing 記録ID: 「記録を開く」 and 「2件目を開いて」 (no model) show them in 観測記録's form."""
+    p, _iface, _fake, _tmp = plugin
+    _model(p, ["SELECT OBS_ID, KIND FROM TBL_OBSERVATION WHERE PLACE_NAME = '舞鶴' ORDER BY OBS_ID", "4 件ありました。"])
+    dock = p.open_chat()
+    answer = _ask(dock, "舞鶴の記録を一覧で見せて？")
+    card = dock.last(AnswerCard)
+    assert card.shown.kind == "record" and card.shown.ids == ("o0", "o1", "o2", "o5") and "record" in card.buttons
+    opened = []
+    monkeypatch.setattr(p.feature(Chat), "open_records", lambda ids: opened.append(list(ids)) or f"記録を開いた: {ids[0]}")
+    card.buttons["record"].click()
+    assert opened == [["o0"]] and dock.last(NoteCard).text() == "記録を開いた: o0"
+    # A follow-up: the second of the list, no model asked.
+    asked = len(p.context.text_assist.writer.asked)
+    assert dock.send("2件目を開いて")
+    assert opened[-1] == ["o1"] and len(p.context.text_assist.writer.asked) == asked
+    # 「新しい話」 forgets the list: the same sentence goes to the model.
+    dock.new_conversation()
+    assert dock.shown is None and answer.result.rows
 
 
 def test_a_model_on_a_server(plugin, tmp_path):
     p, _iface, _fake, _tmp = plugin
-    _config(tmp_path, {"models": {"gpu": {"url": "https://llm.example.local/v1", "model": "qwen3.8-27b"}}, "tasks": {"dataChat": "gpu"}})
+    _config(tmp_path, {"models": {"gpu": {"url": "https://llm.example.local/v1", "model": "qwen3.8-27b"}}, "tasks": {"chat": "gpu"}})
     p.context.reload()
     a = p.context.text_assist
-    assert wait_for(lambda: a.on_server("dataChat"))
+    assert wait_for(lambda: a.on_server("chat"))
     gate = threading.Event()
     gate.set()
     made = []
@@ -298,12 +316,12 @@ def test_a_model_on_a_server(plugin, tmp_path):
 
     a._server_of = server_of
     a._folder_of = lambda *_a, **_k: pytest.fail("a server's model is not loaded")
-    dock = p.open_data_chat()
+    dock = p.open_chat()
     answer = _ask(dock, "先月の舞鶴の記録で、確定は何件？")
     assert answer.by_model and answer.result.rows == [(2,)]
     assert made[0].remote == "qwen3.8-27b" and made[0].on_server
     # Nothing is read ahead on this computer for a server.
-    assert not a.prime("dataChat", [{"role": "system", "content": "x"}])
+    assert not a.prime("chat", [{"role": "system", "content": "x"}])
 
 
 def test_the_server_writer_asks_and_reads_the_stream():

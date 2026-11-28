@@ -224,7 +224,7 @@ def where_of(catalog: CatalogConfig, types: FieldTypes, search: CatalogSearch,
         if len(sensors) == 1:
             parts.append(f"{f['sensor']} = {quote(sensors[0])}")
         elif sensors:
-            # Several (「ICEYE-X27、ASNARO-2」: 文で操作's SAR, or typed): any of them.
+            # Several (「ICEYE-X27、ASNARO-2」: ミカゲと話す's SAR, or typed): any of them.
             parts.append(f"{f['sensor']} IN ({', '.join(quote(s) for s in sensors)})")
     if f.get("systemRegistered"):
         parts += period("systemRegistered", search.system_registered_from, search.system_registered_to)

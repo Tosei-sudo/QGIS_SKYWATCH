@@ -1,8 +1,10 @@
 """
-文で操作 (command; tsudo 2026-11-21: 「生成AIに指示してある操作をするみたいなことをやれたらいいな…
-〇〇システムの〇〇日のオーダーファイルを出力してとか」, study → 「この方針で 17 操作すべて」).
+The operations of 「ミカゲと話す」 (core/chat.py; 文で操作 until 2026-11-28, tsudo
+2026-11-21: 「生成AIに指示してある操作をするみたいなことをやれたらいいな…
+〇〇システムの〇〇日のオーダーファイルを出力してとか」, study → 「この方針で 17 操作すべて」;
+its toolbar field abolished 2026-11-28: 「文で操作の機能は全廃しよう…」).
 
-A sentence typed in the toolbar's 「文で操作」 field is turned into one of a
+A sentence of the chat that asks for an operation is turned into one of a
 fixed list of operations (OPERATIONS): which screen to open and what to put
 in it. The model only chooses the operation: its words matched first (one
 operation whose words the sentence holds: no model), else the model is
@@ -24,7 +26,7 @@ model) all 画像検索 with 「SAR/レーダーか光学か」 in its line (「
 took 「昨日のレーダー画像を地図の範囲で」 for 衛星パス).
 
 This module is pure Python: the operations, the prompt and the readers.
-The card and the running are ui/text_command.py and features/command.py.
+The card and the running are ui/chat_operation.py and features/chat.py.
 """
 from __future__ import annotations
 
@@ -47,7 +49,7 @@ NONE = "なし"
 
 @dataclass(frozen=True)
 class Operation:
-    """One thing 文で操作 can do: what the model is told of it, the words that name it and what it reads."""
+    """One thing ミカゲと話す can do: what the model is told of it, the words that name it and what it reads."""
     key: str
     #: Its name in the model's list (short, one of a kind).
     name: str

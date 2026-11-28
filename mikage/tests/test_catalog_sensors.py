@@ -2,7 +2,7 @@
 画像カタログ's sensors by satellite and kind (core/catalog/sensors.py; tsudo 2026-11-25: 「画像検索の文から生成AIで
 やるけん、衛星の種別も拾えないかな」): the センサー box's several sensors, a sensor's satellites and kind (the
 satellite catalog's kind attribute, its other names, its series), what the card's words name in a catalog, and what
-文で操作's 画像検索 reads from a sentence (by code, as its other values).
+ミカゲと話す's 画像検索 (文で操作's until 2026-11-28) reads from a sentence (by code, as its other values).
 """
 from datetime import date
 from types import SimpleNamespace as NS

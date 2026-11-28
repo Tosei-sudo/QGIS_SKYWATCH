@@ -220,7 +220,7 @@ class FirstSetupDialog(QDialog):
         self.notation.setCurrentIndex(max(0, self.notation.findData(cursor_notation())))
         form.addRow(tr("カーソル位置の表記"), self.notation)
         # 生成 AI (tsudo 2026-11-21: 「生成AIの機能はオプトインにしよう」): off until turned on here.
-        self.ai = QCheckBox(tr("使う（文章の手伝い・文で操作。この PC で動く生成 AI）"))
+        self.ai = QCheckBox(tr("使う（文章の手伝い・ミカゲと話す。この PC で動く生成 AI）"))
         self.ai.setChecked(text_assist is not None and text_assist.enabled)
         self._ai_offered()
         if text_assist is not None:
@@ -252,7 +252,7 @@ class FirstSetupDialog(QDialog):
         """「生成 AI の機能」 can be turned on only when the settings give a task a model."""
         configured = self.text_assist is not None and self.text_assist.configured
         self.ai.setEnabled(configured)
-        self.ai.setToolTip(tr("使うと、備考を整える・依頼文から下書き・文で操作などのボタンが出る（モデルは使うときに読み込む）")
+        self.ai.setToolTip(tr("使うと、備考を整える・依頼文から下書き・ミカゲと話すなどが出る（モデルは使うときに読み込む）")
                            if configured else tr("生成 AI のモデルが未設定（管理者に連絡: textAssist）［E703］"))
 
     def _current_names(self) -> list[str]:

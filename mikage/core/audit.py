@@ -23,13 +23,14 @@ What is recorded (KINDS):
   addresses, the subject, how many rows, the text's length and SHA-256
 - receive (2026-11-15): shapes received from outside (AutoMap, a link, a
   program; ui/shape_receiver.py): who sent, how many, the layer
-- command (2026-11-21): an operation of 文で操作 done from its card
-  (ui/text_command.py): the sentence, the operation, how it was chosen
-  (words, the model, the person) and the values it was done with
-- chat (2026-11-24): a question of データに質問 (ui/data_chat_dock.py): the
-  question, the SQL run, the tables read and how many rows each gave, the
-  model, whether the sentence shown is the model's or the program's (never
-  what the rows hold)
+- command (2026-11-21): an operation of 「ミカゲと話す」 done from its card
+  (ui/chat_operation.py; 文で操作's until 2026-11-28, the same kind kept):
+  the sentence, the operation, how it was chosen (words, the model, the
+  person) and the values it was done with
+- chat (2026-11-24): a question of 「ミカゲと話す」 (ui/chat_dock.py; データに
+  質問 until 2026-11-28): the question, the SQL run, the tables read and how
+  many rows each gave, the model, whether the sentence shown is the model's
+  or the program's (never what the rows hold)
 - error (2026-11-11, tsudo 「エラーログって取れる？」): what went wrong — the
   plugin's warnings and errors in QGIS's log (with their traceback), tasks
   that failed, Python errors raised in the plugin's code, warnings and errors
@@ -89,8 +90,8 @@ KINDS: dict[str, str] = {
     "copy": "クリップボードへコピー",
     "mail": "メールの作成",
     "receive": "外部からの図形",
-    "command": "文で操作",
-    "chat": "データに質問",
+    "command": "ミカゲと話すの操作（文で操作）",
+    "chat": "ミカゲと話すの質問（データに質問）",
     "error": "エラー",
 }
 FORMATS = ("jsonl", "csv")
