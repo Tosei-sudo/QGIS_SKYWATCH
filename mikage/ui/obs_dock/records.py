@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Any, Callable, Optional
 
 from qgis.core import QgsRectangle
-from qgis.PyQt.QtWidgets import QMessageBox, QWidget
+from qgis.PyQt.QtWidgets import QMessageBox
 
 from ...core.obs.api import (
     CheckedArea, ObservationBook, CarryOver, ObjectFlow, is_mine, Observation, class_by_name, find, kind_of, member_names, path_of,
@@ -37,16 +37,10 @@ class RecordsPart:
         clicked = box.clickedButton()
         return False if clicked is everything else True if clicked is deleted else None
 
-    def _more_toggled(self, on: bool) -> None:
-        """「詳細」 opened or closed: its parts with it (less what the roles in use do not have)."""
-        for w in self.more.findChildren(QWidget):
-            w.setVisible(on)
-        self.roles_changed()
-
     def roles_changed(self) -> None:
         """「この PC の記録を消去…」 (cannot be undone): the administrators' (core/roles.py); 「分類体系の編集…」 as its dock."""
-        self.clear_button.setVisible(self.more.isChecked() and self.allows("observations.clear"))
-        self.taxonomy_button.setVisible(self.more.isChecked() and self.edit_taxonomy is not None and self.allows("分類体系の編集"))
+        self.clear_button.setVisible(self.allows("observations.clear"))
+        self.taxonomy_button.setVisible(self.edit_taxonomy is not None and self.allows("分類体系の編集"))
 
     def clear_local(self, deleted_only: Optional[bool] = None) -> Optional[tuple[int, int]]:
         """Removes the local records for good, after asking (`deleted_only` given: without asking)."""
@@ -113,7 +107,7 @@ class RecordsPart:
         the records around the images were).
         """
         if object_id != self.chosen:
-            self.flow_more.setChecked(False)
+            self.flow_more.set_open(False)
         self.chosen = object_id or None
         book = self.book
         if book is not None and book.scoped and self.chosen and (id(book), self.chosen) not in self._whole_flows:
@@ -180,7 +174,7 @@ class RecordsPart:
 
     def _render_rekind(self) -> None:
         """「このモノの詳細 ▸ 種別」's levels, for the kind in its field (drawn while the box is open)."""
-        if self.book is None or not self.flow_more.isChecked():
+        if self.book is None or not self.flow_more.is_open():
             self.rekind_levels.clear()
             return
         self.rekind_levels.render(self._once("taxonomy", self.book.taxonomy), self.rekind_input.text(), keep=True)
@@ -194,7 +188,7 @@ class RecordsPart:
         labels = self.flow_member.parentWidget().layout().labelForField(self.flow_member) if self.flow_member.parentWidget() else None
         for w in (self.flow_member, labels):
             if w is not None:
-                w.setVisible(hit is not None and self.flow_more.isChecked())
+                w.setVisible(hit is not None)
         self._flow_member = hit
         if hit is None:
             return

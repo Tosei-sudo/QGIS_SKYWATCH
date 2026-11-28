@@ -261,10 +261,10 @@ def timed_text_fields(catalog: CatalogConfig, types: FieldTypes, search: Catalog
 
 
 def time_text(value: Any) -> str:
-    """A date-like value in local time (`2026/10/01 10:23`), or the text as it is."""
+    """A date-like value in local time (`2026-10-01 10:23`, as every screen writes it: tsudo 2026-11-28), or the text as it is."""
     if value is None or value == "":
         return ""
     t = time_of(value)
     if math.isnan(t):
         return str(value)
-    return datetime.fromtimestamp(t / 1000).strftime("%Y/%m/%d %H:%M")
+    return datetime.fromtimestamp(t / 1000).strftime("%Y-%m-%d %H:%M")

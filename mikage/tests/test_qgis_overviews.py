@@ -636,7 +636,7 @@ def test_settings_dialog_shows_the_temp_folder(tmp_path, monkeypatch):
     try:
         dialog = SettingsDialog(PluginContext())
         text = dialog.cache.text()
-        assert text.startswith(f"一時フォルダ {folder}（1 件、1.0 MB。QGIS を閉じると消去）\nキャッシュ {tmp_path / 'cache'}（0 件")
+        assert text.startswith(f"一時フォルダ {folder}（1 件、1.0 MB。QGIS を閉じると消去）\n控え {tmp_path / 'cache'}（0 件")
         dialog.reject()
         overviews_io.current = OverviewOptions()
         dialog = SettingsDialog(PluginContext())

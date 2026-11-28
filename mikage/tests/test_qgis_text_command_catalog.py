@@ -58,7 +58,7 @@ def test_the_kind_said_searches_the_sensors_of_that_kind(plugin, records):
     assert card.sensors_note.text() == "→ RADAR 1・RADAR 2（2 センサー）。種別のわからない 1 は含めない"
     assert "OTHER" in card.sensors_note.toolTip()
     card.run_button.click()
-    assert not card.isVisible() and dock.isVisible() and dock.more.isChecked()
+    assert not card.isVisible() and dock.isVisible() and dock.more.is_open()
     assert dock.sensor_box.currentText() == "RADAR 1、RADAR 2"
     assert wait_for(lambda: dock.search_button.isEnabled() and "SENSOR IN ('RADAR 1', 'RADAR 2')" in asked_where(fake))
     assert box.message.endswith("・SAR（2 センサー） を検索")

@@ -143,7 +143,7 @@ COMMAND_PROMPT = (
 )
 #: 文で操作's operations (core/text_command.OPERATIONS: key → its name in the model's list), for the settings' `words`.
 COMMAND_NAMES = {
-    "planFiles": "計画ファイル出力", "schedule": "撮像予定", "resultImport": "結果ファイル取込", "follow": "照合", "quotas": "年間上限",
+    "planFiles": "計画ファイル出力", "schedule": "撮像予定", "resultImport": "結果ファイルの取り込み", "follow": "照合", "quotas": "年間上限",
     "catalog": "画像検索", "passes": "衛星パス", "placeSchedule": "地点の撮像予定", "imagingPlan": "撮像計画", "watch": "新着の監視",
     "obsExport": "観測記録の書き出し", "handover": "引き継ぎメモ", "alert": "通報", "newRequest": "依頼の作成", "outage": "障害情報",
     "jump": "移動", "openScreen": "画面を開く",

@@ -12,7 +12,7 @@ from qgis.PyQt.QtCore import Qt
 from ...core.plan.api import Opportunity
 from ...core.plan.api import cover_plan
 from ...core.plan.api import (
-    NO_OPPORTUNITY, cover_text, cover_title, describe_problems, first_only, is_old_tle, js_round, local_text, mode_facts,
+    NO_OPPORTUNITY, cover_text, cover_title, describe_problems, first_only, is_old_tle, js_round, local_text, mode_facts, short_text,
     percent, side_text, sorted_ops, summary_all, summary_cover,
 )
 from ...core.plan.api import (
@@ -251,7 +251,7 @@ class ResultsPart:
         target = plan["targets"][op.target]
         # A moving target: the circle its guessed place may be off by, at the moment of the pass.
         circle = [*target.points, target.points[0]] if target.uncertainty is not None and len(target.points) > 2 else None
-        self.overlay.chosen(shapes, f"{satellite_label(sat)} {local_text(op.time)[5:]}", steps, circle)
+        self.overlay.chosen(shapes, f"{satellite_label(sat)} {short_text(op.time)}", steps, circle)
         self.canvas.refresh()
 
     def zoom_to_chosen(self) -> None:

@@ -64,7 +64,7 @@ from ..qgis_io import map_tools
 from ..qgis_io.geometry import from_wgs84, multipolygon_of, polygon_of, shape_of, to_wgs84
 from ..qgis_io.request_io import load_schema
 from ..qgis_io.tasks import run_task
-from .docks import PluginDock, ask_no, plain_label, plain_tip
+from .docks import PluginDock, ask_no, name_cancel, plain_label, plain_tip
 from .emphasis import emphasize
 from .fit import fit_text
 from .flow_layout import FlowLayout
@@ -1121,6 +1121,7 @@ class UnrequestedDialog(QDialog):
         self.message = plain_label(QLabel())
         form.addRow(self.message)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        name_cancel(buttons)
         buttons.accepted.connect(self.save)
         buttons.rejected.connect(self.reject)
         form.addRow(buttons)

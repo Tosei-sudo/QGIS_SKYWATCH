@@ -145,7 +145,7 @@ class AlertFeed(QWidget):
         if s is None:
             self.status.setText(self.tr("通報の表が未設定のため使えない（管理者に連絡: alertReports.table）［E703］"))
         elif s.live.seconds <= 0:
-            self.status.setText(self.tr("自動更新なし（alertReports.live）。「今すぐ更新」で読む"))
+            self.status.setText(self.tr("自動更新なし（組織の設定）。「今すぐ更新」で読む"))
         else:
             self.status.setText("")
         if self.active:

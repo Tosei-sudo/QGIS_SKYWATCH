@@ -226,13 +226,13 @@ def test_clears_the_local_records_after_asking(plugin, monkeypatch):
         dock.kind_input.setText("船舶")
         dock.submit()
     dock.remove([o for o in book.living() if o.object_name == "しらせ"])
-    dock.more.setChecked(True)
+    dock.more.set_open(True)
     # Cannot be undone: the administrators' only (担当「管理者」 with the records'), not shown otherwise.
     assert not dock.clear_button.isVisible()
     p.role_keeper.choose(["OBSERVER", "ADMIN"])
     assert dock.clear_button.isVisible() and dock.clear_button.isEnabled()
-    dock.more.setChecked(False)
-    dock.more.setChecked(True)
+    dock.more.set_open(False)
+    dock.more.set_open(True)
     assert dock.clear_button.isVisible()
     answers = [None, True, False]
     asked = []
@@ -937,7 +937,7 @@ def test_a_things_kind_is_chosen_in_its_flow_level_by_level_as_in_the_form(plugi
     levels = dock.rekind_levels
     # Drawn once 「このモノの詳細」 is opened, the thing's kind pressed.
     assert not levels.buttons()
-    dock.flow_more.setChecked(True)
+    dock.flow_more.set_open(True)
     APP.processEvents()
     assert dock.rekind_input.isVisible() and levels.isVisible()
     assert [(name, chosen) for name, _choices, chosen in levels.drawn] == [("大分類", "船舶"), ("種別", "")]
@@ -963,11 +963,11 @@ def test_a_things_kind_is_chosen_in_its_flow_level_by_level_as_in_the_form(plugi
     assert {o.kind for o in book.living() if o.object_name == "船B"} == {"航空機"}
     # Another thing's flow (「このモノの詳細」 folded again): its kind, pressed.
     _flow_button(dock.table, [dock.table.item(r, 0).text() for r in range(dock.table.rowCount())].index("船B")).click()
-    assert not dock.flow_more.isChecked() and dock.rekind_input.text() == "航空機"
-    dock.flow_more.setChecked(True)
+    assert not dock.flow_more.is_open() and dock.rekind_input.text() == "航空機"
+    dock.flow_more.set_open(True)
     assert levels.drawn[0][2] == "航空機" and [b.isChecked() for b in levels.buttons() if b.text() == "航空機"] == [True]
     # Folded, its rows hide again (only its own rows are shown or hidden: a level's drop-down is never opened by it).
-    dock.flow_more.setChecked(False)
+    dock.flow_more.set_open(False)
     assert not dock.rekind_input.isVisible() and not levels.isVisible()
 
 
@@ -1130,7 +1130,7 @@ def test_edits_the_classification_as_a_tree(plugin, tmp_path):
     editor._delete_key()
     assert editor._item_of("航空機 > 補助艦") is None and dock.book.living()[0].kind == "航空機"
     # 「諸元の項目」: one added and saved.
-    editor.fields_box.setChecked(True)
+    editor.fields_box.set_open(True)
     editor._add_field()
     editor.save_fields()
     assert dock.book.spec_fields[-1].name == "項目16" and dock.status.text() == "諸元の項目 16 件を設定"
@@ -1270,7 +1270,7 @@ def test_the_lists_are_filtered_by_a_top_class(plugin):
     assert names() == ["あおば", "はやて", "みずほ"] and combo.currentData() == "" and dock.count_label.text() == "この画像 3 件"
     # The classes are edited in 「分類体系の編集」, opened from 「詳細」 (at the class shown).
     dock.filter_root("船舶")
-    dock.more.setChecked(True)
+    dock.more.set_open(True)
     assert dock.taxonomy_button.isVisible() and dock.taxonomy_button.text() == "分類体系の編集…"
     editor.hide()
     dock.taxonomy_button.click()
@@ -1554,7 +1554,7 @@ def test_with_no_image_chosen_only_a_note_is_shown_and_the_records_are_not_read(
 
 
 def test_what_uses_every_record_reads_them_when_none_is_chosen(bare):
-    """エクスポート, 分類体系, scripts…: the records not read (no image chosen) are read for them, then they go on."""
+    """書き出し, 分類体系, scripts…: the records not read (no image chosen) are read for them, then they go on."""
     p, iface, dock, tmp_path = bare
     dock.list_catalog_images([_listed("IMG1", 1)])
     dock.set_active(True)
@@ -1565,7 +1565,7 @@ def test_what_uses_every_record_reads_them_when_none_is_chosen(bare):
     dock._unlist()
     dock.reset_stores()  # as in a later session: the store's records not read
     assert _idle(dock) and not dock.book.loaded
-    # The local store reads at once: エクスポート counts them.
+    # The local store reads at once: 書き出し counts them.
     export = dock.open_export()
     assert dock.book.loaded and export.count_label.text() == "該当する記録 2 件"
     export.close()
@@ -1605,7 +1605,7 @@ def test_an_esri_store_is_not_asked_until_an_image_is_chosen(bare):
     asked = queries()
     APP.processEvents()
     assert _idle(dock) and not dock.book.loaded and queries() == asked
-    # エクスポート: read in a task, counted once read (a shared store: from today by default, so this image's period here).
+    # 書き出し: read in a task, counted once read (a shared store: from today by default, so this image's period here).
     export = dock.open_export()
     export.start_edit.setDateTime(QDateTime.fromMSecsSinceEpoch(ms(1) - 3_600_000))
     assert export.count_label.text() in ("観測記録を取得中…", "該当する記録 1 件")

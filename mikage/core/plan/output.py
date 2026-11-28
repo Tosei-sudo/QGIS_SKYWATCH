@@ -33,9 +33,17 @@ def js_number(v: float) -> str:
 
 
 def local_text(ms: float, seconds: bool = False) -> str:
-    """A time in local time, `2026/10/11 10:23`."""
+    """
+    A time in local time: on the screens `2026-10-11 10:23` (as every screen writes it, tsudo 2026-11-28);
+    `seconds`, the plan's CSV file's `2026/10/11 10:23:45` (the file as it was).
+    """
     d = datetime.fromtimestamp(ms / 1000)
-    return d.strftime("%Y/%m/%d %H:%M:%S" if seconds else "%Y/%m/%d %H:%M")
+    return d.strftime("%Y/%m/%d %H:%M:%S" if seconds else "%Y-%m-%d %H:%M")
+
+
+def short_text(ms: float) -> str:
+    """A time in local time where room is short, `10/11 10:23`."""
+    return datetime.fromtimestamp(ms / 1000).strftime("%m/%d %H:%M")
 
 
 def utc_text(ms: float) -> str:

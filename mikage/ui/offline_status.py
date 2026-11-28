@@ -26,7 +26,7 @@ from ..core.offline_upload import upload_all
 from ..qgis_io import settings
 from ..qgis_io.network import qgis_transport
 from ..qgis_io.tasks import run_task
-from .docks import plain_tip
+from .docks import ask_no, plain_tip
 
 
 def tr(text: str) -> str:
@@ -61,11 +61,8 @@ def ask_upload(parent: Optional[QWidget], work: OfflineWork, back: bool) -> str:
 
 
 def ask_discard(parent: Optional[QWidget], work: OfflineWork) -> bool:
-    return QMessageBox.warning(
-        parent, tr("送信待ちの破棄"),
-        tr("次の送信待ちをすべて送らずに破棄（復元できない）") + "\n\n" + counts_text(work),
-        QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
-        QMessageBox.StandardButton.Cancel) == QMessageBox.StandardButton.Discard
+    return ask_no(parent, tr("送信待ちの破棄"), tr("次の送信待ちをすべて送らずに破棄（復元できない）") + "\n\n" + counts_text(work),
+                  yes=tr("破棄"))
 
 
 #: After a server comes back with nothing to send, the docks read again within this (ms), at a moment of

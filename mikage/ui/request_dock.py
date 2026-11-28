@@ -583,10 +583,10 @@ class RequestDock(PluginDock):
         """「この地域で撮像依頼…」 on the map: the areas there (the smallest first), one chosen when they overlap."""
         book = self.area_book()
         if book is None or self.store is None:
-            missing = [x for x, ok in ((self.tr("地名のレイヤー（namedAreas）"), book is not None),
-                                       (self.tr("撮像依頼の保存先（requestStores）"), self.store is not None)) if not ok]
-            self.iface.messageBar().pushInfo(self.tr("撮像依頼"), self.tr("地域から撮像依頼を作れない: {m} が未設定（管理者に連絡）").format(
-                m="・".join(missing)))
+            missing = [(x, key) for x, key, ok in ((self.tr("地名のレイヤー"), "namedAreas", book is not None),
+                                                   (self.tr("撮像依頼の保存先"), "requestStores", self.store is not None)) if not ok]
+            self.iface.messageBar().pushInfo(self.tr("撮像依頼"), self.tr("地域から撮像依頼を作れない: {m}がない（管理者に連絡: {keys}）").format(
+                m="・".join(x for x, _key in missing), keys="・".join(key for _x, key in missing)))
             return False
         if self.denied("requests.edit"):
             return False

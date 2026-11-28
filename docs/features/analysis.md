@@ -70,7 +70,7 @@ Python からは `api.analysis`（`tables`・`set_sql(text)`・`set_value(name, 
 例: 画像カタログのレイヤーのラベルを `"IMG_ID" || ' (' || mikage_record_count("IMG_ID") || ' 件)'`、ルールで `mikage_record_count("IMG_ID") = 0`（未記録の画像）。
 
 - 記録は観測記録ドックで選んでいる保存先から読んだもの（式のたびに Esri に問い合わせない。地図の描画中も待たない）
-- 地名は設定ファイルの `alertReports.namedAreas`（なければ `observationExports.namedAreas`）を、[地名・国の控え](observations.md#地名国の控え)から引く（通報・エクスポートと共通。レイヤー全体は読まない）。控えにない場所（1 度四方のマス）は最初 NULL で、裏でそのマスを読み終わると地図を描き直す（フィールド計算機・式で選択はもう一度実行）。どの地名にも入らないときも NULL
+- 地名は設定ファイルの `alertReports.namedAreas`（なければ `observationExports.namedAreas`）を、[地名・国の控え](observations.md#地名国の控え)から引く（通報・書き出しと共通。レイヤー全体は読まない）。控えにない場所（1 度四方のマス）は最初 NULL で、裏でそのマスを読み終わると地図を描き直す（フィールド計算機・式で選択はもう一度実行）。どの地名にも入らないときも NULL
 - レイヤーの CRS は式のコンテキストから読み、WGS 84 に直して比べる
 
 ## 測地線バッファ・正距方位での重心

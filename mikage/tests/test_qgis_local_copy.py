@@ -312,7 +312,7 @@ def test_settings_dialog_shows_the_copies(share):
         assert "（1 件、" in dialog.copies.text()
         local_copy_io.current = LocalCopyOptions(enabled=False)
         dialog._show_copies()
-        assert dialog.copies.text() == "使わない（設定ファイルの localCopy が false）" and not dialog.clear_copies.isEnabled()
+        assert dialog.copies.text() == "使わない（組織の設定）" and not dialog.clear_copies.isEnabled()
     finally:
         dialog.reject()
 

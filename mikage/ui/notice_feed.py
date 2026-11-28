@@ -378,7 +378,7 @@ class NoticeCard(QFrame):
             record = record_of(notice.feature, catalog.fields)
             rows += [(c.label, cell_text(record, c.key)) for c in list_columns(catalog) if c.key != "id"]
         else:
-            rows += [(self.tr("カタログ"), notice.catalog_label + self.tr("（設定ファイルになし）")),
+            rows += [(self.tr("カタログ"), notice.catalog_label + self.tr("（いまは使われていないカタログ）")),
                      (self.tr("撮像日時"), time_text(notice.acquired)), (self.tr("センサー"), notice.sensor)]
         text = _rows_html([(label, value) for label, value in rows if value])
         self.attributes.setText(text)

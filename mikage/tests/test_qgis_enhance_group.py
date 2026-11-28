@@ -181,7 +181,7 @@ def test_the_dock_corrects_every_raster_of_the_chosen_group(tmp_path):
         assert len(dock.layer_label.text().splitlines()) == 1
 
         # The histogram counts the group's rasters in view, added up.
-        dock.histogram_box.setChecked(True)
+        dock.histogram_box.set_open(True)
         dock.histograms = None
         assert dock.take_histogram() is not None and wait_for(lambda: dock.histograms is not None)
         assert sum(int(c.sum()) for c in dock.histograms["before"][:1]) == 3 * 40 * 50

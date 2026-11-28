@@ -29,6 +29,7 @@ from ..core.layer_templates import (
 from ..qgis_io import scratch_layer as store
 from ..qgis_io.scratch_layer import field_design_of, geometry_of, scratch_layer
 from . import last_inputs
+from .docks import CANCEL
 from .fit import fit_text
 
 #: The table's columns: key, heading, tooltip.
@@ -137,7 +138,7 @@ class NewLayerDialog(QDialog):
         layout.addWidget(self.note)
         buttons = QHBoxLayout()
         buttons.addStretch(1)
-        cancel = QPushButton(self.tr("キャンセル"))
+        cancel = QPushButton(CANCEL)
         cancel.clicked.connect(self.reject)
         buttons.addWidget(cancel)
         self.create_button = QPushButton(self.tr("作成"))

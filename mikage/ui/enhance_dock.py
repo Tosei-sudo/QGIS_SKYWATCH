@@ -58,6 +58,7 @@ from ..qgis_io.tasks import run_task
 from .colorize_box import ColorizeBox, paired_with, set_blend
 from .curve_editor import CurveEditor
 from .docks import PluginDock
+from .fold import Fold
 from .histogram_widget import HistogramPlot, StatsTable
 from .orient_row import OrientRow
 from .quick_pan import QuickPanBox
@@ -280,15 +281,13 @@ class EnhanceDock(PluginDock):
         form.addRow(self.extra_label)
         v.addWidget(adjust)
 
-        self.curve_box = QGroupBox(self.tr("トーンカーブ"))
-        self.curve_box.setCheckable(True)
-        self.curve_box.setChecked(False)
-        cv = QVBoxLayout(self.curve_box)
+        # 「トーンカーブ」 (ui/fold.py): the curve works open or closed; a preset with one opens it.
+        self.curve_box = Fold(self.tr("トーンカーブ"))
+        cv = QVBoxLayout(self.curve_box.body)
+        cv.setContentsMargins(0, 0, 0, 0)
         self.curve = CurveEditor()
         self.curve.changed.connect(self.changed)
         cv.addWidget(self.curve)
-        self.curve_box.toggled.connect(self.curve.setVisible)
-        self.curve.setVisible(False)
         v.addWidget(self.curve_box)
 
         buttons = QHBoxLayout()
@@ -302,10 +301,10 @@ class EnhanceDock(PluginDock):
 
         v.addWidget(self.colorize_box)
 
-        self.histogram_box = QGroupBox(self.tr("ヒストグラム（表示範囲）"))
-        self.histogram_box.setCheckable(True)
-        self.histogram_box.setChecked(False)
-        hv = QVBoxLayout(self.histogram_box)
+        # 「ヒストグラム」 (ui/fold.py): taken only while it is open.
+        self.histogram_box = Fold(self.tr("ヒストグラム（表示範囲）"))
+        hv = QVBoxLayout(self.histogram_box.body)
+        hv.setContentsMargins(0, 0, 0, 0)
         row = QHBoxLayout()
         self.histogram_after = QComboBox()
         self.histogram_after.addItem(self.tr("補正後"), True)
@@ -327,10 +326,7 @@ class EnhanceDock(PluginDock):
         self.histogram_note = QLabel()
         self.histogram_note.setWordWrap(True)
         hv.addWidget(self.histogram_note)
-        self._histogram_body = [self.histogram_after, self.histogram_log, self.histogram_plot, self.histogram_readout,
-                                self.histogram_table, self.histogram_note]
-        self.histogram_box.toggled.connect(self._histogram_toggled)
-        self._histogram_toggled(False)
+        self.histogram_box.opened.connect(self._histogram_toggled)
         v.addWidget(self.histogram_box)
         v.addStretch(1)
         #: The wheel scrolls the dock; a choice or slider takes it only once clicked.
@@ -687,8 +683,8 @@ class EnhanceDock(PluginDock):
                 self.dra_linked.setChecked(auto["linked"])
             curve = p.get("curve")
             self.curve.set_step(curve)
-            if curve is not None and not self.curve_box.isChecked():
-                self.curve_box.setChecked(True)
+            if curve is not None:
+                self.curve_box.set_open(True)
             self._extra = [op for op in p.ops if op["op"] not in SLIDER_OPS and op["op"] not in ("autoStretch", "curve")]
             names = {"whiteBalance": "ホワイトバランス", "stretch": "ストレッチ"}
             self.extra_label.setText(self.tr("スライダー外の補正: {s}").format(s="・".join(names.get(o["op"], o["op"]) for o in self._extra))
@@ -800,14 +796,12 @@ class EnhanceDock(PluginDock):
     # ---- histogram ----
 
     def _histogram_toggled(self, on: bool) -> None:
-        for w in self._histogram_body:
-            w.setVisible(on)
         if on:
             self.histogram_later()
 
     def histogram_later(self, *_args) -> None:
         """Takes the histogram again after a short pause (only while it is shown)."""
-        if self.histogram_box.isChecked():
+        if self.histogram_box.is_open():
             self._histogram_timer.start()
 
     def take_histogram(self):

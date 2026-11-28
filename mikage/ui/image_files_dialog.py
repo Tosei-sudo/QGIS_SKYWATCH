@@ -16,6 +16,7 @@ from qgis.PyQt.QtWidgets import (
     QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
+from .docks import name_cancel
 from .fit import fit_text
 
 
@@ -85,6 +86,7 @@ class ImageFilesDialog(QDialog):
         row.addWidget(self.counter)
         layout.addLayout(row)
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        name_cancel(self.buttons)
         self.buttons.button(QDialogButtonBox.StandardButton.Ok).setText(_tr("開く"))
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)

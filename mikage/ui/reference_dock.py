@@ -44,7 +44,7 @@ from ..core.reference_info import (
 from ..qgis_io import map_tools
 from ..qgis_io.geometry import from_wgs84, to_wgs84
 from ..qgis_io.tasks import run_task
-from .docks import PluginDock, ask_no, plain_label, plain_tip
+from .docks import PluginDock, ask_no, name_cancel, plain_label, plain_tip
 from .fit import fit_text
 from .flow_layout import FlowLayout
 from .list_views import column_menus
@@ -182,6 +182,7 @@ class ReferenceForm(QDialog):
         self.problem.setWordWrap(True)
         form.addRow(self.problem)
         self.button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        name_cancel(self.button_box)
         #: Saves the values (in a task): `saver(info, done, failed)`; the form closes only once saved.
         self.saver: Optional[Callable] = None
         self.button_box.accepted.connect(self._accept)
@@ -393,6 +394,7 @@ class ReferencePickDialog(QDialog):
         self.status = plain_label(QLabel())
         layout.addWidget(self.status)
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        name_cancel(self.buttons)
         self.buttons.button(QDialogButtonBox.StandardButton.Ok).setText(self.tr("紐付け"))
         self.create_button = self.buttons.addButton(self.tr("新しい参考情報…"), QDialogButtonBox.ButtonRole.ActionRole)
         #: Pressed: a new info made, then linked (the dock does it).

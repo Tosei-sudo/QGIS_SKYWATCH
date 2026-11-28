@@ -74,14 +74,14 @@ class AreasPart:
         """
         Searched over a period (its first and last days, "" open) and an area (its corners in WGS 84; `anywhere`:
         no area, not whatever area the dock had before), the dock in front (イベント's 「カタログで検索」).
-        `sensor` (文で操作's 画像検索): the センサー box's, 詳細条件 opened for it ("" every sensor; None: as it is).
+        `sensor` (文で操作's 画像検索): the センサー box's, 詳細条件 opened to show it ("" every sensor; None: as it is).
         """
         self.acquired_from.setText(start)
         self.acquired_to.setText(end)
         if sensor is not None:
             self.sensor_box.setEditText(sensor)
             if sensor:
-                self.more.setChecked(True)
+                self.more.set_open(True)
         if anywhere:
             self.area_box.setCurrentIndex(self.area_box.findData("none"))
         else:

@@ -150,7 +150,7 @@ class CloudDock(PluginDock):
     def describe(self) -> None:
         config = self.context.config.cloud_forecast
         if config is None:
-            self.source.setText(self.tr("設定ファイルで雲量予報なし（cloudForecast: false）。ファイルを開いて表示"))
+            self.source.setText(self.tr("雲量予報は使わない（組織の設定）。ファイルを開いて表示"))
         elif config.local:
             where = config.file or config.folder
             self.source.setText(self.tr("{label}: {where}").format(label=config.label, where=where))

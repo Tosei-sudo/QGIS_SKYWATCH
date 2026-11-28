@@ -227,7 +227,7 @@ class HandoverDialog(QDialog):
                     item.setFont(font)
                 self.table.setItem(r, c, item)
         if self.bar.source is None:
-            self._say(self.tr("設定ファイルに assignments（分担のテーブル）なし"))
+            self._say(self.tr("分担の表なし（管理者に連絡: assignments）"))
         elif self.bar.error:
             self._say(self.tr("分担の取得に失敗: {m}").format(m=self.bar.error))
         self._update_buttons()

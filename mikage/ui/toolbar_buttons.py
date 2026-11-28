@@ -26,6 +26,7 @@ from qgis.PyQt.QtWidgets import (
     QToolButton, QVBoxLayout, QWidget,
 )
 from ..qgis_io import qsettings
+from .docks import name_cancel
 from .fit import fit_text
 
 KEY = "toolbarButtons"
@@ -64,8 +65,10 @@ ROLE_SETS = {
     ],
     "管理者": ["接続と表の点検…", "監査ログ…", "設定…", "使い方（ヘルプ）…", "ツールバーのボタン…"],
 }
-#: Menu entries renamed since a person may have kept their buttons: old text → new (2026-11-24: システムの障害 too).
-RENAMED = {"衛星の障害情報…": "衛星・システムの障害情報…"}
+#: Menu entries renamed since a person may have kept their buttons: old text → new (2026-11-24: システムの障害 too;
+#: 2026-11-28, tsudo: 取り込み・書き出し throughout).
+RENAMED = {"衛星の障害情報…": "衛星・システムの障害情報…", "観測記録の一括取込み…": "観測記録の一括取り込み…",
+           "観測記録のエクスポート…": "観測記録の書き出し…"}
 #: Several roles: these stay at the end.
 LAST = ("使い方（ヘルプ）…", "ツールバーのボタン…")
 #: Between the roles' names in the key of several (as RoleKeeper.key writes it).
@@ -196,6 +199,7 @@ class ToolbarButtonsDialog(QDialog):
         row.addWidget(self.reset_button)
         layout.addLayout(row)
         box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        name_cancel(box)
         box.accepted.connect(self.accept)
         box.rejected.connect(self.reject)
         layout.addWidget(box)

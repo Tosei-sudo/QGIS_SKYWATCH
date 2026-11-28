@@ -221,7 +221,7 @@ def test_the_dock_corrects_the_active_layer_and_follows_the_view(tmp_path):
 
         # A tone curve from a script survives the sliders.
         dock.enhance(layer, {"version": 1, "ops": [{"op": "curve", "points": [[0, 0], [0.5, 0.6], [1, 1]]}, {"op": "contrast", "amount": 0.1}]})
-        assert dock.curve_box.isChecked() and dock.curve.step()["points"] == [[0, 0], [0.5, 0.6], [1, 1]]
+        assert dock.curve_box.is_open() and dock.curve.step()["points"] == [[0, 0], [0.5, 0.6], [1, 1]]
         dock.apply()
         assert [op["op"] for op in er.enhance_renderer(layer).settings.correction.ops] == ["contrast", "curve"]
 
@@ -334,7 +334,7 @@ def test_the_histogram_of_the_view_before_and_after(tmp_path):
         def wait(task):
             assert task is not None and wait_for(lambda: dock.histograms is not None)
 
-        dock.histogram_box.setChecked(True)
+        dock.histogram_box.set_open(True)
         dock.histograms = None
         wait(dock.take_histogram())
         rgba = np.dstack(arrays + [np.full((60, 80), 255, np.uint8)])

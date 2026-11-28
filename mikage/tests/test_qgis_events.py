@@ -97,7 +97,7 @@ def test_events_and_their_items_from_the_other_docks(plugin, monkeypatch):
     catalog.area_box.setCurrentIndex(catalog.area_box.findData("none"))
     catalog.search()
     assert wait_for(lambda: catalog.model.rowCount() == 2)
-    assert catalog.buttons["event"].isVisibleTo(catalog)
+    assert catalog.image_actions["event"].isVisible()
     catalog.table.selectAll()
     menu = catalog.add_to_event()
     assert isinstance(menu, QMenu)
@@ -215,7 +215,7 @@ def test_without_settings_the_dock_says_so(tmp_path):
         dock = p.api.events
         dock.show()
         assert "events" in dock.note.text() and not dock.buttons["new"].isEnabled()
-        assert not p.api.image_catalog.buttons["event"].isVisibleTo(p.api.image_catalog)
+        assert not p.api.image_catalog.image_actions["event"].isVisible()
     finally:
         p.unload()
 

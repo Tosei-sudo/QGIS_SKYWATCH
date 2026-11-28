@@ -55,7 +55,7 @@ def upload_all(config: Any, client: Callable[[], EsriClient], prefs: Any, gpkg: 
             upload_requests(esri, r, None, report, now(), only)
     for kind, label, n in [(k, s, n) for k in KINDS for s, n in _stores_of(outbox, k, only).items()]:
         if work is None and kind != DRAFT:
-            report.kept.append(f"オフライン作業（offlineWork）が切ってあるため送らない「{label}」の{KINDS.get(kind, kind)} {n} 件")
+            report.kept.append(f"オフライン作業を使わない組織の設定のため送らない「{label}」の{KINDS.get(kind, kind)} {n} 件")
         elif kind == "plan":
             # Saved before 撮像計画 became 臨時 requests (2026-11-09): there is no plan store to send it to.
             report.kept.append(f"撮像計画の保存はなくなった（撮像依頼に一本化）ため送らない「{label}」の撮像計画 {n} 件")

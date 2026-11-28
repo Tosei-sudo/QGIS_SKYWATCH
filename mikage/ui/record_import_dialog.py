@@ -1,5 +1,5 @@
 """
-「観測記録の一括取込み」 (core/obs/record_import.py): a CSV file or a layer of
+「観測記録の一括取り込み」 (core/obs/record_import.py): a CSV file or a layer of
 the project, which column is which item, a dry run (試行) that shows what each
 row would become, then the import into the observation dock's chosen store.
 """
@@ -40,7 +40,7 @@ class RecordImportDialog(QDialog):
         self._read_for = None
         self._read_rows: list = []
         self._asking = None
-        self.setWindowTitle(self.tr("観測記録の一括取込み"))
+        self.setWindowTitle(self.tr("観測記録の一括取り込み"))
         self.resize(820, 720)
         self.columns: list[str] = []
         self.rows: list[ri.SourceRow] = []
@@ -292,7 +292,7 @@ class RecordImportDialog(QDialog):
         book = self.dock.book
         question = self.tr("{s} に新規 {a} 件・更新 {u} 件を保存（重複・エラー {x} 件は飛ばす）").format(
             s=book.label if book is not None else "", a=n_new, u=n_update, x=counts[ri.DUPLICATE] + counts[ri.ERROR] + counts[ri.EXISTING])
-        if confirm and not ask_no(self, self.tr("観測記録の一括取込み"), question, yes=self.tr("保存")):
+        if confirm and not ask_no(self, self.tr("観測記録の一括取り込み"), question, yes=self.tr("保存")):
             return False
         planned = list(self.planned)
         self._running = True
@@ -306,7 +306,7 @@ class RecordImportDialog(QDialog):
         def failed(message: str) -> None:
             self._finish(self.tr("保存できない: {m}").format(m=message))
 
-        result = self.dock.do(self.tr("観測記録の一括取込み"), lambda b: ri.apply(b, planned), after, watch=True, failed=failed)
+        result = self.dock.do(self.tr("観測記録の一括取り込み"), lambda b: ri.apply(b, planned), after, watch=True, failed=failed)
         return result is not None or self._running
 
     def _finish(self, text: str) -> None:

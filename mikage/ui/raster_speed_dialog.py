@@ -97,7 +97,7 @@ class RasterSpeedDialog(QDialog):
         self.use.blockSignals(False)
         self.use.setEnabled(options.enabled)
         if not options.enabled:
-            self.use.setToolTip(tr("管理者の設定で停止中（rasterSpeed）"))
+            self.use.setToolTip(tr("組織の設定で停止中"))
         rows = raster_speed.rows(options)
         self.table.setRowCount(len(rows))
         for i, row in enumerate(rows):

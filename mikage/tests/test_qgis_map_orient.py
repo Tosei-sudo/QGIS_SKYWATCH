@@ -237,6 +237,8 @@ def test_the_options_are_one_to_a_row_under_the_buttons(opened):
     dock, canvas, records = opened
     dock.resize(420, 900)
     dock.show()
+    # In 「開き方と表示」 (tsudo 2026-11-28): opened, one to a row as before.
+    dock.options_fold.set_open(True)
     APP.processEvents()
     holder = dock.buttons["open"].parentWidget()
     options = [dock.close_previous, dock.zoom_opened, dock.match_crs, dock.orientation_row, dock.footprint_box.parentWidget()]

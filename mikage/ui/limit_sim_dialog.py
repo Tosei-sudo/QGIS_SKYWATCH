@@ -333,7 +333,7 @@ class LimitSimDialog(QDialog):
             text = self.tr("{start} から {n} 日・依頼 {r} 件で試算（台帳への書き込みなし）").format(
                 start=start.isoformat(), n=days, r=len(requests))
             if not systems:
-                text += self.tr("（設定ファイルに requestExports なし）")
+                text += self.tr("（出力するシステムなし。管理者に連絡: requestExports）")
             self.status.setText("。".join([text, *told]))
             self.run_button.setEnabled(True)
 

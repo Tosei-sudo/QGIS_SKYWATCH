@@ -243,7 +243,7 @@ class InterestsDock(PluginDock):
         elif not user:
             self.note.setText(self.tr("利用者名が分からないので使えない（管理者に連絡: editTracking.user）［E205］"))
         else:
-            self.note.setText(self.tr("{user} さんの関心地域・地点（Esri に保存。どの PC でも同じ）").format(user=user))
+            self.note.setText(self.tr("{user} さんの関心地域・地点（共有の保存先に保存。どの PC でも同じ）").format(user=user))
         self.note.setVisible(True)
         self._clear_form()
         self.render()
