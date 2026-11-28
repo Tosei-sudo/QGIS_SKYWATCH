@@ -1105,6 +1105,24 @@ class ObservationBook:
                         replaces=kept.id if kept else None)
         return None
 
+    def keep_typed(self, image: ObservedImage, lon: float, lat: float, values: FormValues, editing: Optional[Observation] = None,
+                   source: Optional[Observation] = None, draft: Optional[str] = None, reason: str = "") -> Draft:
+        """
+        What a form said and was not recorded yet (its image closed meanwhile, tsudo 2026-11-28: the form closed and
+        what was typed was lost): kept as a draft of 「保存できなかった観測記録」, sent only when chosen in its list
+        (`needs_check`: it was not recorded by the person). `draft`: the form was one of those, opened again (it
+        is replaced).
+        """
+        kept = self.draft(draft) if draft else None
+        record = self.record_from(image, lon, lat, editing, source, values, True)
+        if kept is not None and editing is None:
+            record = replace(record, id=kept.record.id, created_at=kept.record.created_at)
+        d = Draft(self._by(record), {k: getattr(values, k) for k in FormValues.__dataclass_fields__}, True,
+                  editing.id if editing else "", editing.updated_at if editing else None, source.id if source else "",
+                  now_ms(), reason, needs_check=True)
+        self.keep_draft(d, replaces=kept.id if kept else None)
+        return self.draft(d.id) or d
+
     def _by(self, record: Observation) -> Observation:
         """A record as it is saved by the one recording now (as _save_records stamps it), for a draft sent later."""
         by = self.observer()

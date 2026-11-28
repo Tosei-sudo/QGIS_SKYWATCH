@@ -33,7 +33,9 @@ class TablePart:
         self.table.setHorizontalHeaderLabels(list(names))
         self.table.setRowCount(0)
         self.table.setRowCount(rows)
-        self._filled = 0
+        # (Its own name: as `_filled`, the form's values when opened, a list drawn again made every form open look typed:
+        # 保存・破棄 asked with nothing changed, tsudo 2026-11-28.)
+        self._rows_filled = 0
         self.row_buttons.clear()
         self._row_actions = []
         self._row_records = []
@@ -44,16 +46,16 @@ class TablePart:
 
     def _end_rows(self) -> None:
         """The rows made room for and not filled dropped (those left out: another 大分類, someone else's)."""
-        if self.table.rowCount() > self._filled:
-            self.table.setRowCount(self._filled)
+        if self.table.rowCount() > self._rows_filled:
+            self.table.setRowCount(self._rows_filled)
 
     def _row(self, cells: list, on_click: Optional[Callable] = None, on_double: Optional[Callable] = None,
              style: str = "", buttons: Optional[list[RowButton]] = None, selected: bool = False,
              records: Optional[list[Observation]] = None, reported: bool = False, waiting: bool = False, key: str = "") -> None:
-        r = getattr(self, "_filled", self.table.rowCount())
+        r = getattr(self, "_rows_filled", self.table.rowCount())
         if r >= self.table.rowCount():
             self.table.insertRow(r)
-        self._filled = r + 1
+        self._rows_filled = r + 1
         for i, c in enumerate(cells):
             item = QTableWidgetItem("" if c is None else str(c))
             if style == "deleted":

@@ -6,6 +6,7 @@ methods as they were, on the dock's widgets and state.
 from __future__ import annotations
 
 import re
+from dataclasses import asdict
 from typing import Callable, Optional
 
 from qgis.PyQt.QtCore import Qt
@@ -194,6 +195,10 @@ class FormPart:
                 edit.setVisible(True)
         self._render_chips()
         self._render_kind_path()
+        kept = self.book.draft(self._draft_id) if self._draft_id else None
+        if kept is not None and kept.values == asdict(values):
+            # Kept in 「保存できなかった観測記録」 as typed: closed unchanged, nothing asked (tsudo 2026-11-28).
+            self._filled = self.form_values()
 
     def _delete_pending(self) -> None:
         if self.pending is None or self.pending[2] is None:

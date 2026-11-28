@@ -87,6 +87,8 @@ class DraftsPart:
                 edit.setVisible(True)
         self.quantity_input.setText(v.get("quantity", ""))
         self._draft_id = d.id
-        self._filled = None  # typed (not what the record says): never filled again by a refresh
+        # As kept: closed unchanged, nothing asked (it stays in the list; tsudo 2026-11-28). Never filled again by
+        # a refresh (what was typed, not what the record says: _editing_changed).
+        self._filled = self.form_values()
         self._center(r)
         return True

@@ -171,6 +171,7 @@ class ObservationDock(
         project = QgsProject.instance()
         project.layersAdded.connect(self._layers_changed)
         project.layersRemoved.connect(self._layers_changed)
+        project.layersWillBeRemoved.connect(self._image_closing)
         # A layer renamed: an image not from the catalog is shown by its name (操作性点検の再検証 R12).
         project.layerTreeRoot().nameChanged.connect(self._layer_renamed)
         self.iface.currentLayerChanged.connect(self._layer_chosen)
@@ -1269,7 +1270,7 @@ class ObservationDock(
         if now is None or now == editing:
             return
         who = now.updated_by or now.recorded_by or self.tr("ほかの人")
-        if self._filled is not None and self.form_values() == self._filled:
+        if not self._draft_id and self._filled is not None and self.form_values() == self._filled:
             self.open_form(now.lon, now.lat, editing=now)
             self.iface.messageBar().pushInfo(self.tr("観測記録"), plain_tip(self.tr("開いている記録を {who} さんが更新。最新の内容を表示").format(who=who)))
         else:
@@ -1322,6 +1323,7 @@ class ObservationDock(
         project = QgsProject.instance()
         self._withdraw_record_on_action()
         for signal, slot in ((project.layersAdded, self._layers_changed), (project.layersRemoved, self._layers_changed),
+                             (project.layersWillBeRemoved, self._image_closing),
                              (project.layerTreeRoot().nameChanged, self._layer_renamed),
                              (self.iface.currentLayerChanged, self._layer_chosen), (self.canvas.extentsChanged, self._extent_changed),
                              (self.context.configChanged, self.reset_stores), (self.context.configChanged, self.assignment_bar.reset),

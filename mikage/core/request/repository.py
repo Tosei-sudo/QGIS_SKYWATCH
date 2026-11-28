@@ -22,7 +22,7 @@ from .groups import delete_groups, group_counts, load_groups, read_groups, renam
 from .linking import links_of
 from .quota import read_quota_data
 from .store import (
-    RequestStoreConfig, add_history, add_shots, count_history, day_counts, delete_history_rows, delete_request, delete_shots,
+    RequestStoreConfig, add_history, add_shots, clock_missing, count_history, day_counts, delete_history_rows, delete_request, delete_shots,
     history_has, load_day, load_days, load_history, load_requests, load_shots, load_shots_where, load_system_rows, save_request,
     save_requests, update_history, update_requests, update_shots, waiting_ids,
 )
@@ -87,6 +87,9 @@ class RequestRepository:
 
     def load_requests(self, cancelled: Optional[Callable[[], bool]] = None, where: str = "1=1") -> list[ImagingRequest]:
         return load_requests(self.client, self.store, self.token, cancelled, where)
+
+    def clock_missing(self) -> list[str]:
+        return clock_missing(self.client, self.store, self.token)
 
     def save_request(self, req: ImagingRequest, now: float) -> ImagingRequest:
         return save_request(self.client, self.store, self.token, req, now)
