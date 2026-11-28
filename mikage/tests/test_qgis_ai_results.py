@@ -376,3 +376,42 @@ def test_matching_can_be_turned_off(plugin):
     iface.setActiveLayer(second)
     assert wait_for(lambda: dock.image_id == "IMG2" and len(dock.rows) == 2)
     assert dock.continued == {} and dock.list.itemWidget(dock.list.topLevelItem(1), 6) is None
+
+
+def test_an_image_whose_read_was_cancelled_by_the_next_one_is_read_again_when_chosen_again(plugin, monkeypatch):
+    """
+    One image chosen, then another before its results came: the first read is cancelled (the network stops it). It was
+    caught per source and kept as the first image's results, 「想定外のエラー［E901］」 with nothing listed, shown when it
+    was chosen again (until 最新を取得).
+    """
+    import threading
+
+    from mikage.qgis_io.tasks import Cancelled, current_feedback
+
+    p, iface, tmp_path = plugin
+    dock = p.api.ai_results
+    real = EsriClient.__init__
+    first = threading.Event()
+
+    def slow(self, transport, *args, **kwargs):
+        def held(url, form):
+            # As qgis_io/network.py: a request of IMG1's first read waits until its task is cancelled, then stops.
+            if "IMG1" in form.get("where", "") and not first.is_set():
+                feedback = current_feedback()
+                while feedback is not None and not feedback.isCanceled():
+                    threading.Event().wait(0.01)
+                first.set()
+                raise Cancelled()
+            return transport(url, form)
+
+        real(self, held, *args, **kwargs)
+
+    monkeypatch.setattr(EsriClient, "__init__", slow)
+    one, two = open_catalog_image(tmp_path, "IMG1"), open_catalog_image(tmp_path, "IMG2")
+    iface.setActiveLayer(one)
+    assert wait_for(lambda: dock._task is not None and dock.image_id == "IMG1")
+    iface.setActiveLayer(two)
+    assert wait_for(lambda: first.is_set() and dock._task is None and dock.image_id == "IMG2" and len(dock.rows) == 2), dock.status.text()
+    iface.setActiveLayer(one)
+    assert wait_for(lambda: dock.image_id == "IMG1" and len(dock.rows) == 3), dock.status.text()
+    assert "E901" not in dock.status.text()

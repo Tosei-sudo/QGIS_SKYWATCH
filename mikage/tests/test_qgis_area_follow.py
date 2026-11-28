@@ -125,7 +125,7 @@ def redraw(panel, name, rings):
     assert panel.shape_changed
 
 
-def test_an_area_saved_with_a_new_shape_moves_its_requests_at_once(plugin):
+def test_an_area_saved_with_a_new_shape_moves_its_requests_at_once(plugin, monkeypatch):
     p, places, ledger, _history, changes = plugin
     requests = p.api.requests
     following = make_request(p)
@@ -158,7 +158,17 @@ def test_an_area_saved_with_a_new_shape_moves_its_requests_at_once(plugin):
     # Undone from the window: the area before, no longer following.
     tree.setCurrentItem(next(tree.topLevelItem(i) for i in range(tree.topLevelItemCount()) if tree.topLevelItem(i).text(1) == "更新"))
     assert dialog.undo_button.isEnabled()
-    assert dialog.undo(ask=False)
+    # The button asks first (its clicked's checked=False once landed in `ask`: undone without asking); 取消 undoes nothing.
+    from mikage.ui import area_follow_dialog
+
+    asked = []
+    monkeypatch.setattr(area_follow_dialog, "ask_no", lambda _parent, title, _text, **_k: asked.append(title) or False)
+    dialog.undo_button.click()
+    assert asked == ["元に戻す"] and dialog.task is None
+    assert {r.id: r for r in requests.requests}[following.id].area_follow
+    monkeypatch.setattr(area_follow_dialog, "ask_no", lambda _parent, title, _text, **_k: asked.append(title) or True)
+    dialog.undo_button.click()
+    assert asked == ["元に戻す", "元に戻す"]
     assert wait_for(lambda: dialog.task is None and requests.task is None and "元に戻した" in dialog.status.text()), dialog.status.text()
     assert wait_for(lambda: not {r.id: r for r in requests.requests}[following.id].area_follow)
     back = {r.id: r for r in requests.requests}[following.id]

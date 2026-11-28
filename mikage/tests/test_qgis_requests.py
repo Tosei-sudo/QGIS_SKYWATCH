@@ -711,3 +711,33 @@ def test_polygons_of_any_shape_drawn_taken_and_saved(plugin):
     g = next(out.getFeatures()).geometry()
     assert g.isMultipart() and len(g.asMultiPolygon()) == 2 and len(g.asMultiPolygon()[0]) == 2
     assert abs(g.area() - (0.04 - 0.0025 + 0.005)) < 1e-9
+
+
+
+def test_a_read_put_off_while_the_dock_is_busy_does_not_run_after_the_plugin_is_unloaded(plugin, monkeypatch):
+    """
+    「最新を取得」 while a task of the dock's runs is put off (300 ms): the plugin unloaded meanwhile (updated, QGIS
+    closed), it ran on the deleted dock (RuntimeError). Now on a timer of the dock's own, gone with it.
+    """
+    import gc
+    import sys
+    import traceback
+
+    from qgis.PyQt.QtCore import QCoreApplication, QEvent
+
+    p, iface, fake, tmp_path = plugin
+    dock = p.api.requests
+    dock.show()
+    assert wait_for(lambda: dock._loaded and dock.task is None)
+    errors = []
+    monkeypatch.setattr(sys, "excepthook", lambda kind, value, tb: errors.append("".join(traceback.format_exception(kind, value, tb))))
+    dock.task = object()  # a task of the dock's runs
+    dock.reload()
+    dock.task = None
+    p.unload()
+    monkeypatch.setattr(p, "unload", lambda: None)  # (unloaded here, not by the fixture)
+    del dock
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    gc.collect()
+    wait_for(lambda: False, 600)
+    assert errors == [], "\n".join(errors)

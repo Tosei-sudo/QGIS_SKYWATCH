@@ -266,6 +266,17 @@ class RequestDock(PluginDock):
         self._update_buttons()
         return True
 
+    def _again(self, call: Callable[[], None]) -> None:
+        """
+        `call` in 300 ms (a task of the dock's runs now), on a timer of the dock's own: gone with it. QTimer.singleShot's
+        ran after the plugin was unloaded meanwhile (RuntimeError: the dock was deleted).
+        """
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+        timer.timeout.connect(call)
+        timer.timeout.connect(timer.deleteLater)
+        timer.start(300)
+
     def repository(self) -> RequestRepository:
         """The store's reads and writes (データ窓口)."""
         return RequestRepository(self.context.esri(), self.store, None)
@@ -309,7 +320,7 @@ class RequestDock(PluginDock):
                 failed(m)
 
         if not self._start(self.tr("撮像依頼の取得"), work, done, not_read):
-            QTimer.singleShot(300, lambda: self.reload(then, failed))
+            self._again(lambda: self.reload(then, failed))
 
     # --- The list -------------------------------------------------------------------------------
 
@@ -478,7 +489,7 @@ class RequestDock(PluginDock):
                 then(None)
 
         if not self._start(self.tr("地域の形に合わせる"), work, done, failed):
-            QTimer.singleShot(300, lambda: self.follow_area(area_id, then, show))
+            self._again(lambda: self.follow_area(area_id, then, show))
         return True
 
     def show_follow(self, result):

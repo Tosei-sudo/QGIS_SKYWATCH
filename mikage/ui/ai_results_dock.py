@@ -70,7 +70,7 @@ from ..qgis_io.detection_results import detection_layers, detection_results, ima
 from ..qgis_io.obs_images import IMAGE_ID, background_layer, image_layers, observed_image
 from ..qgis_io.pixel_place import original_placement, pixel_in
 from ..qgis_io.review_io import rejection_ring
-from ..qgis_io.tasks import current_feedback, error_text, run_task
+from ..qgis_io.tasks import Cancelled, current_feedback, error_text, run_task
 from .docks import PluginDock, ask_no, plain_label
 from .emphasis import LIGHT, emphasize
 from .last_inputs import InputMemory
@@ -462,22 +462,32 @@ class AiResultsDock(PluginDock):
             for s in sources:
                 try:
                     out.append((s, fetch(client, s, image_id, tokens[s.url], cancelled=feedback.isCanceled if feedback else None), None))
+                except Cancelled:
+                    raise
                 except Exception as error:  # noqa: BLE001 (said per source)
                     out.append((s, [], error_text(error)))
+                if task.isCanceled():
+                    # Another image chosen meanwhile (or this one again): nothing kept. Said per source (「取消」, or
+                    # 「想定外のエラー［E901］」 when the network stopped it), the read cancelled was kept as the image's
+                    # results and shown when it was chosen again, nothing listed until 最新を取得.
+                    raise Cancelled()
             return out
 
         def done(found) -> None:
-            self._task = None
+            if self._task is reading:
+                self._task = None
             self.cache[image_id] = found
             if image_id == self.image_id:
                 self.show_results(reveal=reveal)
 
         def failed(message: str) -> None:
-            self._task = None
+            # (A read cancelled by the next one ends after it started: that one stays the dock's.)
+            if self._task is reading:
+                self._task = None
             if image_id == self.image_id:
                 self.status.setText(_tr("取得に失敗: {m}").format(m=message))
 
-        self._task = run_task(_tr("AI結果の取得"), work, done, failed)
+        self._task = reading = run_task(_tr("AI結果の取得"), work, done, failed)
 
     def withhold(self, why: str) -> None:
         """

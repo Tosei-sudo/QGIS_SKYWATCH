@@ -44,6 +44,9 @@ class MovingDock(PluginDock):
         super().__init__("SatObsMoving", _tr("移動体（AIS・ADS-B）"), context, open_settings, parent)
         self.iface = iface
         self.layers: list[MovingLayer] = []
+        #: Each layer's hook on its points layer being removed (taken off in close_all: the layers stay in the project
+        #: after the plugin is unloaded, and their removal later ran this dock's code on its deleted timers).
+        self._gone_hooks: list = []
 
         presets = QHBoxLayout()
         self.preset = QComboBox()
@@ -254,7 +257,9 @@ class MovingDock(PluginDock):
         QgsProject.instance().addMapLayers([layer.trails, layer.points])
         self.layers.append(layer)
         layer.changed.connect(self._refresh)
-        layer.points.willBeDeleted.connect(lambda l=layer: self._gone(l))
+        hook = lambda l=layer: self._gone(l)  # noqa: E731
+        layer.points.willBeDeleted.connect(hook)
+        self._gone_hooks.append((layer.points, hook))
         self.follow_time()
         self._refresh()
 
@@ -266,6 +271,7 @@ class MovingDock(PluginDock):
             controller.setTemporalExtents(QgsDateTimeRange(_qdt(span[0]), _qdt(span[1])))
 
     def _gone(self, layer: MovingLayer) -> None:
+        self._gone_hooks = [(points, hook) for points, hook in self._gone_hooks if points is not layer.points]
         layer.close()
         if layer in self.layers:
             self.layers.remove(layer)
@@ -333,8 +339,15 @@ class MovingDock(PluginDock):
             layer.set_time(None)
 
     def close_all(self) -> None:
+        for points, hook in self._gone_hooks:
+            try:
+                points.willBeDeleted.disconnect(hook)
+            except (TypeError, RuntimeError):
+                pass
+        self._gone_hooks.clear()
         for layer in list(self.layers):
             layer.close()
+        self.layers.clear()
         try:
             self.iface.mapCanvas().temporalRangeChanged.disconnect(self.follow_time)
         except (TypeError, RuntimeError):
