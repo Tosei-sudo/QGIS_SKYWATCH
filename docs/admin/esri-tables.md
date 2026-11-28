@@ -82,6 +82,7 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | [`TBL_REFERENCE_INFO`](#tbl_reference_info参考情報) | ポイント | 書き込み（削除は作成者か管理者） | 出典つきの参考情報（発表・報道・通報など。場所と日時と出典・確からしさ。2026-11-24 に追加） | `referenceInfo.layer` |
 | [`TBL_REFERENCE_LINK`](#tbl_reference_link参考情報の紐付け) | なし | 書き込み | 参考情報とイベント・モノ・観測記録の紐付け（同じ組は 1 行） | `referenceInfo.links` |
 | [`TBL_TAXONOMY_MEMBER`](#tbl_taxonomy_member分類の既知の個体) | なし | 書き込み | 分類体系の既知の個体の別名・個体の諸元・参考写真・備考（1 個体 1 行。2026-11-27 に追加） | `observationStores[].taxonomyTable.members` |
+| [`TBL_FEATURE_USE`](#tbl_feature_use機能の使われ方) | なし | 書き込み（行を足すだけ。作成者・更新者の 4 属性は付けない） | 機能の使われ方（日・利用者の符号・機能・どこからごとの回数。2026-11-28 に追加） | `featureUse` |
 
 使う機能のテーブルだけあればよい（例えば観測記録だけなら `TBL_OBSERVATION`）。「読み」のテーブルはほかのシステムが作るものでもよく、属性名が違えば `fields` で合わせる。表の「必須」は、その属性がないとプラグインがそのテーブルを使わない（理由を出す）もの。ほかの属性は、なければその値を読み書きしない。
 
@@ -156,6 +157,8 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | `TBL_REFERENCE_LINK` | `ITEM_ID` | イベント・モノ・記録の参考情報 |
 | `TBL_TAXONOMY_MEMBER` | `CLASS_PATH` | 分類ごとの個体（ダッシュボード・SQL） |
 | `TBL_TAXONOMY_MEMBER` | `MEMBER_NAME` | 個体の名前で引く（ほかの人が同じ個体を足していないかの確認） |
+| `TBL_FEATURE_USE` | `USE_DATE` | 期間の使われ方（「機能の使われ方…」の集計） |
+| `TBL_FEATURE_USE` | `SEND_ID` | 送ったかどうかの確認（答えが届かなかった送信だけ） |
 
 ほかに:
 
@@ -934,9 +937,31 @@ AI の列（`SOURCE` から `AI_DETECTED_AT`、観測記録は `AI_CONTINUATION`
 | `NOTE` | 備考 | `String(4000)` | 備考 | `note` |
 | `SORT_ORDER` | 並び順 | `Integer` | 分類の中での並び順 | `order` |
 
+### `TBL_FEATURE_USE`（機能の使われ方）
+
+どのメニュー・ボタン・ドックがどれだけ使われているかの記録（2026-11-28 に追加。tsudo「どう使われているか収集してみる？」。[機能の使われ方](operations.md#機能の使われ方featureuse)）。使われない機能を奥にしまうなど、画面を絞る判断に使う。プラグインが日・担当・機能・どこから（メニュー・ツールバー・キー・ドックの中…）ごとの回数を PC の中で数え、1 時間ごとに増えた分を行として足す（変えも消しもしない）。同じ日・機能の行が何行もあるので、**回数は `USE_COUNT` の合計**で見る（「機能の使われ方…」とダッシュボードの集計はどちらも合計）。`featureUse`（URL か `{ "url", "fields", "sendMinutes" }`、既定は下の名前）。
+
+- **利用者名は入れない**: `USER_KEY` は QGIS のプロファイルごとにくじで作った番号で、名前やコンピューター名から作っていない（人数を数えるためだけ）。同じ人が 2 台の PC で使うと 2 人に数える。**作成者・更新者の 4 属性（[`editTracking`](operations.md#作成者更新者の記録edittracking)）は付けない**（付けると利用者名が入る）。`tools/arcgis/create_tables.py` もこの表には付けない。ArcGIS の編集者トラッキングもこの表では有効にしない
+- 入力した文字・選んだ値・画像や記録の中身・ファイル名・座標は入れない。ボタンの名前の数字は `#` に置き換える（「通知（3）」は「通知」）
+- 送れない間は PC に残し、次に送る。答えが届かなかった送信は `SEND_ID` で届いたかを確かめてから送り直す（二重に数えない）
+- 集計はサーバーの統計（`outStatistics`・`groupByFieldsForStatistics`）で行う。行が多いので、サービスは集計のページング（ArcGIS Enterprise 10.7 以降）に対応しているとよい
+
+| 属性名 | エイリアス | 型 | 中身 | 役割 |
+| --- | --- | --- | --- | --- |
+| `USE_DATE` | 日 | `Date` | 使った日（その PC の日の 0 時）。**必須** | `date` |
+| `USER_KEY` | 利用者の符号 | `String(32)` | QGIS のプロファイルごとの番号（16 桁の英数字。名前ではない）。**必須** | `user` |
+| `ROLE_NAMES` | 担当 | `String(255)` | そのときの担当のコード（`OBSERVER,INTERPRETER` のようにカンマ区切り。空は担当を選んでいない人） | `roles` |
+| `DOCK_NAME` | ドック | `String(255)` | ドックの中のボタンなら、そのドックの名前（メニューの項目は空） | `dock` |
+| `FEATURE_NAME` | 機能 | `String(255)` | メニューの項目の名前（「撮像依頼」「監査ログ…」）か、ドックの中のボタン・タブ・リストの名前（「記録」「タブ: 分類」「選択: 種別」）。`MIKAGE` は起動。**必須** | `feature` |
+| `PLACE_KIND` | どこから | `String(16)` | `MENU`（メニュー）・`TOOLBAR`（ツールバー）・`KEY`（キー）・`MAP_MENU`（地図の右クリック）・`HELP`（ヘルプのリンク）・`COMMAND`（文で操作）・`OTHER`（そのほか）・`DOCK`（ドックの中）・`SHOWN`（ドックを表示した）・`START`（起動）。**必須** | `place` |
+| `USE_COUNT` | 回数 | `Integer` | その間に使った回数（`SHOWN` は表示した回数、`START` は起動した回数）。**必須** | `count` |
+| `USE_MINUTES` | 時間（分） | `Double` | `SHOWN` はドックを表示していた分、`START` は MIKAGE を起動していた分（ほかは 0） | `minutes` |
+| `PLUGIN_VERSION` | プラグインの版 | `String(32)` | プラグインの版（画面を変えた前後を比べる） | `version` |
+| `SEND_ID` | 送信ID | `String(32)` | 一度に送った行の ID（送り直しで二重に数えないため） | `send` |
+
 ### 上の表の名前で作ったときの設定
 
-既定の属性名のある項目（撮像計画・撮像依頼・観測記録・通報・分担・画像の評価・引き継ぎ・イベント・参考情報・関心地域・地点・担当・衛星の障害情報・備考の単語集・判読の練習・画像の幾何補正）は URL だけ書けばよい。既定のない項目は `fields` に属性名を書く。URL はサービスに合わせる。
+既定の属性名のある項目（撮像計画・撮像依頼・観測記録・通報・分担・画像の評価・引き継ぎ・イベント・参考情報・関心地域・地点・担当・衛星の障害情報・備考の単語集・判読の練習・画像の幾何補正・機能の使われ方）は URL だけ書けばよい。既定のない項目は `fields` に属性名を書く。URL はサービスに合わせる。
 
 ```jsonc
 {
@@ -1001,6 +1026,7 @@ AI の列（`SOURCE` から `AI_DETECTED_AT`、観測記録は `AI_CONTINUATION`
     "areas": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/25"                         // TBL_INTEREST_AREA
   },
   "userRoles": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/26",                     // TBL_USER_ROLE
+  "featureUse": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/39",                    // TBL_FEATURE_USE
   "satelliteOutages": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/27",              // TBL_SATELLITE_OUTAGE
   "glossary": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/28",                      // TBL_GLOSSARY
   "training": {

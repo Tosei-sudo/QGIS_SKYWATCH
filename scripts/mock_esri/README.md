@@ -98,7 +98,8 @@ QGIS の「ArcGIS REST サーバー」接続に `http://127.0.0.1:8765/arcgis/re
 - 範囲の条件（`geometry`）は外接矩形どうしの重なりで判定する（ポリゴンの形までは見ない）
 - 日時は UTC の ms で持つ（`dateFieldsTimeReference` は UTC）
 - 文字列が属性の長さを超える・型が違う値は、その地物だけ失敗にする（`rollbackOnFailure` が true なら全部戻す）。レイヤーにない属性は無視して、コンソールに表示する
-- 添付ファイル・統計（`outStatistics`）・バージョン管理・リレーション・ジオメトリサービス・マップ画像（MapServer の export）・GP サービスはない
+- 統計（`outStatistics`）は `sum`・`count`・`min`・`max`・`avg` と `groupByFieldsForStatistics` だけ（`orderByFields`・`having` は見ない。集まりは集める属性の順に並べる）。`resultOffset` のページングはレイヤーの `supportsPagination`（既定 true）のときだけ
+- 添付ファイル・バージョン管理・リレーション・ジオメトリサービス・マップ画像（MapServer の export）・GP サービスはない
 - トークンは `--token` のときだけ確認する。ユーザー名とパスワードは確認しない
 
 ## テスト

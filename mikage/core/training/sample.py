@@ -441,6 +441,13 @@ INTEREST_FIELDS = {"INTEREST_ID": {"type": S, "length": 64}, "INTEREST_NAME": S,
                    "NOTE": {"type": S, "length": 4000}}
 #: 担当 (one row per role of a person; empty: each person's ticks on 「担当と個人設定」 write theirs).
 USER_ROLE_FIELDS = {"USER_NAME": S, "ROLE_NAME": {"type": S, "length": 32}}
+#: 機能の使われ方 (TBL_FEATURE_USE, 2026-11-28): sums by day, person (a random id) and feature; no edit tracking attributes
+#: (they would hold the user name).
+FEATURE_USE_FIELDS = {"USE_DATE": T, "USER_KEY": {"type": S, "length": 32}, "ROLE_NAMES": S, "DOCK_NAME": S, "FEATURE_NAME": S,
+                      "PLACE_KIND": {"type": S, "length": 16}, "USE_COUNT": I, "USE_MINUTES": D,
+                      "PLUGIN_VERSION": {"type": S, "length": 32}, "SEND_ID": {"type": S, "length": 32}}
+#: The layers made without the edit tracking attributes (service, layer id).
+NO_EDIT_FIELDS = {("Usage", 0)}
 
 #: 備考の単語集 (one word per row: other spellings, readings and 大分類 with commas between them).
 GLOSSARY_FIELDS = {"TERM": S, "VARIANTS": {"type": S, "length": 1000}, "READING": S, "ROOT_KIND": {"type": S, "length": 1000},
@@ -632,13 +639,15 @@ def services(files: str, base: str, with_features: bool = True, now: Optional[in
                                  "geometry": {"x": (AREA[0] + AREA[2]) / 2, "y": (AREA[1] + AREA[3]) / 2}}])},
             {"id": 1, "name": "関心地域", "geometryType": "polygon", "fields": INTEREST_FIELDS, "features": []}]},
         {"name": "Roles", "layers": [{"id": 0, "name": "担当", "fields": USER_ROLE_FIELDS, "features": []}]},
+        {"name": "Usage", "layers": [{"id": 0, "name": "機能の使われ方", "fields": FEATURE_USE_FIELDS, "features": []}]},
         {"name": "Glossary", "layers": [{"id": 0, "name": "備考の単語集", "fields": GLOSSARY_FIELDS, "features": feats([
             {"attributes": {"TERM": t, "VARIANTS": v, "READING": r, "ROOT_KIND": k, "DESCRIPTION": d, "SORT_ORDER": o}}
             for t, v, r, k, d, o in GLOSSARY_ROWS])}]},
     ]}
     for service in out["services"]:
         for layer in service["layers"]:
-            layer["fields"] = {**layer["fields"], **EDIT_FIELDS}
+            if (service["name"], layer["id"]) not in NO_EDIT_FIELDS:
+                layer["fields"] = {**layer["fields"], **EDIT_FIELDS}
     return out
 
 
@@ -687,8 +696,9 @@ def training_config(base: str, files: str, folder: str) -> str:
     files, the systems' result files, the 通報 file). No production URL, no
     folder outside it, no service on the internet (the 地理院 place search
     left out), no `userRoles` (担当 switched only on this computer while
-    practising) and no `auditLog` (the practice is not audited: the plugin
-    pauses the log while practising).
+    practising), no `featureUse` (nothing counted while practising) and no
+    `auditLog` (the practice is not audited: the plugin pauses the log while
+    practising).
     """
     text = config_text(base, files, label="練習用", alerts=os.path.join(folder, "通報", "alert_{now:%Y%m%d}.txt"))
     text = TRAINING_HEAD + text.split("\n", 2)[2]
@@ -697,8 +707,9 @@ def training_config(base: str, files: str, folder: str) -> str:
     text = text.replace('"system": "MOCK-SAR",', f'"system": "MOCK-SAR", "folder": {exports},', 1)
     text = text.replace(GSI_GEOCODER, "", 1)
     lines = text.split("\n")
-    at = next(i for i, line in enumerate(lines) if line.startswith('  "userRoles":'))
-    del lines[at - 1:at + 1]  # its comment and itself
+    for key in ("userRoles", "featureUse"):
+        at = next(i for i, line in enumerate(lines) if line.startswith(f'  "{key}":'))
+        del lines[at - 1:at + 1]  # its comment and itself
     return "\n".join(lines)
 
 
@@ -817,6 +828,8 @@ def config_text(base: str, files: str, label: str = "モック", alerts: Optiona
   "interests": {{ "points": "{rest}/Interests/FeatureServer/0", "areas": "{rest}/Interests/FeatureServer/1" }},
   // 担当（「担当と個人設定…」でチェックしたものを利用者名ごとに。別の PC でも同じ担当）
   "userRoles": "{rest}/Roles/FeatureServer/0",
+  // 機能の使われ方（メニュー・ドックのボタンを使った回数を日・担当ごとに。利用者名は入れない）
+  "featureUse": "{rest}/Usage/FeatureServer/0",
   // 備考の単語集（観測記録・確認範囲の備考に語の候補を出し、表記ゆれを知らせる）
   "glossary": "{rest}/Glossary/FeatureServer/0",
   // 書き込むレイヤーの作成日時・作成者・更新日時・更新者（既定の属性名。作成者・更新者は環境変数 USERNAME）

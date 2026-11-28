@@ -78,7 +78,9 @@ def test_writable_tables_get_the_edit_tracking_fields():
     for table in schema.TABLES:
         names = [f.name for f in schema.all_fields(table)]
         has = set(edit_stamp.DEFAULT_FIELDS.values()) <= set(names)
-        assert has == table.writable, table.name
+        # (機能の使われ方: written, but never with the user name.)
+        assert has == (table.writable and table.name != "TBL_FEATURE_USE"), table.name
+        assert table.stamped == (table.name != "TBL_FEATURE_USE"), table.name
         assert [f.name for f in schema.all_fields(table, edit_tracking=False)] == [f.name for f in table.fields]
 
 

@@ -141,6 +141,8 @@ class ToolbarButtons:
         self.role = role
         #: Whether the roles in use have an entry (core/roles.allows).
         self.allowed = allowed
+        #: Told after each fill (機能の使われ方 listens to the new buttons).
+        self.filled: Optional[Callable[[QToolBar], None]] = None
 
     @property
     def entries(self) -> dict:
@@ -161,6 +163,8 @@ class ToolbarButtons:
             # 「背景地図」 and 「ドックのレイアウト」: the list right away on a click.
             if action.menu() is not None and isinstance(button, QToolButton):
                 button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        if self.filled is not None:
+            self.filled(self.toolbar)
 
 
 class ToolbarButtonsDialog(QDialog):

@@ -261,6 +261,8 @@ class Training(Feature):
             training_io.end()
             if self.host.audit is not None:
                 self.host.audit.practise(False, {"how": "unload"})
+            if getattr(self.host, "feature_use", None) is not None:
+                self.host.feature_use.practise(False)
             self._screens(False)
         if self.progress is not None:
             self.progress.close()
@@ -425,6 +427,9 @@ class Training(Feature):
         # In the production's audit log, then nothing more until it ends.
         if self.host.audit is not None:
             self.host.audit.practise(True, {"builtin": builtin, "config": "" if builtin else source})
+        # 機能の使われ方: nothing counted while practising.
+        if getattr(self.host, "feature_use", None) is not None:
+            self.host.feature_use.practise(True)
         training_io.begin(training_io.TrainingSession(files, source, builtin, server, production=production,
                                                       from_production=taken))
         self.context.switch_files()
@@ -499,6 +504,8 @@ class Training(Feature):
         self._forget_lists()
         if self.host.audit is not None:
             self.host.audit.practise(False)
+        if getattr(self.host, "feature_use", None) is not None:
+            self.host.feature_use.practise(False)
         self._entries_state()
         # The practice's project let go (nothing to keep), the one of before opened again once the settings file is read.
         QgsProject.instance().setDirty(False)

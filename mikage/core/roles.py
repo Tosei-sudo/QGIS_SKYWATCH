@@ -115,6 +115,7 @@ FEATURES: dict[str, frozenset] = {
     "observations.clear": frozenset({ADMIN}),
     "接続と表の点検…": frozenset({ADMIN}),
     "監査ログ…": frozenset({ADMIN}),
+    "機能の使われ方…": frozenset({ADMIN}),
     "Python API リファレンス…": frozenset({ADMIN}),
     "サーバ処理…": frozenset({ADMIN}),
     #: ArcGIS Web マップとして保存: 「ポータルに保存…」 (the JSON file is for everyone).

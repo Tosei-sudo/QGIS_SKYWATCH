@@ -1,6 +1,6 @@
 """
 The plugin's own entries (MENU_TOP): 「担当と個人設定…」「ツールバーのボタン…」「ドックのレイアウト」
-「ドックを初期位置に戻す」「接続と表の点検…」「監査ログ…」「使い方（ヘルプ）…」「Python API リファレンス…」
+「ドックを初期位置に戻す」「接続と表の点検…」「監査ログ…」「機能の使われ方…」「使い方（ヘルプ）…」「Python API リファレンス…」
 「設定…」, the settings file's problems in the message bar and the lists' column drag (`columnDrag`).
 """
 from __future__ import annotations
@@ -20,7 +20,7 @@ from ..ui.toolbar_buttons import ToolbarButtonsDialog
 from .base import Feature, close, icon, tr
 
 #: The dialogs closed when the roles in use no longer have their entry (担当).
-ROLE_DIALOGS = (("health_dialog", "接続と表の点検…"), ("api_reference", "Python API リファレンス…"))
+ROLE_DIALOGS = (("health_dialog", "接続と表の点検…"), ("api_reference", "Python API リファレンス…"), ("feature_use_dialog", "機能の使われ方…"))
 
 
 #: The help's section on MIKAGE 練習版 (help/src/025-training.html).
@@ -28,7 +28,7 @@ TRAINING_EDITION_HELP = "training-edition"
 
 
 class Platform(Feature):
-    COMMANDS = ("open_settings", "open_first_setup", "open_toolbar_buttons", "open_health_check", "open_audit_log", "open_help",
+    COMMANDS = ("open_settings", "open_first_setup", "open_toolbar_buttons", "open_health_check", "open_audit_log", "open_feature_use", "open_help",
                 "open_api_reference")
 
     def __init__(self, host):
@@ -41,6 +41,7 @@ class Platform(Feature):
         host.help_dialog = None
         host.api_reference = None
         host.health_dialog = None
+        host.feature_use_dialog = None
         self._help_menu = None
         self._problems_shown: Optional[tuple] = None
         self._bar_help: Optional[error_help.BarHelp] = None
@@ -72,6 +73,8 @@ class Platform(Feature):
         self.entry("health_check", "接続と表の点検…", "open_health_check")
         # 「監査ログ」: what is recorded where and what was sent (ui/audit_status.py).
         self.entry("audit_log", "監査ログ…", "open_audit_log")
+        # 「機能の使われ方」: how often each feature is used, by role, least used first (ui/feature_use_dialog.py).
+        self.entry("feature_use", "機能の使われ方…", "open_feature_use")
         # 「使い方（ヘルプ）」: the help for everyday users, bundled HTML (help/index.html, ui/help_dialog.py).
         host.help_action = self.entry("help", "使い方（ヘルプ）…", "open_help", name="SatObsHelp")
         # Also in QGIS's Help ▸ Plugins.
@@ -167,6 +170,20 @@ class Platform(Feature):
         """「監査ログ…」: what is recorded where, what was sent, sending now and checking the folder."""
         return self.host.audit.open_dialog() if self.host.audit is not None else None
 
+    def open_feature_use(self):
+        """「機能の使われ方…」: the dialog (not blocking QGIS), read at once."""
+        from ..ui.feature_use_dialog import FeatureUseDialog
+
+        host = self.host
+        if host.feature_use is None or self.context is None:
+            return None
+        if host.feature_use_dialog is None:
+            host.feature_use_dialog = FeatureUseDialog(host.feature_use, host.use_known, self.window())
+        host.feature_use_dialog.show()
+        host.feature_use_dialog.raise_()
+        host.feature_use_dialog.load()
+        return host.feature_use_dialog
+
     def open_health_check(self):
         """「接続と表の点検…」: the dialog (not blocking QGIS), checking right away."""
         from ..ui.health_dialog import HealthDialog
@@ -229,6 +246,8 @@ class Platform(Feature):
             self._help_menu = None
         close(host.api_reference)
         host.api_reference = None
+        close(host.feature_use_dialog)
+        host.feature_use_dialog = None
         close(host.setup_dialog)
         host.setup_dialog = None
         close(host.toolbar_dialog)

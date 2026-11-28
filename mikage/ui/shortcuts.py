@@ -39,6 +39,10 @@ GLOBAL = [
     ("ToggleMarks", "観測記録: 地図の印の表示・非表示", "Ctrl+Alt+D"),
 ]
 
+#: The keys that open a dock: the dock's object name (機能の使われ方 counts them as uses of that dock's entry).
+OPENS = {"ShowObservations": "SatObsObservations", "ShowCatalog": "SatObsImageCatalog", "ShowImagingPlan": "SatObsImagingPlan",
+         "ShowRequests": "SatObsRequests"}
+
 #: The keys of a feature some roles only use (core/roles.FEATURES): off while the roles in use do not have it.
 FEATURES = {
     "ShowObservations": "観測記録", "NextImage": "観測記録", "PreviousImage": "観測記録", "ToggleRecording": "観測記録",
@@ -87,10 +91,7 @@ class Shortcuts:
         self.docks = docks
         self.actions: dict[str, QAction] = {}
         slots = {
-            "ShowObservations": lambda: self.show_dock("SatObsObservations"),
-            "ShowCatalog": lambda: self.show_dock("SatObsImageCatalog"),
-            "ShowImagingPlan": lambda: self.show_dock("SatObsImagingPlan"),
-            "ShowRequests": lambda: self.show_dock("SatObsRequests"),
+            **{key: (lambda dock=dock: self.show_dock(dock)) for key, dock in OPENS.items()},
             "ToggleNoticeFeed": lambda: toggle_feed() if toggle_feed else self.show_dock("SatObsNotices"),
             "NextImage": lambda: self._observations("step", 1),
             "PreviousImage": lambda: self._observations("step", -1),

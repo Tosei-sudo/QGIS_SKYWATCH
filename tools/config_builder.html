@@ -194,6 +194,7 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "requestExports",
   "editTracking",
   "auditLog",
+  "featureUse",
   "alertReports",
   "observationExports",
   "assignments",
@@ -681,6 +682,18 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
    "residual": "RESIDUAL_M",
    "by": "CORRECTED_BY",
    "at": "CORRECTED_AT"
+  },
+  "featureUse": {
+   "date": "USE_DATE",
+   "user": "USER_KEY",
+   "roles": "ROLE_NAMES",
+   "dock": "DOCK_NAME",
+   "feature": "FEATURE_NAME",
+   "place": "PLACE_KIND",
+   "count": "USE_COUNT",
+   "minutes": "USE_MINUTES",
+   "version": "PLUGIN_VERSION",
+   "send": "SEND_ID"
   }
  },
  "roleCodes": [
@@ -2153,6 +2166,8 @@ const SPEC = [
         N("keepDays", "この PC に残す日数", { min: 1, ph: "90", help: "送り終えたものだけ消す" }),
         T("localFolder", "この PC の保存先", { help: "既定は QGIS のプロファイルの mikage/audit" }),
       ]) },
+    { key: "featureUse", label: "機能の使われ方", doc: "機能の使われ方featureuse", help: "どのメニュー・ボタン・ドックがどれだけ使われたか（日・担当・機能・どこからごとの回数）を数え、1 時間ごとに増えた分を Esri の表に行として足す（メニュー「機能の使われ方…」で集計）。利用者名・入力した文字・画像や記録の中身は記録しない。書かなければこの PC の中だけで数える。false で数えない。",
+      field: TJ("featureUse", "使われ方のテーブル（行を足すだけ）", { ph: "URL か { \"url\", \"fields\", \"sendMinutes\" } か false", help: "TBL_FEATURE_USE。役割: " + Object.entries(K.roles.featureUse).map(([k, v]) => `${k}（${v}）`).join("・") + "。sendMinutes は送る間隔（分、既定 60・5 以上）。作成者・更新者の属性は付けない" }) },
   ] },
   { group: "日時", keys: [
     { key: "timeZones", label: "タイムゾーンの規則", doc: "日時のタイムゾーンtimezonetimezones", help: "URL に合うサービスの日時の本当のタイムゾーン。各項目の timeZone が優先。",
@@ -2218,6 +2233,7 @@ const DOC_FILES = {
   "画像補正": "docs/features/enhance.md",
   "クイック幾何補正": "docs/features/enhance.md",
   "監査ログauditlog": "docs/admin/operations.md",
+  "機能の使われ方featureuse": "docs/admin/operations.md",
   "移動体aisads-b": "docs/features/observations.md",
   "背景地図": "docs/features/map.md",
   "衛星の障害情報satelliteoutages": "docs/features/plan.md",
@@ -2316,7 +2332,7 @@ function field(f, obj, commit, item) {
       const s = e.target.value.trim();
       if (s.startsWith("{") || s.startsWith("[")) {
         try { set(loadJsonc(s)); e.target.classList.remove("invalid"); } catch (err) { e.target.classList.add("invalid"); }
-      } else set(s === "" ? undefined : s);
+      } else set(s === "" ? undefined : s === "false" ? false : s === "true" ? true : s);
     } });
   } else if (t === "roles") {
     control = rolesField(f, obj, commit);

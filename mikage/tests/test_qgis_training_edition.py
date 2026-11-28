@@ -115,7 +115,7 @@ def test_it_practises_from_the_start_and_cannot_end(plugin):
     assert p.context.config.user_roles is None
     assert session.production is not None and session.production.source == shipped
     # Not ended: no entry, no button, and asked anyway, refused.
-    for text in ("練習モードを始める", "練習モードを終える", "判読の練習の問題を作る…", "判読の練習の成績…", "監査ログ…"):
+    for text in ("練習モードを始める", "練習モードを終える", "判読の練習の問題を作る…", "判読の練習の成績…", "監査ログ…", "機能の使われ方…"):
         assert not p.allows(text), text
     assert not training._actions["練習モードを終える"].isVisible() and not training._actions["練習モードを始める"].isVisible()
     assert training._actions["チュートリアル…"].isVisible() and training._actions["判読の練習…"].isVisible()

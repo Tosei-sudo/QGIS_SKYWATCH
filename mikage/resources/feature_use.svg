@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- 機能の使われ方: bars of how often, the shortest one marked -->
+  <rect x="3" y="3" width="26" height="26" rx="3" fill="#fff" stroke="#475569" stroke-width="2"/>
+  <path d="M8 23V15M13 23V9M18 23V12M23 23v-2" stroke="#1d4ed8" stroke-width="3.2" stroke-linecap="round"/>
+  <path d="M7 26.5h18" stroke="#475569" stroke-width="1.6" stroke-linecap="round"/>
+  <circle cx="23" cy="16.5" r="2.6" fill="none" stroke="#b45309" stroke-width="1.8"/>
+</svg>

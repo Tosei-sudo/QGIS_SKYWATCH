@@ -25,7 +25,7 @@ from mikage.ui.settings_dialog import SettingsDialog  # noqa: E402
 ROLES = "https://example.com/arcgis/rest/services/MIKAGE/FeatureServer/30"
 S, T = "esriFieldTypeString", "esriFieldTypeDate"
 FIELDS = {"USER_NAME": S, "ROLE_NAME": S, "CREATED_USER": S, "CREATED_DATE": T}
-ADMIN_ENTRIES = ("接続と表の点検…", "監査ログ…", "Python API リファレンス…", "サーバ処理…")
+ADMIN_ENTRIES = ("接続と表の点検…", "監査ログ…", "機能の使われ方…", "Python API リファレンス…", "サーバ処理…")
 
 
 @pytest.fixture(autouse=True)

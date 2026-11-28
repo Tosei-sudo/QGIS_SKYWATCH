@@ -5,7 +5,7 @@ import os
 import re
 import unicodedata
 
-from mikage.core import edit_stamp, events, interests, reference_info, roles
+from mikage.core import edit_stamp, events, feature_use, interests, reference_info, roles
 from mikage.core.geo_fix import DEFAULT_FIX_FIELDS
 from mikage.core.image_reviews import DEFAULT_REVIEW_FIELDS
 from mikage.core.obs import alerts
@@ -51,6 +51,7 @@ DEFAULTS = {
     "TBL_IMAGE_REVIEW": DEFAULT_REVIEW_FIELDS,
     "TBL_REFERENCE_INFO": reference_info.DEFAULT_INFO_FIELDS,
     "TBL_REFERENCE_LINK": reference_info.DEFAULT_LINK_FIELDS,
+    "TBL_FEATURE_USE": feature_use.DEFAULT_FIELDS,
 }
 NAME = re.compile(r"^[A-Z][A-Z0-9_]{0,29}$")
 

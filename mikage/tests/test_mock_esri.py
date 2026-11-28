@@ -323,6 +323,9 @@ def test_every_layer_written_gets_who_and_when(server, monkeypatch):
     # Every layer of the sample has the fields.
     for s in sample.services(server[2], server[0], with_features=False)["services"]:
         for layer in s["layers"]:
+            if (s["name"], layer["id"]) in sample.NO_EDIT_FIELDS:  # 機能の使われ方: no name in it
+                assert not set(sample.EDIT_FIELDS) & set(layer["fields"]), (s["name"], layer["id"])
+                continue
             assert set(sample.EDIT_FIELDS) <= set(layer["fields"]), (s["name"], layer["id"])
 
 

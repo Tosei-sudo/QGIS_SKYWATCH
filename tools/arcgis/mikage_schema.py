@@ -33,6 +33,8 @@ class Table(NamedTuple):
     fields: tuple = ()
     #: 属性インデックスを張る属性（ID で引く属性）。
     indexes: tuple = ()
+    #: 書き込みのテーブルでも作成者・更新者の 4 属性を足さない（False）: 機能の使われ方（利用者名を入れない表）。
+    stamped: bool = True
 
 
 #: 作成者・更新者の 4 属性（設定ファイルの `editTracking` の既定）。書き込みのテーブルの最後に足す。
@@ -594,6 +596,18 @@ TABLES = (
         F("NOTE", "備考", "TEXT", 4000, "note"),
         F("SORT_ORDER", "並び順", "LONG", None, "order"),
     )),
+    Table("TBL_FEATURE_USE", "機能の使われ方", None, writable=True, setting="featureUse", stamped=False, fields=(
+        F("USE_DATE", "日", "DATE", None, "date"),
+        F("USER_KEY", "利用者の符号", "TEXT", 32, "user"),
+        F("ROLE_NAMES", "担当", "TEXT", 255, "roles"),
+        F("DOCK_NAME", "ドック", "TEXT", 255, "dock"),
+        F("FEATURE_NAME", "機能", "TEXT", 255, "feature"),
+        F("PLACE_KIND", "どこから", "TEXT", 16, "place"),
+        F("USE_COUNT", "回数", "LONG", None, "count"),
+        F("USE_MINUTES", "時間（分）", "DOUBLE", None, "minutes"),
+        F("PLUGIN_VERSION", "プラグインの版", "TEXT", 32, "version"),
+        F("SEND_ID", "送信ID", "TEXT", 32, "send"),
+    )),
 )
 
 #: 属性インデックス（テーブル → 属性）。ID で引く・紐付ける属性と、日時の範囲で引く属性（2026-11-18: 200 人規模の点検で
@@ -631,6 +645,7 @@ INDEXES = {
     "TBL_AREA_CATEGORY": ("CATEGORY_ID",),
     "TBL_REQUEST_AREA_CHANGE": ("REQ_ID", "NAMED_AREA_ID"),
     "TBL_TAXONOMY_MEMBER": ("CLASS_PATH", "MEMBER_NAME"),
+    "TBL_FEATURE_USE": ("USE_DATE", "SEND_ID"),
 }
 
 TABLES = tuple(t._replace(indexes=INDEXES.get(t.name, ())) for t in TABLES)
@@ -646,8 +661,8 @@ LEGACY_FIELDS = {
 
 
 def all_fields(table: Table, edit_tracking: bool = True) -> tuple:
-    """そのテーブルに作る属性（書き込みのテーブルは作成者・更新者の 4 属性も）。"""
-    return table.fields + (EDIT_FIELDS if edit_tracking and table.writable else ())
+    """そのテーブルに作る属性（書き込みのテーブルは作成者・更新者の 4 属性も。機能の使われ方は除く）。"""
+    return table.fields + (EDIT_FIELDS if edit_tracking and table.writable and table.stamped else ())
 
 
 def index_name(table: str, field: str) -> str:
@@ -735,6 +750,8 @@ def plugin_config(urls: dict) -> dict:
         config["interests"] = interests
     if has("TBL_USER_ROLE"):
         config["userRoles"] = urls["TBL_USER_ROLE"]
+    if has("TBL_FEATURE_USE"):
+        config["featureUse"] = urls["TBL_FEATURE_USE"]
     if has("TBL_SATELLITE_OUTAGE"):
         config["satelliteOutages"] = urls["TBL_SATELLITE_OUTAGE"]
     if has("TBL_GLOSSARY"):

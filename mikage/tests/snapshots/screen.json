@@ -536,6 +536,12 @@
    "icon": "audit_log.svg:991b33430780"
   },
   {
+   "text": "機能の使われ方…",
+   "name": "",
+   "checkable": false,
+   "icon": "feature_use.svg:94d338aa8bf6"
+  },
+  {
    "text": "使い方（ヘルプ）…",
    "name": "SatObsHelp",
    "checkable": false,
@@ -605,6 +611,7 @@
   "新着画像（大きな画面）",
   "新規スクラッチレイヤー（テンプレート）…",
   "検出結果を DB へ転記…",
+  "機能の使われ方…",
   "正距方位での重心…",
   "測地線バッファ…",
   "物体検出（AI）…",
@@ -3539,6 +3546,7 @@
   "detectionOutputs",
   "editTracking",
   "events",
+  "featureUse",
   "geocoders",
   "glossary",
   "gpServices",
@@ -3755,6 +3763,7 @@
   "SAVED_KEY='layer_templates'",
   "SAVED_KEY='training/saved'",
   "TAB_KEY='interestsTab'",
+  "USER_KEY='featureUseId'",
   "f'request_groups/{where}'"
  ]
 }
