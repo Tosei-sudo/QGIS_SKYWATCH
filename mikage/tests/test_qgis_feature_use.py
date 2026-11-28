@@ -11,8 +11,9 @@ from qgis.testing import start_app  # noqa: E402
 APP = start_app()
 
 from qgis.core import QgsSettings  # noqa: E402
-from qgis.PyQt.QtCore import QCoreApplication  # noqa: E402
-from qgis.PyQt.QtWidgets import QAbstractButton, QComboBox, QPushButton, QTabBar  # noqa: E402
+from qgis.core import Qgis  # noqa: E402
+from qgis.PyQt.QtCore import QCoreApplication, Qt  # noqa: E402
+from qgis.PyQt.QtWidgets import QAbstractButton, QComboBox, QDialog, QLabel, QMenu, QPushButton, QTabBar  # noqa: E402
 
 from mikage.core import feature_use as fu  # noqa: E402
 from mikage.core.esri import EsriClient  # noqa: E402
@@ -305,6 +306,136 @@ def test_off_in_the_settings_file_and_while_practising(tmp_path, monkeypatch):
         if p.context is not None:
             p.unload()
         QgsSettings().remove("mikage")
+
+
+def waits(keeper) -> dict:
+    """What is counted now that is not a use: (dock, feature, place) → count."""
+    return {k: n for k, n in counted(keeper).items() if not fu.is_use(k[2])}
+
+
+def test_how_long_until_used_or_given_up(plugin, monkeypatch, tmp_path):
+    p, iface, _store = plugin
+    keeper = p.feature_use
+    keeper.counter.take()
+    # The plugin's menu (under QGIS's プラグイン; the fake QGIS has none): opened 40 s before an entry is chosen.
+    root, sub = QMenu("MIKAGE"), QMenu("撮像依頼")
+    keeper.watch_menu(root, [sub])
+    menu, action = submenu_of(p, "撮像計画")
+    p.docks["SatObsImagingPlan"].hide()
+    settle()
+    root.aboutToShow.emit()
+    sub.aboutToShow.emit()
+    keeper._menu_opened -= 40
+    root.aboutToHide.emit()
+    menu.aboutToHide.emit()
+    action.trigger()
+    settle()
+    assert waits(keeper).get(("", "撮像計画", "MENU_PICK:2M")) == 1
+    # Opened and closed with nothing chosen: by the last submenu opened, a moment after it closed.
+    monkeypatch.setattr(feature_use, "MENU_CLOSED", 0.05)
+    root.aboutToShow.emit()
+    sub.aboutToShow.emit()
+    root.aboutToHide.emit()
+    assert wait_for(lambda: waits(keeper).get(("", "メニュー: 撮像依頼", "MENU_NONE:5S")) == 1)
+    # The dock it opened: until a control in it is used (the clock stopped while QGIS was not in front).
+    assert "SatObsImagingPlan" in keeper._dock_wait
+    keeper._dock_wait["SatObsImagingPlan"] -= 1050  # (opened 1050 s ago, of which 1000 s with another program in front)
+    keeper._app_state(Qt.ApplicationState.ApplicationInactive)
+    keeper._away_since -= 1000
+    keeper._app_state(Qt.ApplicationState.ApplicationActive)
+    title = p.dock_entry_text("SatObsImagingPlan")
+    dock = p.docks["SatObsImagingPlan"]
+    button = next(b for b in dock.findChildren(QPushButton) if b.property("mikageFeatureUse") and b.isEnabled() and b.menu() is None)
+    button.clicked.emit(False)
+    assert waits(keeper).get(("", title, "DOCK_FIRST:2M")) == 1
+    button.clicked.emit(False)  # (only the first use)
+    assert sum(n for k, n in waits(keeper).items() if k[2].startswith("DOCK_FIRST")) == 1
+    # Opened again and closed unused at once (by mistake, most likely).
+    keeper.counter.take()
+    p.docks["SatObsImagingPlan"].hide()
+    settle()
+    p.run_menu_entry("撮像計画")
+    settle()
+    p.docks["SatObsImagingPlan"].hide()
+    settle()
+    assert waits(keeper) == {("", title, "DOCK_NONE:5S"): 1}
+    # A window of the plugin: from when it takes the focus until it is closed (its entry's line).
+    keeper.counter.take()
+    p.role_keeper.choose(["ADMIN"])
+    settle()
+    dialog = p.open_feature_use()
+    assert wait_for(lambda: dialog._task is None)
+    keeper._focus(None, dialog.tabs)
+    keeper._focus(None, dialog.tree)  # (still open: timed once)
+    dialog.reject()
+    assert waits(keeper) == {("", "機能の使われ方…", "DLG_CANCEL:5S"): 1}
+    other = QDialog()  # (not the plugin's: not timed)
+    keeper._focus(None, other)
+    assert id(other) not in keeper._dialogs
+    # The help: from the screen in front; the sections read, the searches (the words of those that found nothing).
+    keeper.counter.take()
+    import time as _time
+
+    keeper._last_dock = (title, _time.monotonic())
+    help_dialog = p.open_help("keys")
+    assert waits(keeper) == {("", title, fu.HELP_FROM): 1}
+    help_dialog._section_read()
+    help_dialog._section_read()  # (once while shown)
+    pages = [k for k in waits(keeper) if k[2] == fu.HELP_PAGE]
+    assert len(pages) == 1 and pages[0][1]
+    help_dialog.search.setText("ぜったいにない語 2026")
+    help_dialog.search.textEdited.emit("ぜったいにない語 2026")
+    help_dialog.search.setText("観測記録")
+    help_dialog.search.textEdited.emit("観測記録")
+    help_dialog.hide()  # (the last words, as the window closes)
+    w = waits(keeper)
+    assert w.get(("", "検索", fu.HELP_FIND)) == 1 and not any(k[2] == fu.HELP_MISS for k in w)
+    help_dialog.show()
+    help_dialog.search.setText("ぜったいにない語 2026")
+    help_dialog.search.textEdited.emit("ぜったいにない語 2026")
+    help_dialog._search_done()
+    assert waits(keeper).get(("", "ぜったいにない語 #", fu.HELP_MISS)) == 1
+    help_dialog.close()
+    # An error code shown: on a dock's status line (once per text), on the message bar.
+    from mikage.core import errors
+    from mikage.ui.docks import plain_label
+
+    dock.show()
+    settle()
+    label = plain_label(QLabel(dock.widget()))
+    label.setText(errors.tagged("計算に失敗: サーバーに接続できない", "E101"))
+    label.show()
+    label.repaint()
+    label.repaint()
+    iface.messageBar().pushMessage("撮像計画", errors.tagged("保存に失敗: ほかの人が先に変更", "E301"), Qgis.MessageLevel.Warning, 0)
+    settle()
+    w = waits(keeper)
+    assert w.get((title, "E101", fu.ERROR)) == 1 and w.get((fu.MESSAGE_BAR, "E301", fu.ERROR)) == 1
+    iface.messageBar().clearWidgets()
+    # In 「機能の使われ方…」: the tab 迷い, the tab ヘルプ.
+    keeper.counter.put_back({(fu.today(), "", "v", "", "撮像計画", "MENU_PICK:2M"): [1, 0.7]})
+    assert keeper.tick(send=True)
+    assert wait_for(lambda: keeper._task is None and keeper.last_sent is not None)
+    dialog = p.open_feature_use()
+    assert wait_for(lambda: dialog._task is None)
+    dialog.tabs.setCurrentIndex(1)
+    rows = {dialog.wait_tree.topLevelItem(i).text(0): dialog.wait_tree.topLevelItem(i) for i in range(dialog.wait_tree.topLevelItemCount())}
+    assert title in rows and rows[title].text(3)
+    assert "迷いのあった機能" in dialog.status.text() and not dialog.kind.isEnabled()
+    # (Uses are not counted from the waits.)
+    assert all(not line.feature.startswith("メニュー: ") for line in dialog.summary.lines)
+    dialog.tabs.setCurrentIndex(2)
+    assert "ヘルプの検索" in dialog.status.text()
+    texts = [dialog.help_tree.topLevelItem(i).text(1) for i in range(dialog.help_tree.topLevelItemCount())]
+    assert "ぜったいにない語 #" in texts
+    path = tmp_path / "waits.csv"
+    from mikage.ui import feature_use_dialog
+
+    monkeypatch.setattr(feature_use_dialog.QFileDialog, "getSaveFileName", lambda *a, **k: (str(path), ""))
+    dialog.tabs.setCurrentIndex(1)
+    dialog.export()
+    assert path.read_text(encoding="utf-8-sig").startswith("ドック,機能,迷い")
+    dialog.close()
 
 
 def test_the_entry_is_the_administrators():

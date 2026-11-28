@@ -75,6 +75,37 @@ START_FEATURE = "MIKAGE"
 #: A role filter for the people who ticked no role.
 NO_ROLE = "NONE"
 
+# 迷い (tsudo, 2026-11-28: 「操作に迷った時間を分析する情報を集められないかな〜」): how long
+# before a feature was used, or given up, with the help read and the error codes shown.
+# Not uses: these rows are left out of the uses' sums.
+
+#: The waits, kept as PLACE_KIND 「kind:band」 (one row per wait; minutes: the wait, 0 for LONG).
+MENU_PICK, MENU_NONE = "MENU_PICK", "MENU_NONE"
+DOCK_FIRST, DOCK_NONE = "DOCK_FIRST", "DOCK_NONE"
+DLG_OK, DLG_CANCEL = "DLG_OK", "DLG_CANCEL"
+#: A plugin menu opened until an entry was chosen / closed with nothing chosen.
+#: A dock opened by the person until a control in it was first used / closed (or put behind) unused.
+#: A plugin window opened until it was closed with OK / otherwise.
+WAITS = (MENU_PICK, MENU_NONE, DOCK_FIRST, DOCK_NONE, DLG_OK, DLG_CANCEL)
+#: The bands of a wait (s at most, name, on screen); longer: LONG, most likely away (not taken for hesitation).
+BANDS = ((5, "5S", "5 秒まで"), (30, "30S", "5〜30 秒"), (120, "2M", "30 秒〜2 分"), (300, "5M", "2〜5 分"))
+LONG = "LONG"
+#: The help opened while this screen was in front (feature: the screen).
+HELP_FROM = "HELP_FROM"
+#: A section of the help read (feature: its heading).
+HELP_PAGE = "HELP_PAGE"
+#: A search in the help (feature 「検索」) / one that found nothing (feature: the words, digits as #, MAX_MISS at most).
+HELP_FIND, HELP_MISS = "HELP_FIND", "HELP_MISS"
+#: An error code shown (feature: the code, dock: where).
+ERROR = "ERROR"
+NOT_USES = frozenset({HELP_FROM, HELP_PAGE, HELP_FIND, HELP_MISS, ERROR})
+#: A search's words kept at most (tsudo chose 「見つからなかった語だけ残す」).
+MAX_MISS = 30
+#: Where a screen is not known (the map, QGIS's own windows).
+ELSEWHERE = "地図・そのほか"
+#: Where an error code shown outside the docks was (the main window's message bar).
+MESSAGE_BAR = "メッセージバー"
+
 #: The table's attributes by role (`featureUse.fields`).
 DEFAULT_FIELDS = {
     "date": "USE_DATE", "user": "USER_KEY", "roles": "ROLE_NAMES", "dock": "DOCK_NAME", "feature": "FEATURE_NAME",
@@ -155,6 +186,34 @@ def label_of(text: Optional[str]) -> str:
     text = _COUNT_IN_BRACKETS.sub("", text)
     text = _DIGITS.sub("#", text)
     return _SPACE.sub(" ", text).strip()[:MAX_LABEL]
+
+
+def band_of(seconds: float) -> str:
+    for most, name, _text in BANDS:
+        if seconds <= most:
+            return name
+    return LONG
+
+
+def wait_place(kind: str, seconds: float) -> str:
+    """The PLACE_KIND of a wait: 「DOCK_FIRST:30S」."""
+    return f"{kind}:{band_of(seconds)}"
+
+
+def wait_of(place: str) -> tuple[str, str]:
+    """(kind, band) of a wait's PLACE_KIND, ("", "") for any other."""
+    kind, _sep, band = (place or "").partition(":")
+    return (kind, band) if kind in WAITS and band else ("", "")
+
+
+def is_use(place: str) -> bool:
+    """A use of a feature (or a dock shown, the plugin started), not a wait, the help or an error."""
+    return ":" not in (place or "") and place not in NOT_USES
+
+
+def search_label(text: Optional[str]) -> str:
+    """A search that found nothing as kept: one line, digits as #, MAX_MISS at most."""
+    return label_of(text)[:MAX_MISS]
 
 
 def tip_label(text: Optional[str]) -> str:
@@ -550,7 +609,7 @@ def summarize(groups: Iterable[Group], known: Iterable[tuple[str, str]] = ()) ->
     for dock, feature, place, user, count, minutes in groups:
         if user:
             everyone.add(user)
-        if place == START:
+        if place == START or not is_use(place):
             continue
         line = lines.setdefault((dock, feature), UseLine(dock, feature))
         if place == SHOWN:
@@ -565,6 +624,144 @@ def summarize(groups: Iterable[Group], known: Iterable[tuple[str, str]] = ()) ->
         lines.setdefault((dock, feature), UseLine(dock, feature))
     ordered = sorted(lines.values(), key=lambda line: (line.users, line.count, line.shown, line.dock, line.feature))
     return UseSummary(ordered, len(everyone))
+
+
+# ---- 迷い ---------------------------------------------------------------------------------------------
+
+
+@dataclass
+class WaitLine:
+    """A feature's waits: chosen from the menu after, used after it opened, given up; the help opened from it, the errors in it."""
+    dock: str
+    feature: str
+    #: band → how many (MENU_PICK).
+    pick: dict = field(default_factory=dict)
+    #: band → how many (DOCK_FIRST, DLG_OK).
+    first: dict = field(default_factory=dict)
+    #: band → how many (MENU_NONE, DOCK_NONE, DLG_CANCEL).
+    none: dict = field(default_factory=dict)
+    help_from: int = 0
+    #: code → how many.
+    errors: dict = field(default_factory=dict)
+    people: set = field(default_factory=set)
+
+    @property
+    def slow(self) -> int:
+        """Chosen or used after more than 30 s (up to 5 min)."""
+        return sum(d.get(b, 0) for d in (self.pick, self.first) for b in ("2M", "5M"))
+
+    @property
+    def given_up(self) -> int:
+        """Closed unused (not left for more than 5 min)."""
+        return sum(n for b, n in self.none.items() if b != LONG)
+
+    @property
+    def quick(self) -> int:
+        """Closed unused within 5 s (opened by mistake, most likely)."""
+        return self.none.get("5S", 0)
+
+    @property
+    def error_count(self) -> int:
+        return sum(self.errors.values())
+
+    @property
+    def score(self) -> int:
+        """How much it was hesitated over: slow + given up + the help opened from it + errors."""
+        return self.slow + self.given_up + self.help_from + self.error_count
+
+
+def middle(bands: dict) -> str:
+    """The band of the middle wait (LONG left out), "" when none."""
+    counts = [(name, bands.get(name, 0)) for _most, name, _t in BANDS]
+    total = sum(n for _b, n in counts)
+    if not total:
+        return ""
+    seen = 0
+    for (_most, name, text), (_b, n) in zip(BANDS, counts):
+        seen += n
+        if seen * 2 >= total:
+            return text
+    return BANDS[-1][2]
+
+
+@dataclass
+class HelpLine:
+    kind: str  # HELP_PAGE or HELP_MISS
+    text: str
+    count: int = 0
+    people: set = field(default_factory=set)
+
+
+@dataclass
+class WaitSummary:
+    lines: list
+    helps: list
+    #: Searches in the help, and those that found nothing.
+    searches: int = 0
+    misses: int = 0
+
+
+def summarize_waits(groups: Iterable[Group]) -> WaitSummary:
+    """The waits, help and errors by feature, the most hesitated over first; the help's sections read and searches missed."""
+    lines: dict[tuple[str, str], WaitLine] = {}
+    helps: dict[tuple[str, str], HelpLine] = {}
+    searches = misses = 0
+
+    def line_of(dock: str, feature: str) -> WaitLine:
+        return lines.setdefault((dock, feature), WaitLine(dock, feature))
+
+    for dock, feature, place, user, count, _minutes in groups:
+        kind, band = wait_of(place)
+        if kind:
+            line = line_of(dock, feature)
+            target = line.pick if kind == MENU_PICK else line.first if kind in (DOCK_FIRST, DLG_OK) else line.none
+            target[band] = target.get(band, 0) + count
+        elif place == HELP_FROM:
+            line = line_of(dock, feature)
+            line.help_from += count
+        elif place == ERROR:
+            line = line_of("", dock or MESSAGE_BAR)
+            line.errors[feature] = line.errors.get(feature, 0) + count
+        elif place in (HELP_PAGE, HELP_MISS):
+            h = helps.setdefault((place, feature), HelpLine(place, feature))
+            h.count += count
+            if user:
+                h.people.add(user)
+            if place == HELP_MISS:
+                misses += count
+            continue
+        elif place == HELP_FIND:
+            searches += count
+            continue
+        else:
+            continue
+        if user:
+            line.people.add(user)
+    ordered = sorted(lines.values(), key=lambda line: (-line.score, -line.given_up, line.dock, line.feature))
+    help_lines = sorted(helps.values(), key=lambda h: (h.kind != HELP_MISS, -len(h.people), -h.count, h.text))
+    return WaitSummary(ordered, help_lines, searches, misses)
+
+
+def wait_csv(summary: WaitSummary, newline: str = "\r\n") -> str:
+    """The waits as CSV (one line per feature)."""
+    import csv
+    import io
+
+    buffer = io.StringIO()
+    w = csv.writer(buffer, lineterminator=newline)
+    w.writerow(["ドック", "機能", "迷い", "メニューで選ぶまで（真ん中）", "開いてから使うまで（真ん中）", "30 秒を超えた", "使わずに閉じた",
+                "5 秒以内に閉じた", "ヘルプを開いた", "エラー", "人"])
+    for line in summary.lines:
+        w.writerow([line.dock, line.feature, line.score, middle(line.pick), middle(line.first), line.slow, line.given_up, line.quick,
+                    line.help_from, errors_text(line.errors), len(line.people)])
+    for h in summary.helps:
+        w.writerow(["ヘルプ", f"{'見つからなかった検索' if h.kind == HELP_MISS else '読んだ節'}: {h.text}", "", "", "", "", "", "", "", "", len(h.people)])
+    return buffer.getvalue()
+
+
+def errors_text(errors: dict) -> str:
+    """「E104 ×3・E101」, the most shown first."""
+    return "・".join(f"{code} ×{n}" if n > 1 else code for code, n in sorted(errors.items(), key=lambda t: (-t[1], t[0])))
 
 
 def csv_text(summary: UseSummary, newline: str = "\r\n") -> str:

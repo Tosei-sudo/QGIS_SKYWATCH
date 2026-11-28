@@ -23,6 +23,11 @@ An エラーコード typed in the search (「E101」, 「e-101」, 「Ｅ１０
 row of 「エラーコード一覧」 (marked whole), with the code's text beside the box;
 `go("E101")` does the same (the message bar's 「対処法」, a status line's click).
 
+For 機能の使われ方's 迷い: `sectionRead` (a section at the top of the page for
+READ seconds, once each time the window is shown) and `searched` (words typed
+by the person, SEARCHED seconds after the last key or as the window closes,
+with their number of hits).
+
 Admin matters (the settings file, the Esri tables) stay in the README.
 """
 from __future__ import annotations
@@ -32,7 +37,7 @@ import os
 import re
 from typing import Callable, Optional
 
-from qgis.PyQt.QtCore import QEvent, QObject, Qt, QUrl
+from qgis.PyQt.QtCore import QEvent, QObject, QPoint, Qt, QTimer, QUrl, pyqtSignal
 from qgis.PyQt.QtGui import QColor, QDesktopServices, QKeySequence, QTextCharFormat, QTextCursor
 from qgis.PyQt.QtWidgets import (
     QDialog, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QPushButton, QSplitter, QTextBrowser, QTextEdit, QTreeWidget, QTreeWidgetItem, QVBoxLayout,
@@ -56,6 +61,11 @@ HIT = "#fde68a"
 CURRENT = "#fb923c"
 #: The row of an エラーコード searched for.
 ROW = "#fef3c7"
+
+#: A section read: at the top of the page this long (s).
+READ = 3
+#: A search done: no key for this long (s).
+SEARCHED = 2
 
 _HEADING = re.compile(r'<h([23])\s+id="([^"]+)"[^>]*>(.*?)</h\1>', re.S)
 _TAG = re.compile(r"<[^>]+>")
@@ -91,6 +101,11 @@ def links(page: str) -> list[str]:
 
 
 class HelpDialog(QDialog):
+    #: A section read (its heading).
+    sectionRead = pyqtSignal(str)
+    #: Words searched by the person, and how many hits.
+    searched = pyqtSignal(str, int)
+
     def __init__(self, run: Optional[Callable[[str], bool]] = None, parent=None, path: str = PAGE):
         super().__init__(parent)
         fit_text(self)
@@ -170,6 +185,49 @@ class HelpDialog(QDialog):
         self._row_index: Optional[int] = None
         self._row: list[QTextCursor] = []
         self._enable()
+        # What was read and searched (機能の使われ方).
+        self._read: set[str] = set()
+        self._read_timer = QTimer(self)
+        self._read_timer.setSingleShot(True)
+        self._read_timer.setInterval(READ * 1000)
+        self._read_timer.timeout.connect(self._section_read)
+        self.page.verticalScrollBar().valueChanged.connect(lambda _v: self._read_timer.start())
+        self._typed = ""
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(SEARCHED * 1000)
+        self._search_timer.timeout.connect(self._search_done)
+        self.search.textEdited.connect(self._edited)
+
+    def showEvent(self, event) -> None:  # noqa: N802 (Qt's name)
+        super().showEvent(event)
+        self._read.clear()
+        self._read_timer.start()
+
+    def hideEvent(self, event) -> None:  # noqa: N802 (Qt's name)
+        if self._search_timer.isActive():
+            self._search_timer.stop()
+            self._search_done()
+        self._read_timer.stop()
+        super().hideEvent(event)
+
+    def _section_read(self) -> None:
+        if not self.isVisible():
+            return
+        anchor = self.index.section_at(self.page.cursorForPosition(QPoint(4, 4)).position())
+        item = self.items.get(anchor or "")
+        if item is not None and anchor not in self._read:
+            self._read.add(anchor)
+            self.sectionRead.emit(item.text(0))
+
+    def _edited(self, text: str) -> None:
+        self._typed = text.strip()
+        self._search_timer.start()
+
+    def _search_done(self) -> None:
+        text, self._typed = self._typed, ""
+        if text:
+            self.searched.emit(text, len(self.hits))
 
     def _button(self, text: str, tip: str, slot) -> QPushButton:
         button = QPushButton(text)
