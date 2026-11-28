@@ -1,4 +1,4 @@
-"""「観測記録のエクスポート」 in QGIS: from the plugin menu, the period / place / 大分類 chosen, named areas read in a task, the file."""
+"""「観測記録の書き出し」 in QGIS: from the plugin menu, the period / place / 大分類 chosen, named areas read in a task, the file."""
 import json
 
 import pytest
@@ -49,7 +49,7 @@ def test_exports_by_period_place_and_class_with_place_names(plugin, tmp_path):  
     book.add(139.7, 35.3, object="船A", kind="船舶 > 支援船", activity="航行")
     book.add(139.9, 35.5, object="機B", kind="航空機", activity="飛行")
     book.add(141.0, 35.5, object="船C", kind="船舶", activity="航行")
-    # From the plugin menu: 観測記録 ▸ 観測記録のエクスポート…
+    # From the plugin menu: 観測記録 ▸ 観測記録の書き出し…
     action = next(a for a in p.actions if a.objectName() == "SatObsObservationExport")
     action.trigger()
     dialog = dock._export

@@ -355,7 +355,7 @@ def test_reading_the_quotas_and_the_shots_of_their_years():
     assert read_quota_data(client, store, None, [date(2026, 11, 10)]).shots == []
     fake.layers[QUOTAS].add({"SENSOR": "OPT 1", "ANNUAL_LIMIT": 10})
     data = read_quota_data(client, replace(store, shots=None), None, [date(2026, 11, 10)])
-    assert data.shots == [] and data.problems == ["撮像の範囲（requestStores[].shots）がないため、年間撮像上限は当初の消費枚数だけで数える"]
+    assert data.shots == [] and data.problems == ["撮像の範囲の表がないため、年間撮像上限は当初の消費枚数だけで数える（管理者に連絡: requestStores[].shots）"]
     # A table without its sensor attribute cannot be used.
     with pytest.raises(EsriError, match=r"（管理者に連絡: NO_SUCH）［E704］"):
         read_quota_data(client, replace(store, quota_fields={**store.quota_fields, "sensor": "NO_SUCH"}), None, [date(2026, 11, 10)])

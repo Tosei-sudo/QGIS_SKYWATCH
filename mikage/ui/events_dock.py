@@ -12,7 +12,7 @@ note; 「終了」 closes an event (its end set to now when it had none) and
 take them out of the event, set their note. 「地図に表示」 adds the event's
 area, its images' footprints and its records' points as layers;
 「画像を検索」 searches the image catalog over the event's area and period;
-「エクスポート…」 writes its items as CSV and 「概要をコピー」 copies a few lines.
+「書き出し…」 writes its items as CSV and 「概要をコピー」 copies a few lines.
 
 Items come in from the other docks (「イベントに追加」 in 画像カタログ,
 観測記録 and 撮像依頼): a menu of the open events, the one chosen here first.
@@ -50,7 +50,7 @@ from ..qgis_io.pinned_layers import top_index
 from ..qgis_io.plan_layer import make_field
 from ..qgis_io.overviews_io import queue as overview_queue
 from ..qgis_io.tasks import run_task
-from .docks import PluginDock, ask_no, plain_tip
+from .docks import PluginDock, ask_no, name_cancel, plain_tip
 from .ports import Ports
 from .fit import fit_text
 from .list_views import column_menus
@@ -141,6 +141,7 @@ class EventForm(QDialog):
         self.problem.setStyleSheet("color: #b91c1c")
         form.addRow(self.problem)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        name_cancel(buttons)
         self.button_box = buttons
         #: Saves the values (in a task): `saver(values, done, failed)`; the form closes only once saved.
         self.saver: Optional[Callable] = None
@@ -284,7 +285,7 @@ class EventsDock(PluginDock):
             ("zoom", self.tr("範囲へ移動"), self.tr("イベントの範囲へ地図を移動"), self.zoom),
             ("map", self.tr("地図に表示"), self.tr("範囲・画像の範囲・観測記録の位置をレイヤーとして追加"), self.show_on_map),
             ("search", self.tr("画像を検索"), self.tr("イベントの範囲・期間で画像カタログを検索"), self.search_images),
-            ("export", self.tr("エクスポート…"), self.tr("項目の一覧を CSV で保存"), self.export),
+            ("export", self.tr("書き出し…"), self.tr("項目の一覧を CSV で保存"), self.export),
             ("summary", self.tr("概要をコピー"), self.tr("名前・状態・期間・件数・メモをクリップボードへ"), self.copy_summary),
         ]:
             b = QPushButton(text)

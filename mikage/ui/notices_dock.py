@@ -400,7 +400,7 @@ class NoticesDock(PluginDock):
                 continue
             catalog = self.catalog_of_notice(n)
             if catalog is None:
-                problems.append(self.tr("{id} のカタログが設定ファイルになし").format(id=n.image_id))
+                problems.append(self.tr("{id} のカタログはいまは使われていない（管理者に連絡: imageCatalogs）").format(id=n.image_id))
                 continue
             record = record_of(n.feature, catalog.fields)
             if not catalog.image_files:
@@ -447,7 +447,7 @@ class NoticesDock(PluginDock):
         opened: list = []
         notice = next(iter(self.complete([notice])), notice)
         if catalog is None:
-            problems.append(self.tr("{id} のカタログが設定ファイルになし").format(id=notice.image_id))
+            problems.append(self.tr("{id} のカタログはいまは使われていない（管理者に連絡: imageCatalogs）").format(id=notice.image_id))
         else:
             record = record_of(notice.feature, catalog.fields)
             try:

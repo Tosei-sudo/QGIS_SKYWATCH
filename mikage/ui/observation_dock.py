@@ -42,6 +42,7 @@ from .docks import PluginDock, ask_no, plain_label, plain_tip
 from .elided_combo import ElidedCombo
 from .emphasis import LIGHT, emphasize
 from .flow_layout import FlowLayout
+from .fold import Fold
 from .kind_levels import KindLevels
 from .note_assist import NoteAssist
 from .text_assist_ui import NoteFields, NoteTidy
@@ -144,7 +145,7 @@ class ObservationDock(
         self._following = False
         self._observer_cache = ""
         #: The books whose records are being read, and what waits for them (by id(book)). The records are read only
-        #: once needed (tsudo 2026-11-10): an image chosen here, or something that uses them all (通報, エクスポート…).
+        #: once needed (tsudo 2026-11-10): an image chosen here, or something that uses them all (通報, 書き出し…).
         self._reading: set[int] = set()
         #: Books reading the records around their image (one read at a time each), and things whose whole flow is read.
         self._reading_around: set[int] = set()
@@ -734,10 +735,10 @@ class ObservationDock(
         fl.addLayout(head)
         fl.addWidget(self.flow_strip)
         fl.addWidget(self.steps_table)
-        self.flow_more = QGroupBox(tr("このモノの詳細"))
-        self.flow_more.setCheckable(True)
-        self.flow_more.setChecked(False)
-        more = QFormLayout(self.flow_more)
+        # 「このモノの詳細」 (ui/fold.py): closed again when another thing is chosen (records.py `choose`).
+        self.flow_more = Fold(tr("このモノの詳細"))
+        more = QFormLayout(self.flow_more.body)
+        more.setContentsMargins(0, 0, 0, 0)
         self.rename_input = QLineEdit()
         self.rekind_input = QLineEdit()
         self.rekind_input.setPlaceholderText("船舶 > 支援船 > 〇〇級")
@@ -769,28 +770,21 @@ class ObservationDock(
         self.remove_all_button = self._button(tr("このモノの記録を削除"), tr("このモノの記録をすべて削除（2 回押す）"), self._remove_chosen)
         actions.addWidget(self.remove_all_button)
         more.addRow(actions)
-        # Only its own rows: a level's drop-down or a completer's list inside them is not shown by opening it.
-        def rows() -> list:
-            return self.flow_more.findChildren(QWidget, options=Qt.FindChildOption.FindDirectChildrenOnly)
-
-        self.flow_more.toggled.connect(lambda on: [w.setVisible(on) for w in rows()])
-        self.flow_more.toggled.connect(lambda on: on and self._render_rekind())
-        for w in rows():
-            w.setVisible(False)
+        self.flow_more.opened.connect(lambda on: on and self._render_rekind())
         fl.addWidget(self.flow_more)
         self.flow_box.hide()
         b.addWidget(self.flow_box)
 
         # 詳細.
-        self.more = QGroupBox(tr("詳細"))
-        self.more.setCheckable(True)
-        self.more.setChecked(False)
-        mf = QFormLayout(self.more)
+        # 「詳細」 (ui/fold.py): open or closed as the user left it; 「削除済みも表示」 works closed too (its heading says so).
+        self.more = Fold(tr("詳細"), "observations/more")
+        mf = QFormLayout(self.more.body)
+        mf.setContentsMargins(0, 0, 0, 0)
         self.deleted_check = QCheckBox(tr("削除済みも表示"))
         self.deleted_check.toggled.connect(lambda _on: self.render())
         # The name typed, else the user name (USERNAME, tsudo 2026-11-25): shown as it is written on the records.
         self.observer_input = QLineEdit(settings.recorder_shown())
-        self.observer_input.setToolTip(tr("記録に付ける名前。既定はユーザー名（環境変数 USERNAME）。空欄にするとユーザー名に戻る"))
+        self.observer_input.setToolTip(tr("記録に付ける名前。既定は Windows のユーザー名。空欄にするとユーザー名に戻る"))
         self.observer_input.editingFinished.connect(self._observer_typed)
         mf.addRow(self.deleted_check)
         mf.addRow(tr("記録者"), self.observer_input)
@@ -802,7 +796,7 @@ class ObservationDock(
         self.taxonomy_button = self._button(tr("分類体系の編集…"), tr("分類体系を編集"),
                                             lambda: self.edit_taxonomy and self.edit_taxonomy(self.class_filter))
         actions.addWidget(self.taxonomy_button)
-        actions.addWidget(self._button(tr("エクスポート…"), tr("期間・場所・大分類で絞って、CSV か JSON に保存"),
+        actions.addWidget(self._button(tr("書き出し…"), tr("期間・場所・大分類で絞って、CSV か JSON に保存"),
                                        lambda: self.open_export()))
         actions.addWidget(self._button(tr("レイヤーとして追加"), tr("記録とモノの流れを、レイヤーとして地図に追加"),
                                        self.to_layers))
@@ -810,9 +804,7 @@ class ObservationDock(
         self.clear_button = self._button(tr("この PC の記録を消去…"), tr("この PC の記録と確認範囲を消去（復元できない）"),
                                          lambda: self.clear_local())
         mf.addRow(self.clear_button)
-        self.more.toggled.connect(self._more_toggled)
-        for w in self.more.findChildren(QWidget):
-            w.setVisible(False)
+        self.deleted_check.toggled.connect(lambda on: self.more.set_summary(tr("削除済みも表示") if on else ""))
         b.addWidget(self.more)
 
         # Keys, while the dock has the focus (changeable in Settings ▸ Keyboard Shortcuts).

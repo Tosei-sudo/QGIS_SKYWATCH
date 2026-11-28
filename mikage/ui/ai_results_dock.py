@@ -15,7 +15,7 @@ It follows the image: when an image is opened from the catalog, or a layer
 opened from it becomes the active one, its results are read (once per
 image; 「最新を取得」 reads them again) and the layers of the image before
 are replaced. A result already recorded (its tag in a record's note) is
-marked 取込済 and is not recorded again.
+marked 取り込み済み and is not recorded again.
 
 Review first what the AI is least sure of (能動学習, core/ai/review): the
 list puts first the results neither recorded nor rejected under 「確認不要の
@@ -35,7 +35,7 @@ The `detectionOutputs` tables (「検出結果を DB へ転記」, the plugin's 
 viewer's) are read too (core/ai_results.result_sources), so what one person
 detected and sent is reviewed by others. A result the person's own
 detection layer sent there is listed once, as the layer's; recorded (or
-rejected) from either, it is 取込済 (誤) in both: the record's note carries
+rejected) from either, it is 取り込み済み (誤) in both: the record's note carries
 the table's tag too, and one recorded from the layer before it was sent is
 known by its run and place.
 
@@ -81,7 +81,7 @@ TITLE = "AI結果"
 EDITS = ("featureAdded", "featuresDeleted", "attributeValueChanged", "geometryChanged", "editingStopped")
 #: The list's orders: for review (要確認 first, least sure first), as read.
 ORDERS = ("確認優先（確信度の低い順）", "取得順")
-#: 「未取込をすべて取り込み」 asks first above this many.
+#: 「未取り込みをすべて取り込み」 asks first above this many.
 ASK_OVER = 20
 #: The list's column of the review state.
 REVIEW_COLUMN = 7
@@ -218,7 +218,7 @@ class AiResultsDock(PluginDock):
         self.order = QComboBox()
         for text in ORDERS:
             self.order.addItem(_tr(text), text)
-        self.order.setToolTip(_tr("確認優先: 要確認（未取込・誤検出でもなく確信度が「確認不要」未満）を確信度の低い順に先頭へ"))
+        self.order.setToolTip(_tr("確認優先: 要確認（未取り込み・誤検出でもなく確信度が「確認不要」未満）を確信度の低い順に先頭へ"))
         review.addWidget(self.order)
         review.addWidget(QLabel(_tr("確認不要の確信度")))
         self.sure = QDoubleSpinBox()
@@ -237,7 +237,7 @@ class AiResultsDock(PluginDock):
         self.review_memory = InputMemory("ai_results_review", memory).watch()
 
         self.list = QTreeWidget()
-        self.list.setHeaderLabels([_tr("取込"), _tr("出どころ"), _tr("クラス"), _tr("確信度"), _tr("種別"), _tr("名前"), _tr("継続"), _tr("確認")])
+        self.list.setHeaderLabels([_tr("取り込み"), _tr("出どころ"), _tr("クラス"), _tr("確信度"), _tr("種別"), _tr("名前"), _tr("継続"), _tr("確認")])
         self.list.setRootIsDecorated(False)
         self.list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.list.itemSelectionChanged.connect(self._list_selected)
@@ -250,8 +250,8 @@ class AiResultsDock(PluginDock):
         self.import_button = QPushButton(_tr("選択を観測記録へ取り込み"))
         self.import_button.setToolTip(_tr("一覧か地図で選んだ結果を、この画像の観測記録（ポイント）として記録。ポリゴンは内側の点と長辺・短辺（長さ・幅）で記録"))
         self.import_button.clicked.connect(lambda: self.import_rows(self.selected_rows()))
-        self.import_all_button = QPushButton(_tr("未取込をすべて取り込み"))
-        self.import_all_button.setToolTip(_tr("取込済・誤検出を除く結果をすべて観測記録に（多いときは確認）"))
+        self.import_all_button = QPushButton(_tr("未取り込みをすべて取り込み"))
+        self.import_all_button.setToolTip(_tr("取り込み済み・誤検出を除く結果をすべて観測記録に（多いときは確認）"))
         self.import_all_button.clicked.connect(lambda: self.import_all())
         for b in (self.import_button, self.import_all_button):
             buttons.addWidget(b)
@@ -535,7 +535,7 @@ class AiResultsDock(PluginDock):
         dock.fetch(_tr("まわりの記録の取得"), lambda b: b.read_around(image_id), done, failed)
 
     def _refresh_imported(self, expand: bool = True) -> None:
-        """What is recorded (and recorded as wrong) on the image; `expand`: and which rows that makes 取込済 (誤) too."""
+        """What is recorded (and recorded as wrong) on the image; `expand`: and which rows that makes 取り込み済み (誤) too."""
         book = self._book()
         records = living(book.records) if book is not None else []
         here = [o for o in records if o.image_id == self.image_id]
@@ -726,7 +726,7 @@ class AiResultsDock(PluginDock):
             self._syncing = False
         self._replace_layers(per_source)
         total = sum(len(results) for _s, results, _e in found) + local_total - self.hidden
-        text = _tr("{n} 件（全 {total} 件）・取込済 {done} 件").format(
+        text = _tr("{n} 件（全 {total} 件）・取り込み済み {done} 件").format(
             n=len(self.rows), total=total, done=sum(1 for _s, r in self.rows if r.tag in self.imported))
         if self.hidden:
             text += _tr("・転記先の {k} 件は自分の検出レイヤーで表示").format(k=self.hidden)
@@ -921,11 +921,11 @@ class AiResultsDock(PluginDock):
         self.train_button.setVisible(self.allows("ai_results.train"))
 
     def import_all(self, confirm: bool = True) -> list:
-        """「未取込をすべて取り込み」: every result not recorded nor rejected; more than ASK_OVER asked first."""
+        """「未取り込みをすべて取り込み」: every result not recorded nor rejected; more than ASK_OVER asked first."""
         self._refresh_imported()
         todo = [i for i, (_s, r) in enumerate(self.rows) if r.tag not in self.imported and r.tag not in self.rejected]
         if confirm and len(todo) > ASK_OVER:
-            if not ask_no(self, _tr("未取込をすべて取り込み"), _tr("未取込 {n} 件を観測記録に取り込み（誤検出は除外）").format(n=len(todo)),
+            if not ask_no(self, _tr("未取り込みをすべて取り込み"), _tr("未取り込み {n} 件を観測記録に取り込み（誤検出は除外）").format(n=len(todo)),
                           yes=_tr("取り込み")):
                 return []
         return self.import_rows(todo)
@@ -1000,7 +1000,7 @@ class AiResultsDock(PluginDock):
             entries.append(entry)
             done_rows.append(row)
         if not entries:
-            self.status.setText(_tr("取り込む結果なし（取込済・誤検出か、位置なし）") if rows else _tr("結果を選択"))
+            self.status.setText(_tr("取り込む結果なし（取り込み済み・誤検出か、位置なし）") if rows else _tr("結果を選択"))
             return []
 
         carried_ids = {e.carry.object_id for e in entries if e.carry is not None}
@@ -1118,7 +1118,7 @@ class AiResultsDock(PluginDock):
             specs.append((ring, "", "", origin_for(r, source, self._sent_as(row), rejected=True)))
             tags.append(r.tag)
         if not specs:
-            self.status.setText(_tr("誤検出にする結果なし（取込済・誤検出済か、位置なし）") if rows else _tr("結果を選択"))
+            self.status.setText(_tr("誤検出にする結果なし（取り込み済み・誤検出済か、位置なし）") if rows else _tr("結果を選択"))
             return []
 
         def after(saved) -> None:

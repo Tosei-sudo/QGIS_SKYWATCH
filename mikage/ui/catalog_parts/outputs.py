@@ -36,7 +36,8 @@ class OutputsPart:
             self.status.setText(self.tr("一覧で画像を選択（Ctrl・Shift + クリックで複数）"))
             return None
         events = self.event_linker() if self.event_linker else None
-        return events.offer(self.buttons["event"], self.event_items) if events else None
+        # Its menu of events under 「その他」 (where 「イベントに追加」 is; also the right-click menu's).
+        return events.offer(self.buttons["more"], self.event_items) if events else None
 
     def copy_paths(self) -> None:
         """Copies where the chosen images are (their URL or path), one per line."""

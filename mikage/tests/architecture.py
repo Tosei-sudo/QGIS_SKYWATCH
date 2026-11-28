@@ -54,7 +54,7 @@ KERNEL = (
     # The features' doors read when asked (core/<機能>/api.py).
     "core.door",
     # Shared by two features each: an image recorded on without its file (the catalog makes them, the observations
-    # keep them) and the values of the files written for others (撮像依頼の日次出力, 観測記録のエクスポート).
+    # keep them) and the values of the files written for others (撮像依頼の日次出力, 観測記録の書き出し).
     "core.listed_image", "core.json_schema", "core.file_values",
     # The query results kept a few minutes (データ分析 reads them; core.esri forgets a layer's on an edit).
     "core.analysis_cache",

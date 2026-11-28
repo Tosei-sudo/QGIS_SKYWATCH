@@ -33,7 +33,7 @@ from ..core.plan.api import (
     takes_systems, when_text,
 )
 from ..qgis_io.tasks import error_text, run_task
-from .docks import ask_no, plain_label, plain_tip
+from .docks import ask_no, name_cancel, plain_label, plain_tip
 from .fit import fit_text
 from .list_views import column_menus
 
@@ -114,7 +114,7 @@ class OutageForm(QDialog):
         self.system = QComboBox()
         self.system.setEditable(True)
         self.system.addItems(list(systems))
-        self.system.setToolTip(self.tr("撮像計画ファイルを出すシステム（設定ファイルの requestExports の system）。その衛星すべてにかかる"))
+        self.system.setToolTip(self.tr("撮像計画ファイルを出すシステム。その衛星すべてにかかる"))
         self.system.setCurrentText(outage.system if outage else "")
         form.addRow(self.tr("システム"), self.system)
         self.satellite = QComboBox()
@@ -166,6 +166,7 @@ class OutageForm(QDialog):
         self.problem.setWordWrap(True)
         layout.addWidget(self.problem)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        name_cancel(buttons)
         buttons.button(QDialogButtonBox.StandardButton.Ok).setText(self.tr("保存"))
         buttons.accepted.connect(self._accept)
         buttons.rejected.connect(self.reject)
@@ -242,7 +243,7 @@ class OutageForm(QDialog):
         for k, (key, label, kind, (low, high, default), suffix) in enumerate(rows):
             box = QCheckBox(label)
             if key in ("orders_per_day", "scenes_per_day"):
-                box.setToolTip(self.tr("期間にかかる日（日本時間）は、設定ファイルの上限とこの値の小さいほう"))
+                box.setToolTip(self.tr("期間にかかる日（日本時間）は、組織の設定の上限とこの値の小さいほう"))
             spin = kind()
             spin.setRange(low, high)
             if isinstance(spin, QDoubleSpinBox):

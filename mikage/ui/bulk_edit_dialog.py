@@ -16,6 +16,7 @@ from qgis.PyQt.QtWidgets import (
 
 from ..core.obs.api import kind_of
 from ..core.request.api import PRIORITY_LEVELS, PRIORITY_MAX, PRIORITY_MIN, level_of
+from .docks import name_cancel
 from .fit import fit_text
 from .kind_levels import KindLevels
 
@@ -120,6 +121,7 @@ class BulkEditDialog(QDialog):
         self.message.setWordWrap(True)
         lay.addWidget(self.message)
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        name_cancel(self.buttons)
         self.buttons.button(QDialogButtonBox.StandardButton.Ok).setText(self.tr("変更"))
         self.buttons.accepted.connect(self._ok)
         self.buttons.rejected.connect(self.reject)

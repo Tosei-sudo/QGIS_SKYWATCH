@@ -259,7 +259,7 @@ class PlanFileDock(PluginDock):
         out = QHBoxLayout()
         out.addWidget(QLabel(self.tr("出力先")))
         self.folder = QLineEdit(settings.request_export_folder())
-        self.folder.setPlaceholderText(self.tr("設定ファイルで folder を指定していないシステムの出力先"))
+        self.folder.setPlaceholderText(self.tr("出力先が決まっていないシステムのフォルダ"))
         out.addWidget(self.folder, 1)
         browse = QPushButton(self.tr("参照…"))
         browse.clicked.connect(self._browse)
@@ -523,7 +523,7 @@ class PlanFileDock(PluginDock):
                 except Exception as error:  # noqa: BLE001 (the day goes on without the weather)
                     notes.append(f"雲量予報の取得に失敗（{error_text(error)}）")
             elif places:
-                notes.append("雲量予報なし（cloudForecast: false）")
+                notes.append("雲量予報なし（組織の設定）")
             task.progress(70)
             # The satellites' passes over the day's requests, from their orbits (once; the hand's changes fit again on them).
             passes = day_passes(requests, day, hit, now, task.isCanceled)
@@ -600,7 +600,7 @@ class PlanFileDock(PluginDock):
                 text += self.tr("（うち ほかのシステムで書き出し済み {n} 件）").format(n=pinned)
             text += self.merged_text() + self.shared_text() + self.chances_text()
             if not systems:
-                text += self.tr("（設定ファイルに requestExports なし）")
+                text += self.tr("（出力するシステムなし。管理者に連絡: requestExports）")
             # The orbits it was placed on from TLEs far from the day (改修案 10).
             old = old_tle_text(self.plan)
             self.status.setText("。".join([text, *notes, *([old] if old else [])]))

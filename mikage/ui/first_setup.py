@@ -30,6 +30,7 @@ from ..core import roles as role_list
 from ..core.coords import NOTATIONS
 from ..qgis_io import qsettings, roles_io, settings
 from .dock_layouts import DockLayoutStore, apply as apply_layout, float_docks, merged  # noqa: F401 (float_docks also from here)
+from .docks import CANCEL
 from .fit import fit_text
 
 DONE_KEY = "firstSetupDone"
@@ -203,8 +204,8 @@ class FirstSetupDialog(QDialog):
         own_box = QGroupBox(tr("個人の設定"))
         form = QFormLayout(own_box)
         self.recorder = QLineEdit(settings.recorder_shown())
-        self.recorder.setPlaceholderText(tr("空欄ならユーザー名（環境変数 USERNAME）"))
-        self.recorder.setToolTip(tr("観測記録に付ける名前。既定はユーザー名（環境変数 USERNAME）"))
+        self.recorder.setPlaceholderText(tr("空欄なら Windows のユーザー名"))
+        self.recorder.setToolTip(tr("観測記録に付ける名前。既定は Windows のユーザー名"))
         form.addRow(tr("記録者名"), self.recorder)
         self.points = QComboBox()
         for n, label in POINT_CHOICES:
@@ -236,7 +237,7 @@ class FirstSetupDialog(QDialog):
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.button(QDialogButtonBox.StandardButton.Ok).setText(tr("この設定で開始") if first else tr("適用"))
-        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(tr("あとで") if first else tr("キャンセル"))
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(tr("あとで") if first else CANCEL)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         if first and practise is not None:

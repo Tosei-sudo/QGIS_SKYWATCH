@@ -1,5 +1,5 @@
 """
-Exporting the observation records (観測記録のエクスポート): the records of a
+Exporting the observation records (観測記録の書き出し): the records of a
 period, a place, some 大分類 and 確度 written as CSV or JSON by a named
 format.
 

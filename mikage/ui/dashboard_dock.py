@@ -1046,7 +1046,7 @@ class DashboardDock(PluginDock):
         self.overview.clear()
         for layer in layers:
             if isinstance(layer, QgsVectorLayer):
-                kind = layer.providerType() if layer.providerType() not in ("ogr", "memory") else (_tr("ベクター") if layer.providerType() == "ogr" else _tr("メモリ"))
+                kind = layer.providerType() if layer.providerType() not in ("ogr", "memory") else (_tr("ベクター") if layer.providerType() == "ogr" else _tr("一時レイヤー"))
                 n = layer.featureCount()
                 total = len(self._features) if layer is self.layer and self._filtered == layer.id() else n
                 count = _tr("{n} 件").format(n=short(n)) if n == total else _tr("{n} / {t} 件").format(n=short(n), t=short(total))

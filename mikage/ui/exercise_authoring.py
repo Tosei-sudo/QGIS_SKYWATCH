@@ -34,7 +34,6 @@ from qgis.PyQt.QtWidgets import (
     QLabel,
     QLineEdit,
     QMenu,
-    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QRadioButton,
@@ -762,10 +761,7 @@ class ExerciseEditor(QDialog):
     # ---- closing ------------------------------------------------------------------------------------------
 
     def _ask_close(self) -> bool:
-        answer = QMessageBox.question(self, self.tr("判読の練習の問題を作る"), self.tr("未保存の変更あり。閉じると変更は消える"),
-                                      QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
-                                      QMessageBox.StandardButton.Cancel)
-        return answer == QMessageBox.StandardButton.Discard
+        return ask_no(self, self.tr("判読の練習の問題を作る"), self.tr("未保存の変更あり。閉じると変更は消える"), yes=self.tr("破棄"))
 
     def close_now(self) -> None:
         """Closed without asking (練習モードで試す: saved already)."""

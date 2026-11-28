@@ -86,14 +86,14 @@ def test_the_least_sure_first_and_the_judgements_kept(plugin, monkeypatch):
     # Read as loaded, the list keeps its order.
     dock.order.setCurrentIndex(1)
     assert [s for s, *_ in found(dock)] == [0.9, 0.3, 0.6, 0.85]
-    # 「未取込をすべて取り込み」 leaves the wrong one out (and asks first only when there are many).
+    # 「未取り込みをすべて取り込み」 leaves the wrong one out (and asks first only when there are many).
     from mikage.ui import ai_results_dock
 
     assert dock.reject_rows([1])
     asked = []
     monkeypatch.setattr(ai_results_dock, "ask_no", lambda parent, title, text, **_k: asked.append(text) or False)
     monkeypatch.setattr(ai_results_dock, "ASK_OVER", 1)
-    assert dock.import_all() == [] and asked == ["未取込 2 件を観測記録に取り込み（誤検出は除外）"]
+    assert dock.import_all() == [] and asked == ["未取り込み 2 件を観測記録に取り込み（誤検出は除外）"]
     assert dock.import_rows([1]) == [] and "誤検出" in dock.status.text()
     saved = dock.import_all(confirm=False)
     assert len(saved) == 2 and len(living(book.records)) == 3

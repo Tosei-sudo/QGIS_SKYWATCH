@@ -450,7 +450,7 @@ def read_quota_data(client: EsriClient, store: RequestStoreConfig, token: Option
     if not out.quotas or not days:
         return out
     if not store.shots:
-        out.problems.append("撮像の範囲（requestStores[].shots）がないため、年間撮像上限は当初の消費枚数だけで数える")
+        out.problems.append("撮像の範囲の表がないため、年間撮像上限は当初の消費枚数だけで数える（管理者に連絡: requestStores[].shots）")
         return out
     windows = [q.window(d) for q in out.quotas for d in days]
     first, last = min(w.first for w in windows), max(w.last for w in windows)

@@ -186,7 +186,7 @@ class Command(Feature):
             return tr("{s} を開いた").format(s=reading.screen)
         run = self.host.text_operations().get(key)
         if run is None:
-            raise RuntimeError(errors.tagged(tr("{o} はいまは使えない（設定ファイル・担当）").format(o=reading.operation.title), "E206"))
+            raise RuntimeError(errors.tagged(tr("{o} はいまは使えない（組織の設定・担当）").format(o=reading.operation.title), "E206"))
         if "sensors" in reading.operation.slots:
             reading.catalog_sensors = self._catalog_sensors(reading.sensors)
         return run(reading, place)

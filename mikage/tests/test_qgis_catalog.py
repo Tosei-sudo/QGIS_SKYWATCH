@@ -16,7 +16,7 @@ from qgis.testing import start_app  # noqa: E402
 APP = start_app()
 
 from qgis.core import QgsProject, QgsSettings  # noqa: E402
-from qgis.PyQt.QtCore import Qt, QTimer  # noqa: E402
+from qgis.PyQt.QtCore import QPoint, Qt, QTimer  # noqa: E402
 
 from mikage.core.esri import EsriClient  # noqa: E402
 from mikage.core.catalog.query import EMPTY_SEARCH  # noqa: E402
@@ -94,7 +94,7 @@ def searched(dock):
 
 def test_the_dock_open_at_start_does_not_say_there_is_no_catalog(plugin):
     """
-    The docks are made before the settings file is read: 「設定ファイルに画像カタログなし」
+    The docks are made before the settings file is read: 「画像カタログなし（管理者に連絡: imageCatalogs）」
     stayed beside the filled list of catalogs until the first search.
     """
     p, *_ = plugin
@@ -104,7 +104,7 @@ def test_the_dock_open_at_start_does_not_say_there_is_no_catalog(plugin):
     kept = p.api.config.image_catalogs
     p.api.config.image_catalogs = []
     dock._config_changed()
-    assert dock.status.text() == "設定ファイルに画像カタログなし"
+    assert dock.status.text() == "画像カタログなし（管理者に連絡: imageCatalogs）"
     p.api.config.image_catalogs = kept
     dock._config_changed()
     assert dock.status.text() == ""
@@ -163,7 +163,7 @@ def test_read_more_adds_the_next_images_of_the_search_as_it_was(plugin, tmp_path
     assert dock.more_button.isVisibleTo(dock) and dock.more_button.text() == "続きを読む（次の 3 件）"
     # The form changed since (the map's extent now, a sensor): the 続き is still of the search listed.
     dock.area_box.setCurrentIndex(dock.area_box.findData("extent"))
-    dock.more.setChecked(True)
+    dock.more.set_open(True)
     dock.sensor_box.setEditText("S2")
     dock.choose([r for r in dock.records if r.id == "C"])
     asked = len(fake.asked)
@@ -184,7 +184,8 @@ def test_read_more_adds_the_next_images_of_the_search_as_it_was(plugin, tmp_path
     assert [r.id for r in dock.chosen()] == ["C"]
     assert dock.status.text() == "7 件" and not dock.more_button.isVisibleTo(dock)
     # 「類似画像の検索」 reads on too, ranking all the candidates read.
-    dock.more.setChecked(False)
+    dock.clear_more()
+    dock.more.set_open(False)
     dock.find_similar(next(r for r in dock.records if r.id == "A"), p.context.config.image_catalogs[0])
     assert wait_for(lambda: dock.status.text().startswith("類似画像 ") and dock.more_button.isEnabled())
     # Candidates (S1, angle 5–15°, azimuth 80–120°): A, B, OLD0–3; the newest 3 read, A itself left out (OLD0 covers it all).
@@ -794,7 +795,7 @@ def test_days_and_angles_typed_in_other_ways_are_read_or_stop_the_search(plugin)
     # 2026/11/9 and full-width digits are days too: the condition is asked (before, it was quietly left out).
     dock.acquired_from.setText("２０２６／１０／１")
     dock.acquired_to.setText("20261109")
-    dock.more.setChecked(True)
+    dock.more.set_open(True)
     dock.max_angle.setText("３０°")
     fake.asked.clear()
     dock.search()
@@ -810,10 +811,16 @@ def test_days_and_angles_typed_in_other_ways_are_read_or_stop_the_search(plugin)
         dock.search()
         assert dock.status.text() == said and not fake.asked
         box.setText(before)
-    # A closed 詳細条件 is not read.
+    # A closed 詳細条件 is read too (tsudo 2026-11-28): its heading says what is set, 「クリア」 empties it.
+    dock.more.set_open(False)
+    assert dock.more.title() == "詳細条件（角度 30° まで）"
     dock.max_angle.setText("三十")
-    dock.more.setChecked(False)
-    assert dock.input_problem() is None
+    assert dock.input_problem() == "角度の「三十」は読めない。数字で入力" and dock.more.title() == "詳細条件（角度）"
+    dock.clear_more()
+    assert dock.input_problem() is None and dock.more.title() == "詳細条件" and dock.conditions().max_angle is None
+    dock.more.set_open(True)
+    assert dock.more.title() == "詳細条件"
+    dock.more.set_open(False)
     dock.acquired_from.clear()
     dock.acquired_to.clear()
 
@@ -845,7 +852,7 @@ def test_the_period_takes_times_to_the_minute(plugin):
     assert f"ACQ >= TIMESTAMP '{utc_text(ms(2026, 11, 9, 10, 30))}'" in asked
     assert f"ACQ < TIMESTAMP '{utc_text(ms(2026, 11, 9, 12, 1))}'" in asked
     # The 詳細条件 periods take times too.
-    dock.more.setChecked(True)
+    dock.more.set_open(True)
     dock.registered_from.setText("2026-11-01 9:00")
     dock.system_to.setText("2026-11-08T23:30")
     c = dock.conditions()
@@ -861,7 +868,30 @@ def test_the_period_takes_times_to_the_minute(plugin):
     assert "2026-11-09 10:30" in dock.acquired_from.toolTip() and dock.acquired_to.placeholderText() == "YYYY-MM-DD [hh:mm]"
     for box in (dock.acquired_from, dock.acquired_to, dock.registered_from, dock.registered_to, dock.system_from, dock.system_to):
         box.clear()
-    dock.more.setChecked(False)
+    dock.more.set_open(False)
+
+
+def test_the_options_heading_says_them_and_the_list_menu_has_the_rest(plugin):
+    """点検 9 (tsudo 2026-11-28): the options in 「開き方と表示」, said in its closed heading; 「その他」 in the right-click menu too."""
+    p, iface, folder, fake, _ = plugin
+    dock = p.api.image_catalog
+    searched(dock)
+    fold, zoom, style = dock.options_fold, dock.zoom_opened.isChecked(), dock.footprint_box.currentIndex()
+    fold.set_open(False)
+    dock.zoom_opened.setChecked(True)
+    dock.footprint_box.setCurrentIndex(dock.footprint_box.findData("outline"))
+    assert fold.title() == "開き方と表示"  # the first ones: nothing to say
+    dock.zoom_opened.setChecked(False)
+    dock.footprint_box.setCurrentIndex(dock.footprint_box.findData("fill"))
+    assert fold.title() == "開き方と表示（移動しない・塗りつぶし）"
+    fold.set_open(True)
+    assert fold.title() == "開き方と表示"
+    dock.zoom_opened.setChecked(zoom)
+    dock.footprint_box.setCurrentIndex(style)
+    dock._list_menu(QPoint(1, 1))
+    texts = [a.text() for a in dock._menu.actions() if not a.isSeparator()]
+    assert texts[:2] == ["開く", "範囲へ移動"] and "パスをコピー" in texts and "ファイルなしで記録" not in texts
+    dock._menu.hide()
 
 
 def test_a_record_whose_path_is_a_folder_opens_the_images_its_sensor_names(plugin, monkeypatch):
@@ -1203,9 +1233,11 @@ def test_open_folders_shows_the_folder_of_the_chosen_images_the_rewritten_one_fi
     p, iface, folder, fake, _ = plugin
     dock = p.api.image_catalog
     searched(dock)
-    button = dock.buttons["folder"]
+    button = dock.image_actions["folder"]
     assert button.text() == "フォルダを開く" and not button.isEnabled()
-    assert [k for k in dock.buttons][:5] == ["open", "record", "zoom", "copy", "folder"]
+    assert [k for k in dock.image_actions][:5] == ["open", "record", "zoom", "copy", "folder"]
+    # Under the list only 開く・範囲へ移動・地図で選択・その他 (tsudo 2026-11-28); 「フォルダを開く」 is in その他's menu.
+    assert list(dock.buttons) == ["open", "record", "zoom", "pick", "more"] and button in dock.more_menu.actions()
     shown = []
     monkeypatch.setattr(dock, "show_folder", lambda f, file=None: shown.append((f, file)) or True)
     asked = []
@@ -1213,7 +1245,7 @@ def test_open_folders_shows_the_folder_of_the_chosen_images_the_rewritten_one_fi
     a = next(r for r in dock.records if r.id == "A")
     dock.choose([a])
     assert button.isEnabled()
-    button.click()
+    button.trigger()
     # A file as written: its folder, the file selected; the NAS prefix's folder chosen first (as 「開く」) and kept.
     assert asked == ["\\\\nas\\images"] and settings.path_folder("\\\\nas\\images") == str(folder)
     assert shown == [(str(folder / "2026"), str(folder / "2026" / "A.TIF"))]
@@ -1546,8 +1578,8 @@ def test_a_catalog_without_image_files_records_instead_of_opening(plugin, tmp_pa
     headings = [dock.model.headerData(i, Qt.Orientation.Horizontal) for i in range(dock.model.columnCount())]
     assert headings == ["画像ID", "撮像日時", "センサー", "角度", "方位角"]
     for key in ("open", "copy", "folder"):
-        assert not dock.buttons[key].isVisibleTo(dock), key
-    assert dock.buttons["record"].isVisibleTo(dock)
+        assert not dock.image_actions[key].isVisible(), key
+    assert not dock.buttons["open"].isVisibleTo(dock) and dock.buttons["record"].isVisibleTo(dock)
     a = next(r for r in dock.records if r.id == "A")
     assert dock.buttons["record"].isEnabled() is False
     dock.choose([a])
@@ -1603,7 +1635,9 @@ def test_close_previous_takes_the_images_recorded_without_files_off_the_list(plu
     p.context.reload()
     dock, obs = p.api.image_catalog, p.api.observation_dock
     searched(dock)
-    assert dock.close_previous.isVisibleTo(dock) and not dock.close_previous.isChecked()
+    # In 「開き方と表示」 (closed: its heading says the options, those of a catalog without files only).
+    assert dock.close_previous.isVisibleTo(dock.options_fold.body) and not dock.close_previous.isChecked()
+    assert dock.options_fold.is_open() or "移動" not in dock.options_fold.title()
     a, b, c = (next(r for r in dock.records if r.id == i) for i in "ABC")
 
     def listed():
@@ -1705,10 +1739,10 @@ def test_a_practice_only_catalog_is_shown_in_production_to_instructors_only(plug
     p.role_keeper.choose(["INSTRUCTOR"])
     assert listed() == ["衛星画像", "共通の画像", "練習用の画像（練習用）"]
     dock.catalog_box.setCurrentIndex(2)
-    assert dock.catalog().url == practice and dock.buttons["watch"].isHidden()
+    assert dock.catalog().url == practice and not dock.image_actions["watch"].isVisible()
     assert any(c.url == practice for c in dock.catalogs())  # (opened by image id too)
     dock.catalog_box.setCurrentIndex(0)
-    assert not dock.buttons["watch"].isHidden()
+    assert dock.image_actions["watch"].isVisible()
     # Their sign-in chosen as the others'.
     assert [s.label for s in p.context.services() if s.role == "画像カタログ"] == ["衛星画像", "共通の画像", "練習用の画像（練習用）"]
     p.role_keeper.choose(["OBSERVER"])

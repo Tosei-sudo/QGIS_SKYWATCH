@@ -128,7 +128,7 @@ class OutputsPart:
         return self._alerts
 
     def open_export(self):
-        """Opens 「観測記録のエクスポート」 (one kept while the dock lives; not modal, so the map can be drawn on)."""
+        """Opens 「観測記録の書き出し」 (one kept while the dock lives; not modal, so the map can be drawn on)."""
         from ..obs_export_dialog import ExportDialog
 
         if self._export is None:
@@ -143,7 +143,7 @@ class OutputsPart:
         return self._export
 
     def open_import(self):
-        """Opens 「観測記録の一括取込み」 (a CSV or a layer into the chosen store; one kept while the dock lives)."""
+        """Opens 「観測記録の一括取り込み」 (a CSV or a layer into the chosen store; one kept while the dock lives)."""
         from ..record_import_dialog import RecordImportDialog
 
         if getattr(self, "_import", None) is None:

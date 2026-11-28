@@ -1,5 +1,5 @@
 """
-Values as they go into the files written for others (撮像依頼の日次出力, 観測記録のエクスポート): one
+Values as they go into the files written for others (撮像依頼の日次出力, 観測記録の書き出し): one
 printf conversion, a value as a CSV cell, and a value turned to its JSON Schema's type. Shared base
 (docs/architecture.md): both features write their files with them.
 """

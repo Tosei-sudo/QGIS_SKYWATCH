@@ -321,13 +321,13 @@ def flow_obs():
     shoot(path("obs-06-select"), win, marks=[(table_row(catalog.table, row, win), "1"), (on_map.adjusted(-6, -6, 6, 6), "2", "top")],
           crop=window_part(0, left.right() + 440, left.top(), left.bottom()), width=WIDE)
     # 2-2 開く.
-    # The options one to a row under the buttons (2026-11-25).
-    options = None
-    for w in (catalog.close_previous, catalog.zoom_opened, catalog.match_crs, catalog.orientation_row, catalog.footprint_box.parentWidget()):
-        r = QRect(w.mapTo(catalog, w.rect().topLeft()), w.size())
-        options = r if options is None else options.united(r)
+    # The options one to a row under the buttons, in 「開き方と表示」 opened (2026-11-28); closed again after.
+    catalog.options_fold.set_open(True)
+    yield 400
+    options = rect_in(catalog.options_fold, catalog)
     shoot(path("obs-07-open"), catalog, marks=[(catalog.buttons["open"], "1"), (options.adjusted(-3, -3, 3, 3), "2")],
           crop=[catalog.buttons["open"], options], margin=6)
+    catalog.options_fold.set_open(False)
     catalog.open_records([newest])
     yield lambda: any(isinstance(l, QgsRasterLayer) for l in QgsProject.instance().mapLayers().values())
     yield 2500

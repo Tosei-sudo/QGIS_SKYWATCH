@@ -123,7 +123,7 @@ def test_an_other_name_typed_in_the_form_brings_the_class_and_offers_the_individ
     dock.render()
     APP.processEvents()
     _flow_button(dock.table, 0).click()
-    dock.flow_more.setChecked(True)
+    dock.flow_more.set_open(True)
     APP.processEvents()
     assert dock.flow_member.isVisible()
     assert dock.flow_member_label.text() == "かが（船舶 > 護衛艦 > いずも型）・別名 DDH-184・番号 184"

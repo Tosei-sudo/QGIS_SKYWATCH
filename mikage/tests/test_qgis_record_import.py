@@ -1,4 +1,4 @@
-"""「観測記録の一括取込み」 in QGIS: from the plugin menu, a layer or a CSV, the dry run, the import into the dock's store."""
+"""「観測記録の一括取り込み」 in QGIS: from the plugin menu, a layer or a CSV, the dry run, the import into the dock's store."""
 import pytest
 
 pytest.importorskip("qgis.core")

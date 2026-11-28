@@ -338,7 +338,7 @@ def obs_course(p) -> Course:
           done=lambda _b: bool(catalog.chosen()), demo=lambda: catalog.table.selectRow(0)),
         S("2-2", "開く",
           "<b>開く</b> を押します。行をダブルクリックしても開きます。"
-          "<b>前の画像を閉じる</b> にチェックがあると、次の画像を開いたときに、前に開いた画像が地図から外れます。",
+          "ボタンの下の <b>開き方と表示</b> を開いて <b>前の画像を閉じる</b> にチェックを入れると、次の画像を開いたときに、前に開いた画像が地図から外れます。",
           target=lambda: catalog.buttons["open"], reveal=reveal(catalog, "画像カタログ"),
           begin=raster_ids, done=lambda before: before is not None and bool(raster_ids() - before), demo=open_first,
           ok="画像が地図に入り、地図がその画像の範囲へ移ります"),

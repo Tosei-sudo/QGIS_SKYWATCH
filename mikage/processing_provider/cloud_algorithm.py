@@ -44,7 +44,7 @@ METHOD_LABELS = ["前後の予報時刻から補間", "最も近い予報時刻�
 ZONES = ["local", "utc"]
 ZONE_LABELS = ["PC のタイムゾーン", "UTC"]
 SOURCES = ["config", "file"]
-SOURCE_LABELS = ["設定ファイルの雲量予報（cloudForecast）", "GeoTIFF を指定（docs/cloud-forecast-file.md の形式）"]
+SOURCE_LABELS = ["組織の設定の雲量予報", "GeoTIFF を指定（docs/cloud-forecast-file.md の形式）"]
 DEFAULT_FIELD = "cloud_pct"
 
 #: The settings file's forecast, given by the plugin.
@@ -224,7 +224,7 @@ class CloudCoverAlgorithm(QgsProcessingAlgorithm):
         else:
             self._config = _forecast()
             if self._config is None:
-                raise QgsProcessingException(tr("設定ファイルで雲量予報が使われていない（cloudForecast: false）。GeoTIFF を指定"))
+                raise QgsProcessingException(tr("雲量予報を使わない組織の設定。GeoTIFF を指定"))
         self._auth = None
         if not self._config.local:
             from ..qgis_io import settings

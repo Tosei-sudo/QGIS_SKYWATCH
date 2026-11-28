@@ -424,7 +424,7 @@ class ObservationBook:
     def fetch(self, query: RecordQuery) -> list[Observation]:
         """
         The records of a query (scope.RecordQuery), for what works on more than
-        the images recorded on (通報, エクスポート, 報告書, 引き継ぎ…): asked of a
+        the images recorded on (通報, 書き出し, 報告書, 引き継ぎ…): asked of a
         shared store and kept here too; a local store's are all read already.
         Raises what the store raises.
         """

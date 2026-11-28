@@ -25,18 +25,22 @@ from qgis.PyQt.QtWidgets import (
 
 from ..core import sign_in
 from ..core.obs.api import place_cache
-from ..qgis_io import local_copy_io, overviews_io, raster_speed, settings
+from ..qgis_io import fast_draw, local_copy_io, overviews_io, raster_speed, settings
 from ..qgis_io.context import PluginContext
 from . import last_inputs
+from .docks import name_cancel
 from .fit import fit_text
+from .fold import Fold
 
 
 class SettingsDialog(QDialog):
     def __init__(self, context: PluginContext, parent: QWidget | None = None, may_change_source: bool = True,
-                 raster_speed: Optional[Callable] = None):
+                 raster_speed: Optional[Callable] = None, admin_rows: bool = True):
         """
         `may_change_source`: the roles in use have 「設定ファイルの切り替え」 (管理者,
         core/roles.py); without it the settings file can be chosen only while none is.
+        `admin_rows`: the settings file, the connections and the settings file's problems shown open (担当「管理者」
+        and no role); else they are kept in 「▶ 管理者向け」 below the rows of this PC (tsudo 2026-11-28, 点検 6).
         `raster_speed(parent)`: opens 「地図の描画の速さ」 (plugin.open_raster_speed) for 「地図の描画」's 「詳しく…」.
         """
         super().__init__(parent)
@@ -75,34 +79,37 @@ class SettingsDialog(QDialog):
         buttons_row.addWidget(load)
 
         self.recorder = QLineEdit(settings.recorder_shown())
-        self.recorder.setPlaceholderText(self.tr("空欄ならユーザー名（環境変数 USERNAME）"))
-        self.recorder.setToolTip(self.tr("観測記録に付ける名前。既定はユーザー名（環境変数 USERNAME）"))
+        self.recorder.setPlaceholderText(self.tr("空欄なら Windows のユーザー名"))
+        self.recorder.setToolTip(self.tr("観測記録に付ける名前。既定は Windows のユーザー名"))
 
         # A grid, not a form: a form row of a wrapped text and a button was given one line's height where the text
         # needed two (drawn over the next row; found 2026-11-15 in a real QGIS).
         form = QGridLayout()
         form.setColumnStretch(1, 1)
-        form.addWidget(QLabel(self.tr("設定ファイル")), 0, 0)
-        form.addWidget(self.source, 0, 1)
-        form.addLayout(buttons_row, 0, 2)
+        # 設定ファイル: the first row for the administrators, else in 「管理者向け」 (below).
+        source_grid = form if admin_rows else QGridLayout()
+        source_grid.setColumnStretch(1, 1)
+        source_grid.addWidget(QLabel(self.tr("設定ファイル")), 0, 0)
+        source_grid.addWidget(self.source, 0, 1)
+        source_grid.addLayout(buttons_row, 0, 2)
         form.addWidget(QLabel(self.tr("記録者")), 1, 0)
         form.addWidget(self.recorder, 1, 1, 1, 2)
-        self.startup_layers = QCheckBox(self.tr("起動時と新規プロジェクトで、設定ファイルのレイヤー（layers）を追加"))
+        self.startup_layers = QCheckBox(self.tr("起動時と新規プロジェクトで、組織で決めたレイヤーを追加"))
         self.startup_layers.setChecked(settings.startup_layers_on())
         form.addWidget(self.startup_layers, 2, 1, 1, 2)
         self.cache = QLabel()
         self.cache.setWordWrap(True)
-        self.clear_cache = QPushButton(self.tr("キャッシュを消去"))
-        self.clear_cache.setToolTip(self.tr("書き込めないフォルダの画像のピラミッド（.ovr）を消す。使用中のことがあるので、次に QGIS を起動したときに消去"))
+        self.clear_cache = QPushButton(self.tr("縮小版を消去"))
+        self.clear_cache.setToolTip(self.tr("書き込めないフォルダの画像に作った縮小版（表示を速くする控え）を消す。使用中のことがあるので、次に QGIS を起動したときに消去"))
         self.clear_cache.clicked.connect(self._clear_cache)
-        form.addWidget(QLabel(self.tr("ピラミッドのキャッシュ")), 3, 0)
+        form.addWidget(QLabel(self.tr("画像の縮小版")), 3, 0)
         form.addWidget(self.cache, 3, 1)
         form.addWidget(self.clear_cache, 3, 2)
         self._show_cache()
         self.places = QLabel()
         self.places.setWordWrap(True)
         self.clear_places = QPushButton(self.tr("控えを消去"))
-        self.clear_places.setToolTip(self.tr("通報・エクスポート・式の関数で使った地名と国の形の控えを消去（次に使うとき取得し直す）"))
+        self.clear_places.setToolTip(self.tr("通報・書き出し・式の関数で使った地名と国の形の控えを消去（次に使うとき取得し直す）"))
         self.clear_places.clicked.connect(self._clear_places)
         form.addWidget(QLabel(self.tr("地名・国の控え")), 4, 0)
         form.addWidget(self.places, 4, 1)
@@ -153,7 +160,7 @@ class SettingsDialog(QDialog):
         self.sign_in.setWordWrap(True)
         self.sign_in.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.sign_in_again = QPushButton(self.tr("確認し直す"))
-        self.sign_in_again.setToolTip(self.tr("統合 Windows 認証のポータルに、サインインを確かめ直す（トークンを取り直す）"))
+        self.sign_in_again.setToolTip(self.tr("統合 Windows 認証のポータルに、サインインを確かめ直す"))
         self.sign_in_again.clicked.connect(self._check_sign_in)
         form.addWidget(QLabel(self.tr("サインイン")), 9, 0)
         form.addWidget(self.sign_in, 9, 1)
@@ -170,15 +177,30 @@ class SettingsDialog(QDialog):
         self.status.setWordWrap(True)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        name_cancel(buttons)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
 
         layout = QVBoxLayout(self)
         layout.addLayout(form)
-        layout.addWidget(QLabel(self.tr("接続の認証（設定ファイルの signIn にないサーバーは、QGIS の認証設定を選べる）")))
-        layout.addWidget(self.services, 2)
-        layout.addWidget(QLabel(self.tr("設定ファイルの問題")))
-        layout.addWidget(self.problems, 1)
+        admin = QVBoxLayout()
+        admin.setContentsMargins(0, 0, 0, 0)
+        if not admin_rows:
+            admin.addLayout(source_grid)
+        admin.addWidget(QLabel(self.tr("接続の認証（設定ファイルの signIn にないサーバーは、QGIS の認証設定を選べる）")))
+        admin.addWidget(self.services, 2)
+        admin.addWidget(QLabel(self.tr("設定ファイルの問題")))
+        admin.addWidget(self.problems, 1)
+        #: 「管理者向け」 (ui/fold.py), closed, for the roles without 管理者; None when the rows are shown open.
+        self.admin_fold: Optional[Fold] = None
+        if admin_rows:
+            layout.addLayout(admin, 3)
+        else:
+            self.admin_fold = Fold(self.tr("管理者向け"))
+            self.admin_fold.setToolTip(self.tr("設定ファイル・接続の認証・設定ファイルの問題（ふだんは使わない。管理者に言われたときに）"))
+            self.admin_fold.body.setLayout(admin)
+            layout.addWidget(self.admin_fold, 3)
+            layout.addStretch(1)
         layout.addWidget(self.status)
         layout.addWidget(buttons)
 
@@ -197,7 +219,7 @@ class SettingsDialog(QDialog):
 
     def _show_sign_in(self) -> None:
         lines = self.context.sign_in.lines()
-        self.sign_in.setText("\n".join(lines) if lines else self.tr("設定ファイルに signIn なし（サーバーごとに下の表で QGIS の認証設定を選ぶ）"))
+        self.sign_in.setText("\n".join(lines) if lines else self.tr("組織のサインインの設定なし（サーバーごとに接続の表で QGIS の認証設定を選ぶ）"))
         self.sign_in_again.setEnabled(any(r.method == "iwa" for r in sign_in.rules()))
 
     def _check_sign_in(self) -> None:
@@ -208,7 +230,12 @@ class SettingsDialog(QDialog):
             self._show_sign_in()
 
     def _show_raster(self) -> None:
-        self.raster.setText(raster_speed.summary())
+        """In use or not, in plain words (GDAL's threads and cache are in 「詳しく…」 and the log: raster_speed.summary)."""
+        if raster_speed.personal_off():
+            self.raster.setText(self.tr("使わない（「詳しく…」で切り替え）"))
+            return
+        text = self.tr("描画を速くする設定を使用中（QGIS の設定の変更 {n} 件。中身は「詳しく…」）").format(n=len(raster_speed.qgis_changed()))
+        self.raster.setText(text + (self.tr("、MIKAGE の速い描画（試作）") if fast_draw.on() else ""))
 
     def _raster_details(self) -> None:
         if self._open_raster is not None:
@@ -225,7 +252,7 @@ class SettingsDialog(QDialog):
             temp = self.tr("一時フォルダ {folder}（{n} 件、{mb:.1f} MB。QGIS を閉じると消去）").format(
                 folder=overviews_io.temp_folder(options, make=False), n=n, mb=size / 1048576)
         if not folder:
-            text = self.tr("なし（書き込めないフォルダの画像にはピラミッドを作らない）")
+            text = self.tr("なし（書き込めないフォルダの画像には縮小版を作らない）")
             self.cache.setText(temp + "\n" + text if temp else text)
             self.clear_cache.setEnabled(False)
             return
@@ -233,13 +260,13 @@ class SettingsDialog(QDialog):
         text = self.tr("{folder}（{n} 件、{mb:.1f} MB）").format(folder=folder, n=n, mb=size / 1048576)
         if settings.overview_cache_to_clear():
             text += self.tr("。次回起動時に消去")
-        self.cache.setText(temp + "\n" + self.tr("キャッシュ ") + text if temp else text)
+        self.cache.setText(temp + "\n" + self.tr("控え ") + text if temp else text)
         self.clear_cache.setEnabled(n > 0 and not settings.overview_cache_to_clear())
 
     def _show_copies(self) -> None:
         options = local_copy_io.current
         if not options.enabled:
-            self.copies.setText(self.tr("使わない（設定ファイルの localCopy が false）"))
+            self.copies.setText(self.tr("使わない（組織の設定）"))
             self.clear_copies.setEnabled(False)
             return
         folder = local_copy_io.base_folder(options)
@@ -260,7 +287,7 @@ class SettingsDialog(QDialog):
     def _show_folders(self) -> None:
         folders = settings.path_folders()
         if not folders:
-            self.folders.setText(self.tr("なし（画像を開くときに、pathMappings の prefix のフォルダを選ぶとここに）"))
+            self.folders.setText(self.tr("なし（共有フォルダの画像を開くときに選んだフォルダがここに出る）"))
         else:
             pairs = [f"{prefix} → {folder}" for prefix, folder in sorted(folders.items())]
             self.folders.setText("、".join(pairs[:3]) + (self.tr(" ほか {n} 件").format(n=len(pairs) - 3) if len(pairs) > 3 else ""))
@@ -334,6 +361,11 @@ class SettingsDialog(QDialog):
         self.services.resizeRowsToContents()
         self.problems.clear()
         self.problems.addItems(self.context.problems)
+        if self.admin_fold is not None:
+            # The message bar's 「問題 n 件」 opens this to show them: they are in 「管理者向け」, open then.
+            self.admin_fold.set_summary(self.tr("問題 {n} 件").format(n=len(self.context.problems)) if self.context.problems else "")
+            if self.context.problems:
+                self.admin_fold.set_open(True)
         if not self.context.source:
             self.status.setText(self.tr("設定ファイルなし（サンプルの衛星とローカル保存で動作）"))
         elif self.context.locked and not self.context.problems:

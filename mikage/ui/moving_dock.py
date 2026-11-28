@@ -18,7 +18,7 @@ from typing import Callable, Optional
 from qgis.core import QgsDateTimeRange, QgsProject, QgsRasterLayer, QgsTemporalNavigationObject
 from qgis.PyQt.QtCore import QCoreApplication, QDateTime, QTimeZone
 from qgis.PyQt.QtWidgets import (
-    QComboBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSpinBox, QTreeWidget, QTreeWidgetItem,
+    QComboBox, QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSpinBox, QTreeWidget, QTreeWidgetItem,
     QVBoxLayout, QWidget,
 )
 
@@ -26,6 +26,7 @@ from ..core.moving import FEED_TYPES, KINDS, ROLES, FeedConfig, feed_type_of, fe
 from ..qgis_io.moving_layer import MovingLayer
 from ..qgis_io.tasks import error_text
 from .docks import PluginDock
+from .fold import Fold
 from .list_views import column_menus
 
 #: How long the temporal controller's range is when set to an acquisition time: the half hour up to it.
@@ -79,12 +80,12 @@ class MovingDock(PluginDock):
         history.addStretch(1)
         self.body.addLayout(history)
 
-        self.details = QGroupBox(_tr("詳細（種別・間隔・航跡・属性の対応）"))
-        self.details.setCheckable(True)
-        self.details.setChecked(False)
-        inner = QWidget()
-        QVBoxLayout(self.details).addWidget(inner)
-        form = QFormLayout(inner)
+        # 「詳細」 (ui/fold.py, tsudo 2026-11-28): what is set in it works open or closed (自動: the feed's own);
+        # its closed heading says what is set (「すべて自動」 for nothing).
+        self.details = Fold(_tr("詳細"))
+        self.details.setToolTip(_tr("種別・ポーリング間隔・航跡・属性の対応"))
+        form = QFormLayout(self.details.body)
+        form.setContentsMargins(0, 0, 0, 0)
         self.kind = QComboBox()
         self.kind.addItem(_tr("自動"), None)
         for key, label in KINDS.items():
@@ -98,9 +99,11 @@ class MovingDock(PluginDock):
             box.setValue(minimum - 1)
             return box
 
+        # 1 stands for 自動: the feed's own interval (the settings file's, else 10 seconds).
         self.interval = QSpinBox()
-        self.interval.setRange(2, 3600)
-        self.interval.setValue(10)
+        self.interval.setRange(1, 3600)
+        self.interval.setSpecialValueText(_tr("自動"))
+        self.interval.setValue(1)
         form.addRow(_tr("ポーリング間隔（秒）"), self.interval)
         self.trail, self.stale, self.remove = minutes(0), minutes(0), minutes(1)
         # 0 minutes of trail is a real choice: −1 stands for automatic.
@@ -118,8 +121,12 @@ class MovingDock(PluginDock):
             edit.setPlaceholderText(_tr("自動"))
             self.roles[role] = edit
             form.addRow(label, edit)
-        self.details.toggled.connect(inner.setVisible)
-        inner.setVisible(False)
+        self.kind.currentIndexChanged.connect(self._summarize_details)
+        for box in (self.interval, self.trail, self.stale, self.remove):
+            box.valueChanged.connect(self._summarize_details)
+        for edit in self.roles.values():
+            edit.textChanged.connect(self._summarize_details)
+        self._summarize_details()
         self.body.addWidget(self.details)
 
         self.body.addWidget(QLabel(_tr("表示中のフィード")))
@@ -166,18 +173,32 @@ class MovingDock(PluginDock):
         source = self.context.source or ""
         return source if source.lower().startswith(("http://", "https://")) else None
 
+    def _summarize_details(self, *_args) -> None:
+        """「詳細」's closed heading: what is set in it (「種別 船舶・間隔 30 秒」), or 「すべて自動」."""
+        parts = []
+        if self.kind.currentData():
+            parts.append(_tr("種別 {k}").format(k=self.kind.currentText()))
+        if self.interval.value() > 1:
+            parts.append(_tr("間隔 {s} 秒").format(s=self.interval.value()))
+        for box, label in ((self.trail, _tr("航跡")), (self.stale, _tr("薄く表示")), (self.remove, _tr("消去"))):
+            if box.value() > box.minimum():
+                parts.append(_tr("{what} {m} 分").format(what=label, m=box.value()))
+        if any(e.text().strip() for e in self.roles.values()):
+            parts.append(_tr("属性名"))
+        self.details.set_summary("・".join(parts) or _tr("すべて自動"))
+
+    def _interval(self, feed_interval: Optional[float]) -> Optional[float]:
+        """The interval of 「詳細」 (自動: the feed's own)."""
+        return self.interval.value() if self.interval.value() > 1 else feed_interval
+
     def _settings(self) -> dict:
-        if not self.details.isChecked():
-            return {}
         return {"trail": self.trail.value() if self.trail.value() >= 0 else None, "stale": self.stale.value() if self.stale.value() >= 0 else None,
                 "remove": self.remove.value() if self.remove.value() >= 1 else None}
 
     def _with_details(self, feed: FeedConfig) -> FeedConfig:
-        """The feed with what 「詳細」 sets over it."""
-        if not self.details.isChecked():
-            return feed
+        """The feed with what 「詳細」 sets over it (自動 and empty: the feed's own)."""
         fields = {**feed.fields, **{role: e.text().strip() for role, e in self.roles.items() if e.text().strip()}}
-        return FeedConfig(feed.label, feed.type, feed.url, self.interval.value() if feed.type == "poll" else feed.interval, fields,
+        return FeedConfig(feed.label, feed.type, feed.url, self._interval(feed.interval) if feed.type == "poll" else feed.interval, fields,
                           self.kind.currentData() or feed.kind)
 
     def connect_preset(self) -> Optional[MovingLayer]:
@@ -197,7 +218,7 @@ class MovingDock(PluginDock):
             self.note.setText(str(e))
             return None
         host = url.split("//", 1)[-1].split("/", 1)[0].split("?")[0]
-        return self.connect_feed(FeedConfig(host, kind, url, self.interval.value() if kind == "poll" else None))
+        return self.connect_feed(FeedConfig(host, kind, url, self._interval(None) if kind == "poll" else None))
 
     def connect_feed(self, feed: FeedConfig) -> MovingLayer:
         """Connects a feed, as a pair of layers on top of the project."""

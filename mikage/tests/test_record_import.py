@@ -1,4 +1,4 @@
-"""観測記録の一括取込み without the screen: column guessing, the dry run, the import with the store's checks."""
+"""観測記録の一括取り込み without the screen: column guessing, the dry run, the import with the store's checks."""
 from dataclasses import replace
 
 from mikage.core.esri import EsriClient

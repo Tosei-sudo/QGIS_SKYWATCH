@@ -94,8 +94,11 @@ class Platform(Feature):
 
     def open_settings(self) -> None:
         # Another settings file than the one in use: the administrators' (the first one: anyone's).
-        dialog = SettingsDialog(self.context, self.window(), may_change_source=self.host.allows("settings.config"),
-                                raster_speed=self.host.open_raster_speed)
+        # 設定ファイル・接続 open for 管理者 and for no role; in 「管理者向け」 for the other roles (tsudo 2026-11-28).
+        keeper = getattr(self.host, "role_keeper", None)
+        admin = self.host.allows("settings.config")
+        dialog = SettingsDialog(self.context, self.window(), may_change_source=admin, raster_speed=self.host.open_raster_speed,
+                                admin_rows=admin or keeper is None or not keeper.codes)
         try:
             if dialog.exec() and self.context is not None:
                 # The 記録者 also in an open 「観測記録」 (its box and the name written on the records).

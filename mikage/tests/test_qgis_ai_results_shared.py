@@ -3,7 +3,7 @@
 one person detected and sent with 「検出結果を DB へ転記」 is reviewed by
 others. The person who sent it sees each result once (their layer's row);
 recorded or rejected from the layer (before or after it was sent) or from
-the table, a result is 取込済 (誤) in both.
+the table, a result is 取り込み済み (誤) in both.
 """
 import json
 
@@ -130,7 +130,7 @@ def test_a_detection_sent_to_the_table_is_reviewed_by_others_once(plugin):
     assert (third.ai.source, third.ai.layer, third.ai.result_id, third.ai.score, third.ai.model) == ("AI検出", "検出DB", oid[0.7], 0.7, "港湾モデル")
     assert len(living(book.records)) == 3
 
-    # The one who detected it, with the layer again: recorded from the table, 取込済 in the layer's row too.
+    # The one who detected it, with the layer again: recorded from the table, 取り込み済み in the layer's row too.
     QgsProject.instance().addMapLayer(layer)
     assert wait_for(lambda: len(dock.rows) == 4 and all(s.local for s, _r in dock.rows))
     assert [dock.state(i) for i in range(4)] == [ACCEPTED, ACCEPTED, ACCEPTED, REJECTED_STATE]

@@ -32,7 +32,7 @@ if TYPE_CHECKING:  # the door (core/door.py): each name is imported from its mod
     )
     from .output import (
         cover_text, cover_title, describe_problems, first_only, is_old_tle, js_round, LayerField, local_text, mode_facts,
-        natural_key, NO_OPPORTUNITY, percent, plan_csv, plan_features, PlanLayer, side_text, sorted_ops, split_antimeridian,
+        natural_key, NO_OPPORTUNITY, percent, plan_csv, plan_features, PlanLayer, short_text, side_text, sorted_ops, split_antimeridian,
         summary_all, summary_cover,
     )
     from .pairs import repeat_pairs, RepeatOptions, stereo_pairs, StereoOptions
@@ -72,7 +72,7 @@ __all__ = [
     "priority_of", "R", "reach_of", "read_grid", "RECOVERED", "reminder_of", "reminder_text", "repeat_pairs", "RepeatOptions",
     "Report", "revisit_color", "revisit_csv", "revisit_layer", "revisit_stats", "ROW", "sample_at", "sample_satellites",
     "sample_sensor_modes", "satellite_label", "satellite_track", "SatelliteChoice", "SatelliteNames", "satellites_from_text", "series_of",
-    "SatelliteSpec", "satrec_of", "save_outage", "shift_scene", "ShipState", "side_text", "sorted_ops", "source_text",
+    "SatelliteSpec", "satrec_of", "save_outage", "shift_scene", "ShipState", "short_text", "side_text", "sorted_ops", "source_text",
     "SPEED_UNITS", "split_antimeridian", "spread_out", "stereo_pairs", "StereoOptions", "stopped", "summary_all",
     "summary_cover", "summary_text", "sun_angles", "SYSTEM_OUTAGE", "SYSTEM_STOP", "SYSTEM_WARNING", "system_limits",
     "takes_systems", "target_of", "targets_of", "tle_age_days", "track_angles", "TRACK_COLORS",

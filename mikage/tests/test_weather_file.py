@@ -28,7 +28,7 @@ def test_settings_of_a_file_or_folder():
     problems = []
     assert cloud_forecast_of({"folder": " \\\\fs\\wx\\gfs ", "label": "GFS 雲量"}, problems) == CloudForecastConfig("", "GFS 雲量", folder="\\\\fs\\wx\\gfs")
     one = cloud_forecast_of({"file": "D:/wx/a.tif"}, problems)
-    assert one == CloudForecastConfig("", "雲量予報（取込）", file="D:/wx/a.tif") and one.local
+    assert one == CloudForecastConfig("", "雲量予報（取り込み）", file="D:/wx/a.tif") and one.local
     assert not DEFAULT_CLOUD_FORECAST.local
     assert problems == []
     # Only one of url, file and folder.

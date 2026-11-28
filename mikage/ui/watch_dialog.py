@@ -23,7 +23,7 @@ from ..core.catalog.api import CatalogSearch
 from ..core.catalog.api import CatalogWatch, areas_of, conditions_text
 from ..qgis_io.catalog_io import layer_watch_areas
 from ..qgis_io.geometry import to_wgs84
-from .docks import plain_label
+from .docks import name_cancel, plain_label
 from .fit import fit_text
 from .last_inputs import InputMemory
 
@@ -237,6 +237,7 @@ class WatchDialog(_AreaDialog):
         layout.addWidget(note)
         layout.addWidget(QLabel(self.tr("初回の確認は既存の画像の記録のみ。以降の新着画像を通知")))
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        name_cancel(buttons)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
@@ -268,6 +269,7 @@ class WatchAreaDialog(_AreaDialog):
         layout.addLayout(form)
         layout.addWidget(QLabel(self.tr("新しい範囲に今ある画像は通知しない。以降の新着画像を通知")))
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        name_cancel(buttons)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
@@ -310,6 +312,7 @@ class PointWatchDialog(QDialog):
         self.add.toggled.connect(self.watch.setEnabled)
         self.add.toggled.connect(lambda on: (self.catalog.setEnabled(not on), self.name.setEnabled(not on)))
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        name_cancel(buttons)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)

@@ -17,7 +17,7 @@ from dataclasses import replace
 from typing import Callable, Optional
 
 from qgis.core import QgsProject, QgsVectorLayer
-from qgis.gui import QgsCollapsibleGroupBox, QgsMapToolEmitPoint
+from qgis.gui import QgsMapToolEmitPoint
 from qgis.PyQt.QtCore import QDateTime, Qt, QTimer, pyqtSignal
 from qgis.PyQt.QtCore import QCoreApplication
 from qgis.PyQt.QtGui import QStandardItemModel
@@ -39,6 +39,7 @@ from ..qgis_io.tasks import run_task
 from . import shortcuts
 from .docks import PluginDock, plain_label
 from .emphasis import LIGHT, emphasize
+from .fold import Fold
 from .plan_drag_tool import PlanDragTool
 from .plan_overlay import PlanOverlay
 from .plan_timeline import PlanTimeline
@@ -152,7 +153,7 @@ class ImagingPlanDock(
         target_row.addWidget(self.pick)
         form.addRow(self.tr("対象"), target_row)
         self.start = QDateTimeEdit(QDateTime.currentDateTime())
-        self.start.setDisplayFormat("yyyy/MM/dd HH:mm")
+        self.start.setDisplayFormat("yyyy-MM-dd HH:mm")
         self.start.setCalendarPopup(True)
         form.addRow(self.tr("開始"), self.start)
         self.days = QComboBox()
@@ -173,13 +174,12 @@ class ImagingPlanDock(
         top_layout.setContentsMargins(0, 0, 0, 0)
         top_layout.addLayout(form)
 
-        more = QgsCollapsibleGroupBox(self.tr("詳細条件"))
-        more.setCollapsed(True)
+        # 「詳細条件」 (ui/fold.py): the rows that do not apply hidden in its body.
+        more = Fold(self.tr("詳細条件"))
         self.more = more
-        # Expanding shows every row again: those that do not apply are hidden once more.
-        more.collapsedStateChanged.connect(lambda collapsed: collapsed or self._hide_rows())
         self._priority_shown = False
-        more_layout = QVBoxLayout(more)
+        more_layout = QVBoxLayout(more.body)
+        more_layout.setContentsMargins(0, 0, 0, 0)
         self.tree = SatelliteTree(remember_as="imaging_plan")
         more_layout.addWidget(self.tree)
         options = QFormLayout()
@@ -295,10 +295,16 @@ class ImagingPlanDock(
         splitter = QSplitter(Qt.Orientation.Vertical)
         splitter.addWidget(scroll)
         splitter.addWidget(bottom)
-        splitter.setStretchFactor(0, 2)
-        splitter.setStretchFactor(1, 3)
+        # A taller dock: the results get the room, the form's pane stays as tall as the form (点検 15).
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
         splitter.setChildrenCollapsible(False)
         self.body.addWidget(splitter, 1)
+        self.splitter, self.form_top = splitter, top
+        # No gap above 「計算」 (tsudo 2026-11-28, 点検 15): the form's pane as tall as the form when shown and
+        # when 詳細条件 opens or closes (the user's drag stays until then).
+        self._fitted = False
+        more.opened.connect(lambda _on: QTimer.singleShot(0, self._fit_form))
 
         buttons = QHBoxLayout()
         self.run_button = emphasize(QPushButton(self.tr("計算")))
@@ -584,7 +590,7 @@ class ImagingPlanDock(
             self.status.setText(targets)
             return
         if not sats:
-            self.more.setCollapsed(False)
+            self.more.set_open(True)
             self.status.setText(self.tr("衛星が未選択（詳細条件で選択）") if self.tree.items() else self.tr("衛星なし。衛星カタログを確認するか、「詳細条件」に TLE を貼り付け"))
             return
         if ships:
@@ -770,8 +776,20 @@ class ImagingPlanDock(
 
     # --- Showing and hiding ---------------------------------------------------------------
 
+    def _fit_form(self) -> None:
+        """The form's pane as tall as the form, at most 3/5 of the two panes (the rest for the results)."""
+        sizes = self.splitter.sizes()
+        total = sum(sizes)
+        if total <= 0 or len(sizes) != 2:
+            return
+        self._fitted = True
+        top = min(self.form_top.sizeHint().height() + 2, int(total * 0.6))
+        self.splitter.setSizes([top, total - top])
+
     def _visibility(self, visible: bool) -> None:
         if visible:
+            if not self._fitted:
+                QTimer.singleShot(0, self._fit_form)
             self.list_targets()
             if self.context.config.satellite_catalogs and not self._loaded:
                 self.load_catalog()

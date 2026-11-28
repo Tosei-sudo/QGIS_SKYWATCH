@@ -17,7 +17,7 @@ from typing import Callable, Optional
 
 from qgis.PyQt.QtCore import QTimer, Qt
 from qgis.PyQt.QtGui import QGuiApplication
-from qgis.PyQt.QtWidgets import QDockWidget, QFrame, QLabel, QMessageBox, QScrollArea, QVBoxLayout, QWidget
+from qgis.PyQt.QtWidgets import QDialogButtonBox, QDockWidget, QFrame, QLabel, QMessageBox, QScrollArea, QVBoxLayout, QWidget
 
 from ..core import audit, errors, roles
 from ..qgis_io.context import PluginContext
@@ -83,11 +83,23 @@ def ask_no(parent, title: str, text: str, yes: str = "") -> bool:
         return QMessageBox.question(parent, title, plain_tip(text), ok | no, no) == ok
     box = QMessageBox(QMessageBox.Icon.Question, title, plain_tip(text), parent=parent)
     go = box.addButton(yes, QMessageBox.ButtonRole.AcceptRole)
-    cancel = box.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+    cancel = box.addButton(CANCEL, QMessageBox.ButtonRole.RejectRole)
     box.setDefaultButton(cancel)
     box.setEscapeButton(cancel)
     box.exec()
     return box.clickedButton() is go
+
+
+#: The word on every button that gives up (tsudo 2026-11-23 with `ask_no`; 2026-11-28 the standard ones too, not Qt's 「キャンセル」).
+CANCEL = "取消"
+
+
+def name_cancel(buttons: QDialogButtonBox) -> QDialogButtonBox:
+    """A button box's standard Cancel button named 「取消」 (CANCEL) like the plugin's own; the box, for chaining."""
+    cancel = buttons.button(QDialogButtonBox.StandardButton.Cancel)
+    if cancel is not None:
+        cancel.setText(CANCEL)
+    return buttons
 
 
 class PluginDock(QDockWidget):
