@@ -127,6 +127,12 @@ def _collapse_classes() -> tuple:
         return (), ()
 
 
+def heading_of(box) -> str:
+    """A folded group's name: a fold's (ui/fold.py) without the conditions its closed heading shows."""
+    heading = getattr(box, "heading", None)
+    return heading() if callable(heading) else box.title()
+
+
 def button_label(button) -> str:
     """A button's name as counted: its text (unless only a mark such as ＋ or ▼), else the start of its tooltip, else its accessible name."""
     text = fu.label_of(button.text())
@@ -583,11 +589,11 @@ class FeatureUseKeeper(QObject):
                                       self.used(f"タブ: {fu.label_of(bar.tabText(i))}", fu.DOCK, title) if i >= 0 else None)
         if self._group_box:
             for box in dock.findChildren(self._group_box):
-                if box.property(MARK) or QWidget.window(box) is not window or not fu.label_of(box.title()):
+                if box.property(MARK) or QWidget.window(box) is not window or not fu.label_of(heading_of(box)):
                     continue
                 box.setProperty(MARK, True)
                 found += 1
-                self.controls[(title, f"開く: {fu.label_of(box.title())}")] = None
+                self.controls[(title, f"開く: {fu.label_of(heading_of(box))}")] = None
                 box.collapsedStateChanged.connect(lambda collapsed, box=box, title=title: self._group_opened(title, box, collapsed))
         combos = [c for c in dock.findChildren(QComboBox) if not c.property(MARK) and QWidget.window(c) is window]
         if combos:
@@ -622,11 +628,13 @@ class FeatureUseKeeper(QObject):
         if collapsed:
             return
         try:
-            by_person = box.underMouse() or (box.collapseButton() is not None and box.collapseButton().hasFocus())
+            # Its ▶ button: a child of the group (QGIS's collapseButton() is not in the Python bindings).
+            button = box.findChild(self._collapse_button, "", Qt.FindChildOption.FindDirectChildrenOnly) if self._collapse_button else None
+            by_person = box.underMouse() or (button is not None and button.hasFocus())
         except RuntimeError:
             return
         if by_person:
-            self.used(f"開く: {fu.label_of(box.title())}", fu.DOCK, title)
+            self.used(f"開く: {fu.label_of(heading_of(box))}", fu.DOCK, title)
 
     def known(self, allows: Callable[[str], bool], entries: Iterable[str]) -> list[tuple[str, str]]:
         """The features listed with 0 when not used: the entries `allows` lets through, and their docks' controls."""
