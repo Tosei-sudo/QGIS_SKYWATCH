@@ -14,6 +14,7 @@ pytest.importorskip("qgis.core")
 from mikage.features.chat import Chat  # noqa: E402
 from mikage.features.images import Images  # noqa: E402
 from mikage.features.plan import Plan  # noqa: E402
+from mikage.tests.fake_esri import FakeLayer  # noqa: E402
 from mikage.tests.qgis_fakes import wait_for  # noqa: E402
 from mikage.tests.test_qgis_requests import IMAGES, plugin  # noqa: E402,F401 (the fixture)
 from mikage.tests.test_qgis_chat_operation import _setup, records, send  # noqa: E402,F401 (a fixture)
@@ -148,3 +149,46 @@ def test_images_searched_without_the_roles_for_the_catalog_are_not(plugin, monke
     assert chat.send("35.3, 139.7 の昨日の画像を見せて")
     assert wait_for(lambda: not chat.busy)
     assert not chat.cards(ImagesCard)
+
+
+def test_images_searched_in_every_catalog_or_the_one_named(plugin):
+    """
+    Two catalogs (tsudo 2026-11-28 「複数画像カタログがある場合はどうなる？」): both searched at once, each one's SAR
+    sensors, the images together newest first with their catalog, each count said, a 「…で見る」 for each, and one
+    opened with its own catalog; a sentence naming one searches that one only.
+    """
+    p, iface, fake, tmp_path = plugin
+    radar = "https://example.com/arcgis/rest/services/Radar/FeatureServer/0"
+    fake.add_layer(radar, FakeLayer({"IMAGE_ID": "esriFieldTypeString", "ACQ": "esriFieldTypeDate", "SENSOR": "esriFieldTypeString",
+                                     "URL": "esriFieldTypeString"}, "esriGeometryPolygon"))
+    now = time.time() * 1000
+    for i, (sensor, age) in enumerate([("RADAR 1", 3), ("RADAR 2", 1), ("OPT 1", 2)]):
+        fake.layers[IMAGES].add({"IMAGE_ID": f"A{i}", "ACQ": now - age * 3_600_000, "SENSOR": sensor, "URL": f"https://x.example/a{i}.tif"},
+                                ring(139.6, 35.2, 139.8, 35.4))
+    fake.layers[radar].add({"IMAGE_ID": "B0", "ACQ": now - 2 * 3_600_000, "SENSOR": "RADAR 1", "URL": "https://x.example/b0.tif"},
+                           ring(139.6, 35.2, 139.8, 35.4))
+    fields = {"id": "IMAGE_ID", "acquired": "ACQ", "sensor": "SENSOR", "source": "URL"}
+    catalogs = [{"label": "本番", "url": IMAGES, "fields": fields}, {"label": "レーダー", "url": radar, "fields": fields}]
+    chat, _loaded = _setup(p, tmp_path, [], extra={"imageCatalogs": catalogs})
+    dock = p.docks["SatObsImageCatalog"]
+    feature = p.feature(Chat)
+    feature.satellites()
+    assert wait_for(lambda: len(feature.satellites()) == 2)
+    opened = []
+    dock.open_catalog_records = lambda catalog, records: opened.append((catalog.label, [r.id for r in records])) or []
+    card = send(chat, "35.3, 139.7 の今日のSAR画像を見せて", ImagesCard)
+    # Both, newest first, each with its catalog; the 光学 one left out by the sensors.
+    assert [r.id for r in card.found.records] == ["A1", "B0", "A0"]
+    assert [c.label for c in card.found.catalogs] == ["本番", "レーダー", "本番"]
+    assert card.said.text().endswith(": 3 枚（本番 2 枚・レーダー 1 枚）")
+    assert [b.text() for b in card.catalog_buttons] == ["本番で見る", "レーダーで見る"]
+    assert not dock.isVisible()
+    # The second one opened with its own catalog; 「レーダーで見る」 lists its images in 画像カタログ.
+    assert chat.send("2枚目を開いて")
+    assert opened == [("レーダー", ["B0"])]
+    card.catalog_buttons[1].click()
+    # (Listed as イベント's images are: the list's catalog said in the status line, the form's as it was.)
+    assert dock.isVisible() and [r.id for r in dock.records] == ["B0"] and dock.status.text().startswith("「レーダー」・")
+    # A sentence naming a catalog: that one only, named in the answer.
+    card = send(chat, "レーダーで 35.3, 139.7 の今日の画像ある？", ImagesCard)
+    assert [r.id for r in card.found.records] == ["B0"] and card.said.text().startswith("「レーダー」・")

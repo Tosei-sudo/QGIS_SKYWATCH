@@ -5,11 +5,13 @@ state.
 """
 from __future__ import annotations
 
-from typing import Callable, Optional
+from typing import Callable, Optional, Union
 
 from qgis.PyQt.QtCore import Qt
 
-from ...core.catalog.api import CatalogConfig, CatalogLayerInfo, CatalogRecord, read_catalog_layer, search_catalog
+from ...core.catalog.api import (
+    SENSOR_SEPARATOR, CatalogConfig, CatalogLayerInfo, CatalogRecord, CatalogSearch, read_catalog_layer, search_catalog, sensors_of,
+)
 from ...core.obs.api import AssignmentRepository
 from ...qgis_io.tasks import run_task
 from .common import _Listed, _key
@@ -78,6 +80,45 @@ class SearchPart:
                 refuse(self.tr("「{name}」に形のある地物なし").format(name=layer.name()))
             return
         self._read(_Listed(catalog, search, box), searched=searched)
+
+    def search_every(self, start: str, end: str, corners: Optional[list], catalogs: list[CatalogConfig],
+                     sensors_for: Callable[[CatalogConfig, Optional[list]], Union[list, str]],
+                     done: Callable[[list], None]) -> None:
+        """
+        ミカゲと話す's 画像検索 in each of `catalogs` at once, behind the screen (the form and the list as they were): the
+        period (its days, "" open), the area (the corners' polygon; none: the map's extent), and the sensors
+        `sensors_for(catalog, its sensors)` gives (its sensors read, None without a sensor attribute; it returns the
+        sensors to search, [] every one, or a str: why that catalog is not searched; called in the task). Once all are
+        read, `done([(catalog, records newest first, how many match or None, "" or why not), …])` in their order.
+        """
+        box = self.corners_area(corners) if corners else self.view_area()
+        search = CatalogSearch(acquired_from=start, acquired_to=end)
+        client = self.context.esri()
+        token = None
+        got: list[Optional[tuple]] = [None] * len(catalogs)
+
+        def over(i: int, result: tuple) -> None:
+            got[i] = result
+            if all(g is not None for g in got):
+                done(list(got))
+
+        for i, catalog in enumerate(catalogs):
+            def work(task, catalog=catalog) -> tuple:
+                values = sensors_of(client, catalog, token) if catalog.fields.get("sensor") else None
+                sensors = sensors_for(catalog, values)
+                if isinstance(sensors, str):
+                    return (catalog, [], None, sensors)
+                self.context.satellite_names(client, task.isCanceled)
+                result = search_catalog(client, catalog, self._layer_of(client, catalog, token),
+                                        search.with_(sensor=SENSOR_SEPARATOR.join(sensors)), box, token, 0, task.isCanceled)
+                return (catalog, list(result.records), result.total, "")
+
+            def failed(message: str, i=i, catalog=catalog) -> None:
+                over(i, (catalog, [], None, self.tr("検索に失敗: {m}").format(m=message)))
+
+            self._start(self.tr("画像カタログの検索"), work, lambda result, i=i: over(i, result), failed)
+        if not catalogs:
+            done([])
 
     def read_more(self) -> None:
         """「続きを読む」: the next `maxResults` images of the search listed added to the list."""

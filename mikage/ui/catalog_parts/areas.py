@@ -103,6 +103,21 @@ class AreasPart:
         self.show()
         self.raise_()
 
+    def view_area(self):
+        """The map's extent as searched (a box; a turned map: the view as it is, not the box around it)."""
+        if abs(self.canvas.rotation()) > 1e-9:
+            ring = visible_ring(self.canvas)
+            if ring is not None:
+                return areas_of([], [[ring]])[0]
+        return self.extent()
+
+    def corners_area(self, corners: list):
+        """An area given by its corners in WGS 84 (closed when it is not), as searched (an Esri polygon)."""
+        ring = [list(p) for p in corners]
+        if ring[0] != ring[-1]:
+            ring.append(list(ring[0]))
+        return areas_of([], [[ring]])[0]
+
     def area(self):
         """
         Where to search: the map's extent (a box), the area drawn (an Esri
@@ -111,12 +126,7 @@ class AreasPart:
         """
         kind = self.area_box.currentData()
         if kind == "extent":
-            if abs(self.canvas.rotation()) > 1e-9:
-                # A turned map (「向き」): the view as it is, not the box around it.
-                ring = visible_ring(self.canvas)
-                if ring is not None:
-                    return areas_of([], [[ring]])[0]
-            return self.extent()
+            return self.view_area()
         if kind == "drawn" and self.drawn:
             return areas_of([], [[self.drawn]])[0]
         if kind == "saved":

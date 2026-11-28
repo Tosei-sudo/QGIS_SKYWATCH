@@ -21,7 +21,7 @@ What each operation does is the plugin's (features/chat.py, `host.run`).
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Callable, Optional, Protocol, Sequence
 
@@ -74,14 +74,48 @@ class OperationHost(Protocol):
 
 
 @dataclass
-class ImagesFound:
-    """What 画像検索 found for the chat (features/chat.py search_images): the catalog's records, newest first."""
+class FoundIn:
+    """What 画像検索 found in one catalog: its records newest first, or why it was not searched."""
     catalog: Any
+    #: Its name as 画像カタログ lists it.
+    label: str
     records: list
-    #: How many match (None when the catalog does not say).
+    #: How many match (None when the catalog does not say, or it was not searched).
     total: Optional[int]
+    #: Why it was not searched or failed ("" when it was).
+    problem: str = ""
+
+
+@dataclass
+class ImagesFound:
+    """
+    What 画像検索 found for the chat (features/chat.py search_images): each catalog searched (`parts`; tsudo
+    2026-11-28 「複数画像カタログがある場合はどうなる？」), and their records together newest first (`records`, each
+    one's catalog in `catalogs`).
+    """
+    parts: list
     #: Where, when and which sensors (「呉・2026-11-21〜2026-11-27・SAR（3 センサー）」).
     said: str = ""
+    records: list = field(default_factory=list)
+    catalogs: list = field(default_factory=list)
+
+    @property
+    def searched(self) -> list:
+        """The parts searched (not those that could not be)."""
+        return [p for p in self.parts if not p.problem]
+
+    @property
+    def total(self) -> Optional[int]:
+        """How many match in all (None when a catalog searched does not say)."""
+        totals = [p.total for p in self.searched]
+        return None if any(t is None for t in totals) else sum(totals)
+
+
+def images_found(parts: Sequence[FoundIn], said: str, newest: Callable[[Any], float]) -> ImagesFound:
+    """The parts' records together, newest first by `newest(record)` (a catalog's own order kept between equals)."""
+    pairs = [(p.catalog, r) for p in parts for r in p.records]
+    pairs.sort(key=lambda cr: -newest(cr[1]))
+    return ImagesFound(list(parts), said, [r for _c, r in pairs], [c for c, _r in pairs])
 
 
 class ChatHost(OperationHost, Protocol):
@@ -93,11 +127,14 @@ class ChatHost(OperationHost, Protocol):
     def search_images(self, reading: Reading, place: Any, done: Callable[[Optional[ImagesFound], str], None]) -> None:
         """画像検索 behind the screen (画像カタログ's own search): done(found, "") or done(None, why not)."""
 
+    def catalogs(self) -> list:
+        """The catalogs 画像カタログ lists (none without it)."""
+
     def open_images(self, found: ImagesFound, indexes: Sequence[int]) -> str:
         """Those of the records found opened (as from the catalog's list); what was done."""
 
-    def show_images(self, found: ImagesFound) -> str:
-        """The records found listed in 画像カタログ, the dock in front."""
+    def show_images(self, found: ImagesFound, part: FoundIn) -> str:
+        """A catalog's records found listed in 画像カタログ, the dock in front."""
 
     def open_image_ids(self, ids: Sequence[str]) -> str:
         """Images opened by their ids (画像 ID で開く, one by one); what was done."""

@@ -128,6 +128,23 @@ def test_the_tables_told_with_their_values_the_place_column_and_no_deleted_recor
     assert "- 「艦艇」は KIND LIKE '%艦艇%'" in rules and "NG: 理由" in rules
 
 
+def test_two_catalogs_told_apart_by_their_names():
+    """Several 画像カタログ (by sensor, by system …): each named for the model, and read together unless one is named."""
+    roles = {"id": "IMAGE_ID", "acquired": "ACQUIRED", "sensor": "SENSOR"}
+    tables = [_table("TBL_IMAGE_CATALOG", "catalog", roles, ["OBJECTID", "IMAGE_ID", "ACQUIRED", "SENSOR"]),
+              _table("TBL_IMAGE_CATALOG_2", "catalog", roles, ["OBJECTID", "IMAGE_ID", "ACQUIRED", "SENSOR"])]
+    tables[0].title, tables[1].title = "画像カタログ（光学）", "画像カタログ"
+    schema = dc.schema_of(tables, {})
+    text = dc.schema_text(schema)
+    assert "■ TBL_IMAGE_CATALOG 画像カタログ（1 行 = 1 画像）「光学」" in text
+    assert "■ TBL_IMAGE_CATALOG_2 画像カタログ（1 行 = 1 画像）\n" in text
+    assert ("- 画像カタログは TBL_IMAGE_CATALOG（光学）・TBL_IMAGE_CATALOG_2（名前なし）の 2 つ。名前で言われたらその表、"
+            "言われなければ UNION ALL で全部を合わせる") in dc.rules_text(schema)
+    # One of a kind: as before (no name, no rule).
+    one = dc.schema_of(tables[:1], {})
+    assert "■ TBL_IMAGE_CATALOG 画像カタログ（1 行 = 1 画像）\n" in dc.schema_text(one) and "UNION ALL" not in dc.rules_text(one)
+
+
 def test_without_the_named_areas_there_is_no_place_column():
     schema = _schema(area=False)
     assert schema.place is None and "PLACE_NAME" not in dc.schema_text(schema)

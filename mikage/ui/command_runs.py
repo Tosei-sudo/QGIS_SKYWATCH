@@ -159,13 +159,17 @@ def catalog(dock, r: Reading, place, front: bool = True, searched=None) -> str:
     """
     first, last = r.period or (None, None)
     start, end = (first.isoformat() if first else ""), (last.isoformat() if last else "")
-    ring = None
-    if place is not None and place.rings:
-        ring = [list(p) for p in place.rings[0]] if place.kind == "範囲" else corners_of(place.rings)
-    dock.search_area_period(start, end, ring, sensor=SENSOR_SEPARATOR.join(r.catalog_sensors), extent=True, front=front,
+    dock.search_area_period(start, end, place_corners(place), sensor=SENSOR_SEPARATOR.join(r.catalog_sensors), extent=True, front=front,
                             searched=searched)
     where = place.label if place is not None else tr("地図の表示範囲")
     return tr("画像カタログ: {w} を検索").format(w=catalog_said(r, where))
+
+
+def place_corners(place) -> Optional[list]:
+    """The corners 画像検索 searches of a place found: a 範囲's ring, else the corners around its shapes; None without one."""
+    if place is None or not place.rings:
+        return None
+    return [list(p) for p in place.rings[0]] if place.kind == "範囲" else corners_of(place.rings)
 
 
 def catalog_said(r: Reading, where: str) -> str:
